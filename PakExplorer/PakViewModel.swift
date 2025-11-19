@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 final class PakViewModel: ObservableObject {
     @Published var pakFile: PakFile?
     @Published var currentFolder: PakNode? // Directory shown in right pane
-    @Published var selectedFile: PakNode?  // File selected in right pane
+    @Published var selectedFile: PakNode?  // File selected in right pane (first of selection for backward compatibility)
+    @Published var selectedNodes: [PakNode] = [] // Multi-selection support
     @Published private(set) var hasUnsavedChanges = false
     var documentURL: URL?
 
@@ -47,10 +48,56 @@ final class PakViewModel: ObservableObject {
         return destination
     }
 
+    func rename(node: PakNode, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != node.name else { return }
+
+        node.name = trimmed
+        if let entry = node.entry {
+            let updatedPath: String
+            if let slashIndex = entry.name.lastIndex(of: "/") {
+                let prefix = entry.name[..<entry.name.index(after: slashIndex)]
+                updatedPath = String(prefix) + trimmed
+            } else {
+                updatedPath = trimmed
+            }
+            node.entry = PakEntry(name: updatedPath, offset: entry.offset, length: entry.length)
+        }
+        markDirty()
+    }
+
+    func write(node: PakNode, toDirectory directory: URL) throws {
+        let destination = directory.appendingPathComponent(node.name, isDirectory: node.isFolder)
+        if node.isFolder {
+            try PakFilesystemExporter.export(node: node, originalData: pakFile?.data, to: destination)
+        } else {
+            guard let data = extractData(for: node) else {
+                throw ExportError.missingData
+            }
+            try data.write(to: destination)
+        }
+    }
+
+    func exportSelectionToTemporaryLocation(nodes: [PakNode]) throws -> URL {
+        precondition(!nodes.isEmpty)
+        if nodes.count == 1, let first = nodes.first {
+            return try exportToTemporaryLocation(node: first)
+        }
+
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+
+        for node in nodes {
+            let destination = base.appendingPathComponent(node.name, isDirectory: node.isFolder)
+            try PakFilesystemExporter.export(node: node, originalData: pakFile?.data, to: destination)
+        }
+        return base
+    }
+
 
     // Export the currently-selected file
     func exportSelectedFile() {
-        guard let node = selectedFile, let data = extractData(for: node) else { return }
+        guard let node = selectedNodes.first ?? selectedFile, let data = extractData(for: node) else { return }
 
         let save = NSSavePanel()
         save.nameFieldStringValue = node.name
@@ -129,13 +176,21 @@ final class PakViewModel: ObservableObject {
         }
     }
     func deleteSelectedFile() {
-        guard let folder = currentFolder, let selected = selectedFile else { return }
-        
-        if let index = folder.children?.firstIndex(where: { $0.id == selected.id }) {
-            folder.children?.remove(at: index)
-            selectedFile = nil
-            markDirty()
+        guard let folder = currentFolder else { return }
+
+        let idsToDelete: Set<PakNode.ID>
+        if !selectedNodes.isEmpty {
+            idsToDelete = Set(selectedNodes.map { $0.id })
+        } else if let single = selectedFile {
+            idsToDelete = [single.id]
+        } else {
+            return
         }
+
+        folder.children?.removeAll { idsToDelete.contains($0.id) }
+        selectedNodes = []
+        selectedFile = nil
+        markDirty()
     }
     
     var canCreateFolder: Bool {
@@ -144,6 +199,10 @@ final class PakViewModel: ObservableObject {
     
     var canAddFiles: Bool {
         pakFile != nil
+    }
+
+    var canDeleteFile: Bool {
+        !selectedNodes.isEmpty || selectedFile != nil
     }
 
     @discardableResult

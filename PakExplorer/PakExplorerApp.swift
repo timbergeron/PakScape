@@ -38,6 +38,7 @@ struct PakExplorerApp: App {
             PakAboutCommands()
             PakNewCommands()
             PakSaveCommands()
+            PakViewCommands()
             // "Open" is handled by DocumentGroup automatically
         }
     }
@@ -145,6 +146,26 @@ struct PakAboutCommands: Commands {
         linkButton.sizeToFit()
         alert.accessoryView = linkButton
         alert.runModal()
+    }
+}
+
+struct PakViewCommands: Commands {
+    @FocusedValue(\.pakCommands) private var pakCommands
+
+    var body: some Commands {
+        CommandMenu("View") {
+            Button("Bigger Icons") {
+                pakCommands?.zoomInIcons()
+            }
+            .keyboardShortcut("+", modifiers: [.command])
+            .disabled(!(pakCommands?.canZoomInIcons ?? false))
+
+            Button("Smaller Icons") {
+                pakCommands?.zoomOutIcons()
+            }
+            .keyboardShortcut("-", modifiers: [.command])
+            .disabled(!(pakCommands?.canZoomOutIcons ?? false))
+        }
     }
 }
 

@@ -13,7 +13,7 @@ struct ContentView: View {
     @Binding var document: PakDocument
     let fileURL: URL?
     @StateObject private var model: PakViewModel
-    @State private var selectedFileID: PakNode.ID? // Selection in the detail table
+    @State private var selectedFileIDs: Set<PakNode.ID> = [] // Selection in the detail table (supports multi-select)
     @State private var detailViewStyle: DetailViewStyle = .list
     @State private var renamingNodeID: PakNode.ID?
     @State private var renamingText: String = ""
@@ -21,6 +21,7 @@ struct ContentView: View {
     @FocusState private var renamingFocus: PakNode.ID?
     @State private var window: NSWindow?
     @State private var windowDelegate = PakWindowDelegate()
+    @State private var iconZoomLevel: Int = 1
 
     init(document: Binding<PakDocument>, fileURL: URL?) {
         self._document = document
@@ -149,14 +150,9 @@ struct ContentView: View {
                     }
                     .disabled(!model.canAddFiles)
                 }
-                .onChange(of: selectedFileID) { _, newValue in
-                    // Update model selection for export
-                    if let id = newValue {
-                        model.selectedFile = folder.children?.first(where: { $0.id == id })
-                    } else {
-                        model.selectedFile = nil
-                    }
-                    if let renamingID = renamingNodeID, renamingID != newValue {
+                .onChange(of: selectedFileIDs) { _, newValue in
+                    updateSelection(ids: newValue, in: folder)
+                    if let renamingID = renamingNodeID, !newValue.contains(renamingID) {
                         cancelRenaming()
                     }
                 }
@@ -166,8 +162,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: model.currentFolder) { _, _ in
-            selectedFileID = nil
+            selectedFileIDs.removeAll()
             model.selectedFile = nil
+            model.selectedNodes = []
             cancelRenaming()
         }
         .onChange(of: renamingFocus) { _, newValue in
@@ -185,9 +182,19 @@ struct ContentView: View {
         }
     }
 
-    private func select(_ node: PakNode) {
-        selectedFileID = node.id
-        model.selectedFile = node
+    private func select(_ node: PakNode, toggle: Bool = false) {
+        guard let folder = model.currentFolder else { return }
+        var ids = selectedFileIDs
+        if toggle {
+            if ids.contains(node.id) {
+                ids.remove(node.id)
+            } else {
+                ids.insert(node.id)
+            }
+        } else {
+            ids = [node.id]
+        }
+        updateSelection(ids: ids, in: folder)
     }
 
     private func beginRenaming(_ node: PakNode) {
@@ -204,21 +211,7 @@ struct ContentView: View {
             return
         }
 
-        let trimmed = renamingText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && trimmed != node.name {
-            node.name = trimmed
-            if let entry = node.entry {
-                let updatedPath: String
-                if let slashIndex = entry.name.lastIndex(of: "/") {
-                    let prefix = entry.name[..<entry.name.index(after: slashIndex)]
-                    updatedPath = String(prefix) + trimmed
-                } else {
-                    updatedPath = trimmed
-                }
-                node.entry = PakEntry(name: updatedPath, offset: entry.offset, length: entry.length)
-            }
-            model.markDirty()
-        }
+        model.rename(node: node, to: renamingText)
         cancelRenaming()
     }
 
@@ -226,6 +219,29 @@ struct ContentView: View {
         renamingNode = nil
         renamingNodeID = nil
         renamingText = ""
+    }
+
+    private func updateSelection(ids: Set<PakNode.ID>, in folder: PakNode?) {
+        if selectedFileIDs != ids {
+            selectedFileIDs = ids
+        }
+        let nodes = selectionNodes(for: ids, in: folder)
+        model.selectedNodes = nodes
+        model.selectedFile = nodes.first
+    }
+
+    private func selectionNodes(for ids: Set<PakNode.ID>, in folder: PakNode?) -> [PakNode] {
+        guard let folder, !ids.isEmpty else { return [] }
+        return (folder.children ?? []).filter { ids.contains($0.id) }
+    }
+
+    private func handleIconSelection(for node: PakNode) {
+        let modifiers = NSApp.currentEvent?.modifierFlags ?? []
+        if modifiers.contains(.command) {
+            select(node, toggle: true)
+        } else {
+            select(node)
+        }
     }
 
     @ViewBuilder
@@ -252,10 +268,10 @@ struct ContentView: View {
                 .font(font)
                 .multilineTextAlignment(alignment)
                 .onTapGesture {
-                    if model.selectedFile?.id == node.id {
+                    if selectedFileIDs.contains(node.id) {
                         // Delay to mimic file system behavior and avoid conflict with double-click
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            if model.selectedFile?.id == node.id {
+                            if selectedFileIDs.contains(node.id) {
                                 beginRenaming(node)
                             }
                         }
@@ -310,87 +326,32 @@ struct ContentView: View {
     }
     @ViewBuilder
     private func listView(_ children: [PakNode]) -> some View {
-        Table(children, selection: $selectedFileID, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { node in
-                HStack {
-                    Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                    nameLabel(for: node)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    select(node)
-                }
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
-                        select(node)
-                        if node.isFolder {
-                            model.currentFolder = node
-                        }
-                    }
-                )
-                .contextMenu {
-                    contextMenuActions(for: node)
-                }
-                .onDrag { dragItem(for: node) }
+        PakListView(
+            nodes: children,
+            selection: $selectedFileIDs,
+            sortOrder: $sortOrder,
+            viewModel: model,
+            onOpenFolder: { folder in
+                model.currentFolder = folder
             }
-            TableColumn("Size", value: \.fileSize) { node in
-                Text(node.formattedFileSize)
-                    .monospacedDigit()
-            }
-            TableColumn("Type", value: \.fileType) { node in
-                Text(node.fileType)
-                    .foregroundStyle(.secondary)
-            }
-        }
+        )
     }
 
     @ViewBuilder
     private func iconsView(_ children: [PakNode]) -> some View {
-        ScrollView {
-            let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(children) { node in
-                    let isSelected = selectedFileID == node.id
-                    VStack(spacing: 6) {
-                    Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                        .font(.system(size: 36))
-                        nameLabel(for: node, font: .caption, alignment: .center)
-                            .lineLimit(2)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        select(node)
-                    }
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded {
-                            select(node)
-                            if node.isFolder {
-                                model.currentFolder = node
-                            }
-                        }
-                    )
-                    .contextMenu {
-                        contextMenuActions(for: node)
-                    }
-                    .onDrag { dragItem(for: node) }
-                }
+        PakIconView(
+            nodes: children,
+            selection: $selectedFileIDs,
+            zoomLevel: iconZoomLevel,
+            viewModel: model,
+            onOpenFolder: { folder in
+                model.currentFolder = folder
             }
-            .padding()
-        }
+        )
     }
 
     private func dragItem(for node: PakNode) -> NSItemProvider {
+        // Kept only for compatibility if used elsewhere; list/icons now use AppKit views.
         do {
             let url = try model.exportToTemporaryLocation(node: node)
             let provider = NSItemProvider(object: url as NSURL)
@@ -412,6 +373,10 @@ struct PakCommands {
     let canNewFolder: Bool
     let addFiles: () -> Void
     let canAddFiles: Bool
+    let zoomInIcons: () -> Void
+    let zoomOutIcons: () -> Void
+    let canZoomInIcons: Bool
+    let canZoomOutIcons: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -501,7 +466,7 @@ private extension ContentView {
             deleteFile: {
                 model.deleteSelectedFile()
             },
-            canDeleteFile: model.selectedFile != nil,
+            canDeleteFile: model.canDeleteFile,
             newFolder: {
                 createFolder(at: model.currentFolder)
             },
@@ -509,7 +474,19 @@ private extension ContentView {
             addFiles: {
                 presentAddFilesPanel(target: model.currentFolder)
             },
-            canAddFiles: model.pakFile != nil
+            canAddFiles: model.pakFile != nil,
+            zoomInIcons: {
+                if iconZoomLevel < 2 {
+                    iconZoomLevel += 1
+                }
+            },
+            zoomOutIcons: {
+                if iconZoomLevel > 0 {
+                    iconZoomLevel -= 1
+                }
+            },
+            canZoomInIcons: detailViewStyle == .icons && iconZoomLevel < 2,
+            canZoomOutIcons: detailViewStyle == .icons && iconZoomLevel > 0
         )
     }
 
