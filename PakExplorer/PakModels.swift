@@ -417,6 +417,17 @@ struct PakFilesystemExporter {
         try writeChildren(root.children ?? [], to: directory, originalData: originalData)
     }
 
+    static func export(node: PakNode, originalData: Data?, to url: URL) throws {
+        if node.isFolder {
+            let fileManager = FileManager.default
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            try writeChildren(node.children ?? [], to: url, originalData: originalData)
+        } else {
+            let payload = data(for: node, originalData: originalData)
+            try payload.write(to: url)
+        }
+    }
+
     private static func writeChildren(_ nodes: [PakNode], to directory: URL, originalData: Data?) throws {
         for node in nodes {
             if node.isFolder {

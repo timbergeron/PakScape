@@ -332,16 +332,7 @@ struct ContentView: View {
                 .contextMenu {
                     contextMenuActions(for: node)
                 }
-                .onDrag {
-                    guard let data = model.extractData(for: node) else { return NSItemProvider() }
-                    let name = node.name
-                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-                    try? data.write(to: tempURL)
-                    let provider = NSItemProvider()
-                    provider.suggestedName = name
-                    provider.registerObject(tempURL as NSURL, visibility: .all)
-                    return provider
-                }
+                .onDrag { dragItem(for: node) }
             }
             TableColumn("Size", value: \.fileSize) { node in
                 Text(node.formattedFileSize)
@@ -392,19 +383,21 @@ struct ContentView: View {
                     .contextMenu {
                         contextMenuActions(for: node)
                     }
-                    .onDrag {
-                        guard let data = model.extractData(for: node) else { return NSItemProvider() }
-                        let name = node.name
-                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-                        try? data.write(to: tempURL)
-                        let provider = NSItemProvider()
-                        provider.suggestedName = name
-                        provider.registerObject(tempURL as NSURL, visibility: .all)
-                        return provider
-                    }
+                    .onDrag { dragItem(for: node) }
                 }
             }
             .padding()
+        }
+    }
+
+    private func dragItem(for node: PakNode) -> NSItemProvider {
+        do {
+            let url = try model.exportToTemporaryLocation(node: node)
+            let provider = NSItemProvider(object: url as NSURL)
+            provider.suggestedName = node.name
+            return provider
+        } catch {
+            return NSItemProvider()
         }
     }
 }

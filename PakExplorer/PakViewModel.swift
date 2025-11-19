@@ -24,6 +24,29 @@ final class PakViewModel: ObservableObject {
         documentURL = url
     }
 
+    enum ExportError: Error {
+        case missingData
+    }
+
+    func exportToTemporaryLocation(node: PakNode) throws -> URL {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+
+        if node.isFolder {
+            let destination = base.appendingPathComponent(node.name, isDirectory: true)
+            try PakFilesystemExporter.export(node: node, originalData: pakFile?.data, to: destination)
+            return destination
+        }
+
+        guard let data = extractData(for: node) else {
+            throw ExportError.missingData
+        }
+
+        let destination = base.appendingPathComponent(node.name)
+        try data.write(to: destination)
+        return destination
+    }
+
 
     // Export the currently-selected file
     func exportSelectedFile() {
@@ -59,37 +82,51 @@ final class PakViewModel: ObservableObject {
     
     func importFiles(urls: [URL], to folder: PakNode) {
         for url in urls {
-            // If it's a directory, we might want to recurse, but for now let's just handle flat files or ignore folders
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                // Create folder and recurse?
-                // For simplicity, let's just create a folder node and try to import children?
-                // Or just skip folders for MVP.
-                // Let's skip folders for now to keep it simple, or maybe just add the folder node.
-                continue 
-            }
-            
-            do {
-                let data = try Data(contentsOf: url)
-                let name = url.lastPathComponent
-                
-                // Check if file already exists in this folder
-                if let existingIndex = folder.children?.firstIndex(where: { $0.name == name }) {
-                    // Overwrite? Or skip?
-                    // Let's overwrite
-                    folder.children?[existingIndex].localData = data
-                    folder.children?[existingIndex].entry = nil // It's now a local file, not from PAK
-                } else {
-                    let newNode = PakNode(name: name)
-                    newNode.localData = data
-                    folder.children?.append(newNode)
-                }
-            } catch {
-                print("Failed to import \(url): \(error)")
-            }
+            importItem(at: url, into: folder)
         }
         sortFolder(folder)
         markDirty()
+    }
+
+    private func importItem(at url: URL, into folder: PakNode) {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return }
+
+        if isDir.boolValue {
+            folder.children = folder.children ?? []
+            let targetFolder: PakNode
+            if let existing = folder.children?.first(where: { $0.name == url.lastPathComponent && $0.isFolder }) {
+                targetFolder = existing
+            } else {
+                let newFolder = PakNode(name: url.lastPathComponent)
+                folder.children?.append(newFolder)
+                targetFolder = newFolder
+            }
+
+            let contents = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
+            for child in contents {
+                importItem(at: child, into: targetFolder)
+            }
+            sortFolder(targetFolder)
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let name = url.lastPathComponent
+
+            folder.children = folder.children ?? []
+            if let existingIndex = folder.children?.firstIndex(where: { $0.name == name }) {
+                folder.children?[existingIndex].localData = data
+                folder.children?[existingIndex].entry = nil
+            } else {
+                let newNode = PakNode(name: name)
+                newNode.localData = data
+                folder.children?.append(newNode)
+            }
+        } catch {
+            print("Failed to import \(url): \(error)")
+        }
     }
     func deleteSelectedFile() {
         guard let folder = currentFolder, let selected = selectedFile else { return }
