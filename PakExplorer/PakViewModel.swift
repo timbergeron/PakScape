@@ -140,7 +140,8 @@ final class PakViewModel: ObservableObject {
             guard response == .OK, let url = save.url else { return }
             let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
             do {
-                try result.data.write(to: url)
+                let data = try self.outputData(for: url, with: result)
+                try data.write(to: url)
             } catch {
                 let alert = NSAlert(error: error)
                 alert.runModal()
@@ -175,7 +176,8 @@ final class PakViewModel: ObservableObject {
     private func write(pakFile: PakFile, to url: URL) -> Bool {
         let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
         do {
-            try result.data.write(to: url)
+            let data = try outputData(for: url, with: result)
+            try data.write(to: url)
             pakFile.data = result.data
             pakFile.entries = result.entries
             pakFile.version = UUID()
@@ -186,6 +188,14 @@ final class PakViewModel: ObservableObject {
             alert.runModal()
             return false
         }
+    }
+    
+    private func outputData(for url: URL, with result: PakWriter.Output) throws -> Data {
+        let ext = url.pathExtension.lowercased()
+        if ext == "pk3", let root = pakFile?.root {
+            return try PakZipWriter.write(root: root, originalData: result.data)
+        }
+        return result.data
     }
     
     func markDirty() {

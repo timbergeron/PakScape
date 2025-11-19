@@ -200,6 +200,50 @@ struct PakLoader {
         }
         node.children?.forEach { sortNodeRecursively($0) }
     }
+
+    static func loadZip(from url: URL, name: String) throws -> PakFile {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-qq", url.path, "-d", tempDir.path]
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw PakError.unknown("Failed to unzip PK3 archive")
+        }
+
+        let root = PakNode(name: "/")
+        try buildTree(from: tempDir, into: root)
+        sortNodeRecursively(root)
+        return PakFile(name: name, data: Data(), entries: [], root: root)
+    }
+
+    private static func buildTree(from directory: URL, into parent: PakNode) throws {
+        let contents = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [])
+        for item in contents {
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: item.path, isDirectory: &isDir)
+            if isDir.boolValue {
+                let folder = PakNode(name: item.lastPathComponent)
+                parent.children?.append(folder)
+                try buildTree(from: item, into: folder)
+            } else {
+                let child = PakNode(name: item.lastPathComponent)
+                child.localData = try Data(contentsOf: item)
+                parent.children?.append(child)
+            }
+        }
+        parent.children?.sort {
+            if $0.isFolder != $1.isFolder {
+                return $0.isFolder && !$1.isFolder
+            }
+            return $0.name.lowercased() < $1.name.lowercased()
+        }
+    }
 }
 
 struct PakWriter {
@@ -300,5 +344,61 @@ struct PakWriter {
     private static func int32ToData(_ value: Int32) -> Data {
         var v = value.littleEndian
         return Data(bytes: &v, count: 4)
+    }
+}
+
+struct PakZipWriter {
+    enum ZipError: Error {
+        case processFailed
+    }
+
+    static func write(root: PakNode, originalData: Data?) throws -> Data {
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        try writeChildren(root.children ?? [], to: staging, originalData: originalData)
+
+        let zipURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pk3")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.arguments = ["-qr", zipURL.path, "."]
+        process.currentDirectoryURL = staging
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: staging)
+            throw ZipError.processFailed
+        }
+
+        let data = try Data(contentsOf: zipURL)
+        try FileManager.default.removeItem(at: staging)
+        try? FileManager.default.removeItem(at: zipURL)
+        return data
+    }
+
+    private static func writeChildren(_ nodes: [PakNode], to directory: URL, originalData: Data?) throws {
+        for node in nodes {
+            if node.isFolder {
+                let folderURL = directory.appendingPathComponent(node.name)
+                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+                try writeChildren(node.children ?? [], to: folderURL, originalData: originalData)
+            } else {
+                let fileURL = directory.appendingPathComponent(node.name)
+                let payload = data(for: node, originalData: originalData)
+                try payload.write(to: fileURL)
+            }
+        }
+    }
+
+    private static func data(for node: PakNode, originalData: Data?) -> Data {
+        if let local = node.localData {
+            return local
+        }
+        guard let entry = node.entry, let original = originalData,
+              entry.offset + entry.length <= original.count else {
+            return Data()
+        }
+        return original.subdata(in: entry.offset ..< entry.offset + entry.length)
     }
 }

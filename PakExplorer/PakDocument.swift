@@ -5,10 +5,18 @@ struct PakDocument: FileDocument {
     var pakFile: PakFile
 
     static var readableContentTypes: [UTType] {
+        var types: [UTType] = []
         if let pakType = UTType(filenameExtension: "pak") {
-            return [pakType]
+            types.append(pakType)
         }
-        return []
+        if let pk3Type = UTType(filenameExtension: "pk3") {
+            types.append(pk3Type)
+        }
+        return types
+    }
+
+    static var writableContentTypes: [UTType] {
+        readableContentTypes
     }
 
     init(pakFile: PakFile? = nil) {
@@ -20,17 +28,32 @@ struct PakDocument: FileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         let filename = configuration.file.filename ?? "Untitled.pak"
-        self.pakFile = try PakLoader.load(data: data, name: filename)
+        let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
+        let ext = preferredExt ?? ((filename as NSString).pathExtension.lowercased())
+        if ext == "pk3" {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pk3")
+            try data.write(to: temporary)
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            self.pakFile = try PakLoader.loadZip(from: temporary, name: filename)
+        } else {
+            self.pakFile = try PakLoader.load(data: data, name: filename)
+        }
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         let root = pakFile.root
-
-        let result = PakWriter.write(root: root, originalData: pakFile.data)
-        pakFile.data = result.data
-        pakFile.entries = result.entries
+        let packResult = PakWriter.write(root: root, originalData: pakFile.data)
+        pakFile.data = packResult.data
+        pakFile.entries = packResult.entries
         pakFile.version = UUID()
 
-        return FileWrapper(regularFileWithContents: result.data)
+        let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
+        let ext = preferredExt ?? "pak"
+        if ext == "pk3" {
+            let zipData = try PakZipWriter.write(root: root, originalData: packResult.data)
+            return FileWrapper(regularFileWithContents: zipData)
+        }
+
+        return FileWrapper(regularFileWithContents: packResult.data)
     }
 }

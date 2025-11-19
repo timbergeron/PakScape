@@ -1,6 +1,6 @@
 # PakExplorer
 
-PakExplorer is a simple Quake `.pak` archive viewer inspired by PakScape and originally developed by Peter Engström. It renders the PAK directory tree, lets you add/remove files, and export modified archives.
+PakExplorer is a simple Quake `.pak` and `.pk3` archive viewer inspired by PakScape and originally developed by Peter Engström. It renders the archive directory tree, lets you add/remove files, and export modified archives.
 
 ## Building
 
