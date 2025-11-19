@@ -36,15 +36,7 @@ struct ContentView: View {
         } detail: {
             detailView
         }
-        .focusedValue(\.pakCommands, PakCommands(
-            save: {
-                _ = model.saveCurrentPak(promptForLocationIfNeeded: true)
-            },
-            saveAs: {
-                model.exportPakAs()
-            },
-            canSave: model.canSave
-        ))
+        .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
             model.updateDocumentURL(fileURL)
             window?.isDocumentEdited = model.hasUnsavedChanges
@@ -484,5 +476,20 @@ private final class PakWindowDelegate: NSObject, NSWindowDelegate {
         default:
             return forwardingDelegate?.windowShouldClose?(sender) ?? true
         }
+    }
+
+}
+
+private extension ContentView {
+    var currentPakCommands: PakCommands {
+        PakCommands(
+            save: {
+                _ = model.saveCurrentPak(promptForLocationIfNeeded: true)
+            },
+            saveAs: {
+                model.exportPakAs()
+            },
+            canSave: model.canSave
+        )
     }
 }
