@@ -18,9 +18,9 @@ final class PakNode: Identifiable, Hashable {
     }
 
     let id = UUID()
-    let name: String
+    var name: String
     var children: [PakNode]? = []   // NOTE: optional array for OutlineGroup
-    let entry: PakEntry?            // nil for folders
+    var entry: PakEntry?            // nil for folders
 
     init(name: String, entry: PakEntry? = nil) {
         self.name = name
@@ -174,4 +174,3 @@ struct PakLoader {
         node.children?.forEach { sortNodeRecursively($0) }
     }
 }
-
