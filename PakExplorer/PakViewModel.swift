@@ -77,7 +77,6 @@ final class PakViewModel: ObservableObject {
                 print("Failed to import \(url): \(error)")
             }
         }
-        
         sortFolder(folder)
         markDirty()
     }

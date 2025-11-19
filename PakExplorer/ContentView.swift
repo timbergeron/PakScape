@@ -31,7 +31,7 @@ struct ContentView: View {
         } detail: {
             detailView
         }
-        .onChange(of: model.pakFile?.version) { _ in
+        .onChange(of: model.pakFile?.version) { _, _ in
             document = PakDocument(pakFile: model.pakFile)
         }
         .focusedValue(\.pakCommands, PakCommands(saveAs: {
@@ -102,7 +102,7 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
                     guard let folder = model.currentFolder else { return false }
                     let dispatchGroup = DispatchGroup()
                     var urls: [URL] = []
@@ -302,20 +302,12 @@ struct ContentView: View {
                 }
                 .onDrag {
                     guard let data = model.extractData(for: node) else { return NSItemProvider() }
+                    let name = node.name
+                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                    try? data.write(to: tempURL)
                     let provider = NSItemProvider()
-                    let name = node.name // Capture on main actor
                     provider.suggestedName = name
-                    let type = UTType(filenameExtension: (name as NSString).pathExtension) ?? .content
-                    provider.registerFileRepresentation(for: type, visibility: .all) { completion in
-                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-                        do {
-                            try data.write(to: tempURL)
-                            completion(tempURL, true, nil)
-                        } catch {
-                            completion(nil, false, error)
-                        }
-                        return nil
-                    }
+                    provider.registerObject(tempURL as NSURL, visibility: .all)
                     return provider
                 }
             }
@@ -371,20 +363,12 @@ struct ContentView: View {
                     }
                     .onDrag {
                         guard let data = model.extractData(for: node) else { return NSItemProvider() }
+                        let name = node.name
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                        try? data.write(to: tempURL)
                         let provider = NSItemProvider()
-                        let name = node.name // Capture on main actor
                         provider.suggestedName = name
-                        let type = UTType(filenameExtension: (name as NSString).pathExtension) ?? .content
-                        provider.registerFileRepresentation(for: type, visibility: .all) { completion in
-                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-                            do {
-                                try data.write(to: tempURL)
-                                completion(tempURL, true, nil)
-                            } catch {
-                                completion(nil, false, error)
-                            }
-                            return nil
-                        }
+                        provider.registerObject(tempURL as NSURL, visibility: .all)
                         return provider
                     }
                 }
