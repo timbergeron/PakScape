@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PakDocument: FileDocument {
-    var pakFile: PakFile?
+    var pakFile: PakFile
 
     static var readableContentTypes: [UTType] {
         if let pakType = UTType(filenameExtension: "pak") {
@@ -12,7 +12,7 @@ struct PakDocument: FileDocument {
     }
 
     init(pakFile: PakFile? = nil) {
-        self.pakFile = pakFile
+        self.pakFile = pakFile ?? PakFile.empty(name: "Untitled.pak")
     }
 
     init(configuration: ReadConfiguration) throws {
@@ -24,14 +24,12 @@ struct PakDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        guard let root = pakFile?.root else {
-            throw CocoaError(.fileWriteUnknown)
-        }
+        let root = pakFile.root
 
-        let result = PakWriter.write(root: root, originalData: pakFile?.data)
-        pakFile?.data = result.data
-        pakFile?.entries = result.entries
-        pakFile?.version = UUID()
+        let result = PakWriter.write(root: root, originalData: pakFile.data)
+        pakFile.data = result.data
+        pakFile.entries = result.entries
+        pakFile.version = UUID()
 
         return FileWrapper(regularFileWithContents: result.data)
     }

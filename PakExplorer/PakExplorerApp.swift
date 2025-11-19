@@ -14,8 +14,7 @@ struct PakExplorerApp: App {
             ContentView(document: file.$document, fileURL: file.fileURL)
         }
         .commands {
-            // No "New" document
-            CommandGroup(replacing: .newItem) {}
+            PakNewCommands()
             PakSaveCommands()
             // "Open" is handled by DocumentGroup automatically
         }
@@ -45,6 +44,30 @@ struct PakSaveCommands: Commands {
             }
             .keyboardShortcut(.delete, modifiers: [.command])
             .disabled(!(pakCommands?.canDeleteFile ?? false))
+        }
+    }
+}
+
+struct PakNewCommands: Commands {
+    @FocusedValue(\.pakCommands) private var pakCommands
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Pak") {
+                NSApp.sendAction(#selector(NSDocumentController.newDocument(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("N")
+
+            Divider()
+
+            Button("New Folder") {
+                pakCommands?.newFolder()
+            }
+            .disabled(!(pakCommands?.canNewFolder ?? false))
+            Button("Add File(s)…") {
+                pakCommands?.addFiles()
+            }
+            .disabled(!(pakCommands?.canAddFiles ?? false))
         }
     }
 }

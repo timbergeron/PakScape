@@ -101,6 +101,34 @@ final class PakViewModel: ObservableObject {
         }
     }
     
+    var canCreateFolder: Bool {
+        pakFile != nil
+    }
+    
+    var canAddFiles: Bool {
+        pakFile != nil
+    }
+
+    @discardableResult
+    func addFolder(in folder: PakNode?) -> PakNode? {
+        guard let target = folder ?? currentFolder ?? pakFile?.root else { return nil }
+        target.children = target.children ?? []
+
+        let baseName = "New Folder"
+        var candidate = baseName
+        var suffix = 1
+        while target.children?.contains(where: { $0.name == candidate }) == true {
+            suffix += 1
+            candidate = "\(baseName) \(suffix)"
+        }
+
+        let newNode = PakNode(name: candidate)
+        target.children?.append(newNode)
+        sortFolder(target)
+        markDirty()
+        return newNode
+    }
+
     func exportPakAs() {
         guard let pakFile = pakFile else { return }
         

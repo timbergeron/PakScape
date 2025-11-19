@@ -71,6 +71,11 @@ final class PakFile {
         self.entries = entries
         self.root = root
     }
+
+    static func empty(name: String) -> PakFile {
+        let root = PakNode(name: "/")
+        return PakFile(name: name, data: Data(), entries: [], root: root)
+    }
 }
 
 enum PakError: Error, LocalizedError {

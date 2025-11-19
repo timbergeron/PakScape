@@ -139,6 +139,16 @@ struct ContentView: View {
                     }
                     return true
                 }
+                .contextMenu {
+                    Button("New Folder") {
+                        createFolder(at: folder)
+                    }
+                    .disabled(!model.canCreateFolder)
+                    Button("Add File(s)…") {
+                        presentAddFilesPanel(target: folder)
+                    }
+                    .disabled(!model.canAddFiles)
+                }
                 .onChange(of: selectedFileID) { _, newValue in
                     // Update model selection for export
                     if let id = newValue {
@@ -258,6 +268,21 @@ struct ContentView: View {
 
     @ViewBuilder
     private func contextMenuActions(for node: PakNode) -> some View {
+        Button("Add File(s)…") {
+            presentAddFilesPanel(target: node.isFolder ? node : model.currentFolder)
+        }
+        .disabled(!model.canCreateFolder)
+
+        if node.isFolder {
+            Button("New Folder") {
+                createFolder(at: node)
+            }
+            .disabled(!model.canCreateFolder)
+        }
+        Button("Select") {
+            select(node)
+        }
+
         Button("Select") {
             select(node)
         }
@@ -395,6 +420,10 @@ struct PakCommands {
     let canSave: Bool
     let deleteFile: () -> Void
     let canDeleteFile: Bool
+    let newFolder: () -> Void
+    let canNewFolder: Bool
+    let addFiles: () -> Void
+    let canAddFiles: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -484,7 +513,37 @@ private extension ContentView {
             deleteFile: {
                 model.deleteSelectedFile()
             },
-            canDeleteFile: model.selectedFile != nil
+            canDeleteFile: model.selectedFile != nil,
+            newFolder: {
+                createFolder(at: model.currentFolder)
+            },
+            canNewFolder: model.canCreateFolder,
+            addFiles: {
+                presentAddFilesPanel(target: model.currentFolder)
+            },
+            canAddFiles: model.pakFile != nil
         )
+    }
+
+    func createFolder(at parent: PakNode?) {
+        guard let newNode = model.addFolder(in: parent) else { return }
+        select(newNode)
+        beginRenaming(newNode)
+        if let folder = parent {
+            model.currentFolder = folder
+        }
+    }
+
+    func presentAddFilesPanel(target folder: PakNode?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.begin { response in
+            guard response == .OK else { return }
+            let destination = folder ?? model.currentFolder ?? model.pakFile?.root
+            guard let targetFolder = destination else { return }
+            model.importFiles(urls: panel.urls, to: targetFolder)
+        }
     }
 }
