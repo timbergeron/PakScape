@@ -1,8 +1,29 @@
 import SwiftUI
 import AppKit
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        removeBlankFileMenuItem()
+    }
+
+    private func removeBlankFileMenuItem() {
+        DispatchQueue.main.async {
+            guard let fileMenu = NSApp.mainMenu?.item(withTitle: "File")?.submenu else { return }
+            let blankItems = fileMenu.items.filter { item in
+                let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return title.isEmpty || title == "NSMenuItem"
+            }
+            for item in blankItems {
+                fileMenu.removeItem(item)
+            }
+        }
+    }
+}
+
 @main
 struct PakExplorerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         if #available(macOS 10.12, *) {
             NSWindow.allowsAutomaticWindowTabbing = false
@@ -44,6 +65,18 @@ struct PakSaveCommands: Commands {
             }
             .keyboardShortcut(.delete, modifiers: [.command])
             .disabled(!(pakCommands?.canDeleteFile ?? false))
+            
+            Divider()
+
+            Button("Close") {
+                NSApp.sendAction(#selector(NSWindow.performClose(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("W")
+
+            Button("Close All") {
+                NSApp.windows.forEach { $0.performClose(nil) }
+            }
+            .keyboardShortcut("W", modifiers: [.command, .option])
         }
     }
 }
@@ -57,8 +90,6 @@ struct PakNewCommands: Commands {
                 NSApp.sendAction(#selector(NSDocumentController.newDocument(_:)), to: nil, from: nil)
             }
             .keyboardShortcut("N")
-
-            Divider()
 
             Button("New Folder") {
                 pakCommands?.newFolder()

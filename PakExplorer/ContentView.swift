@@ -271,18 +271,13 @@ struct ContentView: View {
         Button("Add File(s)…") {
             presentAddFilesPanel(target: node.isFolder ? node : model.currentFolder)
         }
+        .disabled(!model.canAddFiles)
+
+        Button("New Folder") {
+            let parent = node.isFolder ? node : model.currentFolder
+            createFolder(at: parent)
+        }
         .disabled(!model.canCreateFolder)
-
-        if node.isFolder {
-            Button("New Folder") {
-                createFolder(at: node)
-            }
-            .disabled(!model.canCreateFolder)
-        }
-        Button("Select") {
-            select(node)
-        }
-
         Button("Select") {
             select(node)
         }
