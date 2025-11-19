@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
     case list = "List"
@@ -81,86 +82,36 @@ struct ContentView: View {
                     Group {
                         switch detailViewStyle {
                         case .list:
-                            Table(sortedChildren, selection: $selectedFileID, sortOrder: $sortOrder) {
-                                TableColumn("Name", value: \.name) { node in
-                                    HStack {
-                                        Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                                            .foregroundStyle(node.isFolder ? .yellow : .primary)
-                                        nameLabel(for: node)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        select(node)
-                                    }
-                                    .simultaneousGesture(
-                                        TapGesture(count: 2).onEnded {
-                                            select(node)
-                                            if node.isFolder {
-                                                model.currentFolder = node
-                                            }
-                                        }
-                                    )
-                                    .contextMenu {
-                                        contextMenuActions(for: node)
-                                    }
-                                }
-                                TableColumn("Size", value: \.fileSize) { node in
-                                    Text(node.isFolder ? "--" : "\(node.fileSize)")
-                                        .monospacedDigit()
-                                }
-                                TableColumn("Type", value: \.fileType) { node in
-                                    Text(node.fileType)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
+                            listView(sortedChildren)
                         case .icons:
-                            ScrollView {
-                                let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
-                                LazyVGrid(columns: columns, spacing: 12) {
-                                    ForEach(sortedChildren) { node in
-                                        let isSelected = selectedFileID == node.id
-                                        Button {
-                                            select(node)
-                                        } label: {
-                                            VStack(spacing: 6) {
-                                                Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                                                    .font(.system(size: 36))
-                                                    .foregroundStyle(node.isFolder ? .yellow : .primary)
-                                                nameLabel(for: node, font: .caption, alignment: .center)
-                                                    .lineLimit(2)
-                                            }
-                                            .padding()
-                                            .frame(maxWidth: .infinity)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 2 : 1)
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                        .simultaneousGesture(
-                                            TapGesture(count: 2).onEnded {
-                                                select(node)
-                                                if node.isFolder {
-                                                    model.currentFolder = node
-                                                }
-                                            }
-                                        )
-                                        .contextMenu {
-                                            contextMenuActions(for: node)
-                                        }
-                                    }
-                                }
-                                .padding()
-                            }
+                            iconsView(sortedChildren)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    guard let folder = model.currentFolder else { return false }
+                    let dispatchGroup = DispatchGroup()
+                    var urls: [URL] = []
+                    
+                    for provider in providers {
+                        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                            dispatchGroup.enter()
+                            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { (item, error) in
+                                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                                    urls.append(url)
+                                } else if let url = item as? URL {
+                                    urls.append(url)
+                                }
+                                dispatchGroup.leave()
+                            }
+                        }
+                    }
+                    
+                    dispatchGroup.notify(queue: .main) {
+                        model.importFiles(urls: urls, to: folder)
+                    }
+                    return true
                 }
                 .onChange(of: selectedFileID) { newValue in
                     // Update model selection for export
@@ -255,6 +206,18 @@ struct ContentView: View {
             Text(node.name)
                 .font(font)
                 .multilineTextAlignment(alignment)
+                .onTapGesture {
+                    if model.selectedFile?.id == node.id {
+                        // Delay to mimic file system behavior and avoid conflict with double-click
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            if model.selectedFile?.id == node.id {
+                                beginRenaming(node)
+                            }
+                        }
+                    } else {
+                        select(node)
+                    }
+                }
         }
     }
 
@@ -276,6 +239,121 @@ struct ContentView: View {
                 select(node)
                 model.exportSelectedFile()
             }
+        }
+    }
+    @ViewBuilder
+    private func listView(_ children: [PakNode]) -> some View {
+        Table(children, selection: $selectedFileID, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { node in
+                HStack {
+                    Image(systemName: node.isFolder ? "folder.fill" : "doc")
+                        .foregroundStyle(node.isFolder ? .yellow : .primary)
+                    nameLabel(for: node)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    select(node)
+                }
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        select(node)
+                        if node.isFolder {
+                            model.currentFolder = node
+                        }
+                    }
+                )
+                .contextMenu {
+                    contextMenuActions(for: node)
+                }
+                .onDrag {
+                    guard let data = model.extractData(for: node) else { return NSItemProvider() }
+                    let provider = NSItemProvider()
+                    provider.suggestedName = node.name
+                    let type = UTType(filenameExtension: (node.name as NSString).pathExtension) ?? .content
+                    provider.registerFileRepresentation(for: type, visibility: .all) { completion in
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(node.name)
+                        do {
+                            try data.write(to: tempURL)
+                            completion(tempURL, true, nil)
+                        } catch {
+                            completion(nil, false, error)
+                        }
+                        return nil
+                    }
+                    return provider
+                }
+            }
+            TableColumn("Size", value: \.fileSize) { node in
+                Text(node.isFolder ? "--" : "\(node.fileSize)")
+                    .monospacedDigit()
+            }
+            TableColumn("Type", value: \.fileType) { node in
+                Text(node.fileType)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func iconsView(_ children: [PakNode]) -> some View {
+        ScrollView {
+            let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(children) { node in
+                    let isSelected = selectedFileID == node.id
+                    VStack(spacing: 6) {
+                        Image(systemName: node.isFolder ? "folder.fill" : "doc")
+                            .font(.system(size: 36))
+                            .foregroundStyle(node.isFolder ? .yellow : .primary)
+                        nameLabel(for: node, font: .caption, alignment: .center)
+                            .lineLimit(2)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 2 : 1)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        select(node)
+                    }
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            select(node)
+                            if node.isFolder {
+                                model.currentFolder = node
+                            }
+                        }
+                    )
+                    .contextMenu {
+                        contextMenuActions(for: node)
+                    }
+                    .onDrag {
+                        guard let data = model.extractData(for: node) else { return NSItemProvider() }
+                        let provider = NSItemProvider()
+                        provider.suggestedName = node.name
+                        let type = UTType(filenameExtension: (node.name as NSString).pathExtension) ?? .content
+                        provider.registerFileRepresentation(for: type, visibility: .all) { completion in
+                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(node.name)
+                            do {
+                                try data.write(to: tempURL)
+                                completion(tempURL, true, nil)
+                            } catch {
+                                completion(nil, false, error)
+                            }
+                            return nil
+                        }
+                        return provider
+                    }
+                }
+            }
+            .padding()
         }
     }
 }

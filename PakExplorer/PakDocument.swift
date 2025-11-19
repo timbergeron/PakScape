@@ -24,11 +24,10 @@ struct PakDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        // For now, we only support reading. 
-        // If we wanted to save, we'd return FileWrapper(regularFileWithContents: pakFile?.data ?? Data())
-        // But since we don't support editing the PAK structure yet, let's just return the original data if available.
-        if let data = pakFile?.data {
-            return FileWrapper(regularFileWithContents: data)
+        // Rebuild the PAK file from the current node tree
+        if let root = pakFile?.root {
+            let newData = PakWriter.write(root: root, originalData: pakFile?.data)
+            return FileWrapper(regularFileWithContents: newData)
         } else {
             throw CocoaError(.fileWriteUnknown)
         }

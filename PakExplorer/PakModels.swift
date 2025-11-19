@@ -21,20 +21,22 @@ final class PakNode: Identifiable, Hashable {
     var name: String
     var children: [PakNode]? = []   // NOTE: optional array for OutlineGroup
     var entry: PakEntry?            // nil for folders
+    var localData: Data?            // For newly added files or modified content
 
     init(name: String, entry: PakEntry? = nil) {
         self.name = name
         self.entry = entry
     }
 
-    var isFolder: Bool { entry == nil }
+    var isFolder: Bool { entry == nil && localData == nil }
 
     var folderChildren: [PakNode]? {
         children?.filter { $0.isFolder }
     }
 
     var fileSize: Int {
-        entry?.length ?? 0
+        if let local = localData { return local.count }
+        return entry?.length ?? 0
     }
 
     var fileType: String {
@@ -172,5 +174,137 @@ struct PakLoader {
             return $0.name.lowercased() < $1.name.lowercased()
         }
         node.children?.forEach { sortNodeRecursively($0) }
+    }
+}
+
+struct PakWriter {
+    static func write(root: PakNode, originalData: Data?) -> Data {
+        // 1. Flatten the tree to get all files with their full paths
+        var files: [(path: String, node: PakNode)] = []
+        collectFiles(node: root, currentPath: "", into: &files)
+        
+        // 2. Prepare data buffer
+        var output = Data()
+        
+        // Reserve space for header (12 bytes)
+        // We'll write the real header at the end or just append files first then directory
+        // Standard PAK: Header -> Files -> Directory
+        
+        // Let's write a placeholder header first
+        output.append(Data(count: 12))
+        
+        // 3. Write files and record their new entries
+        var newEntries: [PakEntry] = []
+        
+        for (path, node) in files {
+            let offset = output.count
+            let data: Data
+            
+            if let local = node.localData {
+                data = local
+            } else if let entry = node.entry, let original = originalData {
+                let range = entry.offset ..< (entry.offset + entry.length)
+                // Safety check
+                if range.upperBound <= original.count {
+                    data = original.subdata(in: range)
+                } else {
+                    data = Data() // Corrupt or missing reference
+                }
+            } else {
+                data = Data()
+            }
+            
+            output.append(data)
+            newEntries.append(PakEntry(name: path, offset: offset, length: data.count))
+        }
+        
+        // 4. Write Directory
+        let dirOffset = output.count
+        let dirLength = newEntries.count * 64
+        
+        for entry in newEntries {
+            // Name (56 bytes)
+            var nameBytes = [UInt8](repeating: 0, count: 56)
+            let nameData = entry.name.data(using: .ascii) ?? Data()
+            for (i, byte) in nameData.prefix(55).enumerated() {
+                nameBytes[i] = byte
+            }
+            output.append(contentsOf: nameBytes)
+            
+            // Offset (4 bytes)
+            output.append(int32ToData(Int32(entry.offset)))
+            
+            // Length (4 bytes)
+            output.append(int32ToData(Int32(entry.length)))
+        }
+        
+        // 5. Write Header at the beginning
+        // Ident "PACK"
+        let ident = "PACK".data(using: .ascii)!
+        output.replaceSubrange(0..<4, with: ident)
+        
+        // Dir Offset
+        output.replaceSubrange(4..<8, with: int32ToData(Int32(dirOffset)))
+        
+        // Dir Length
+        output.replaceSubrange(8..<12, with: int32ToData(Int32(dirLength)))
+        
+        return output
+    }
+    
+    private static func collectFiles(node: PakNode, currentPath: String, into files: inout [(path: String, node: PakNode)]) {
+        if !node.isFolder {
+            // It's a file
+            // currentPath includes the parent folder path. Append this node's name.
+            // Note: root has name "/", but we don't include it in the path for children if it's just "/"
+            // Actually, the recursion below handles the path building.
+            // If this is called on root, currentPath is "".
+            
+            // If node is a file, add it.
+            // But usually collectFiles is called on a folder.
+            // Let's handle the recursion logic carefully.
+            
+            // If this node itself is a file, add it.
+            if !currentPath.isEmpty {
+                files.append((currentPath, node))
+            } else {
+                files.append((node.name, node))
+            }
+            return
+        }
+        
+        // It is a folder
+        let children = node.children ?? []
+        for child in children {
+            if node.name != "/" {
+                 // If not root, append this folder's name
+                 // Wait, the `currentPath` passed in should already be the full path to THIS node (if it's a folder)
+                 // Let's adjust the logic:
+                 // The caller passes the *parent's* path.
+            }
+            
+            // Let's restart the logic for clarity
+            // We want "maps/level1.bsp"
+            // Root is "/"
+            // Child "maps" -> recurse with "maps"
+            // Child "level1.bsp" -> recurse with "maps/level1.bsp"
+            
+            var nextPath = currentPath
+            if !nextPath.isEmpty {
+                nextPath += "/"
+            }
+            nextPath += child.name
+            
+            if child.isFolder {
+                collectFiles(node: child, currentPath: nextPath, into: &files)
+            } else {
+                files.append((nextPath, child))
+            }
+        }
+    }
+    
+    private static func int32ToData(_ value: Int32) -> Data {
+        var v = value.littleEndian
+        return Data(bytes: &v, count: 4)
     }
 }
