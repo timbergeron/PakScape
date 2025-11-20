@@ -441,6 +441,8 @@ struct PakCommands {
     let canSave: Bool
     let deleteFile: () -> Void
     let canDeleteFile: Bool
+    let rename: () -> Void
+    let canRename: Bool
     let newFolder: () -> Void
     let canNewFolder: Bool
     let addFiles: () -> Void
@@ -546,6 +548,10 @@ private extension ContentView {
                 model.deleteSelectedFile()
             },
             canDeleteFile: model.canDeleteFile,
+            rename: {
+                renameSelectedNode()
+            },
+            canRename: canRenameSelectedNode,
             newFolder: {
                 createFolder(at: model.currentFolder)
             },
@@ -570,7 +576,9 @@ private extension ContentView {
                 model.cutSelection()
             },
             copy: {
-                model.copySelection()
+                if !copyNameIfEditing() {
+                    model.copySelection()
+                }
             },
             paste: {
                 let inserted = model.pasteIntoCurrentFolder()
@@ -605,6 +613,64 @@ private extension ContentView {
     var canSelectAllInCurrentFolder: Bool {
         guard let folder = model.currentFolder else { return false }
         return !(folder.children ?? []).isEmpty
+    }
+
+    var canRenameSelectedNode: Bool {
+        renamingNodeID == nil && model.selectedFile != nil
+    }
+
+    func renameSelectedNode() {
+        // Prefer letting the active AppKit view (list or icon view)
+        // handle rename for the current selection, so we get inline
+        // editing behavior consistent with context menus and hover.
+        let selector = NSSelectorFromString("renameSelectedItem:")
+        if let window = window ?? NSApp.keyWindow {
+            if window.firstResponder?.tryToPerform(selector, with: nil) == true {
+                return
+            }
+        }
+        _ = NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
+    func copyNameIfEditing() -> Bool {
+        guard let window = window ?? NSApp.keyWindow else { return false }
+
+        if let textView = window.firstResponder as? NSTextView,
+           let textField = textView.delegate as? NSTextField {
+            copyText(from: textView, in: textField)
+            return true
+        }
+
+        if let textField = window.firstResponder as? NSTextField {
+            if let editor = textField.currentEditor() {
+                copyText(from: editor, in: textField)
+            } else {
+                copyString(textField.stringValue)
+            }
+            return true
+        }
+
+        return false
+    }
+
+    private func copyText(from editor: NSText, in textField: NSTextField) {
+        let full = textField.stringValue as NSString
+        let range = editor.selectedRange
+        let text: String
+        if range.location != NSNotFound,
+           range.length > 0,
+           range.location + range.length <= full.length {
+            text = full.substring(with: range)
+        } else {
+            text = textField.stringValue
+        }
+        copyString(text)
+    }
+
+    private func copyString(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     func presentAddFilesPanel(target folder: PakNode?) {

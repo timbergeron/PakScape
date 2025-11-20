@@ -4,6 +4,7 @@ import AppKit
 private final class PakIconCollectionView: NSCollectionView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
     var contextMenuProvider: ((IndexPath) -> NSMenu?)?
+    var renameHandler: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if let onHandledKeyDown, onHandledKeyDown(event) {
@@ -23,6 +24,10 @@ private final class PakIconCollectionView: NSCollectionView {
             }
         }
         return super.menu(for: event)
+    }
+
+    @objc func renameSelectedItem(_ sender: Any?) {
+        renameHandler?()
     }
 }
 
@@ -102,6 +107,9 @@ struct PakIconView: NSViewRepresentable {
         }
         collectionView.contextMenuProvider = { [weak coordinator = context.coordinator] indexPath in
             coordinator?.contextMenu(for: indexPath)
+        }
+        collectionView.renameHandler = { [weak coordinator = context.coordinator] in
+            coordinator?.renameFromEditCommand()
         }
 
         let doubleClickRecognizer = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleClick(_:)))
@@ -212,8 +220,14 @@ struct PakIconView: NSViewRepresentable {
                 let currentSelection = collectionView.selectionIndexPaths
                 guard currentSelection.contains(indexPath), currentSelection.count == 1 else { return }
 
-                if let item = collectionView.item(at: indexPath) as? PakIconItem {
-                    item.beginRenaming(delegate: self)
+                // Verify mouse is still over the item
+                let mouseLocation = collectionView.window?.mouseLocationOutsideOfEventStream ?? .zero
+                let localPoint = collectionView.convert(mouseLocation, from: nil)
+                if let mouseIndexPath = collectionView.indexPathForItem(at: localPoint),
+                   mouseIndexPath == indexPath {
+                    if let item = collectionView.item(at: indexPath) as? PakIconItem {
+                        item.beginRenaming(delegate: self)
+                    }
                 }
             }
 
@@ -239,6 +253,19 @@ struct PakIconView: NSViewRepresentable {
 
         private func previewImage(for node: PakNode) -> NSImage? {
             parent.viewModel.previewImage(for: node)
+        }
+
+        func renameFromEditCommand() {
+            cancelPendingRename()
+            guard let collectionView = collectionView else { return }
+
+            let selection = collectionView.selectionIndexPaths
+            guard selection.count == 1, let indexPath = selection.first else { return }
+            guard indexPath.item >= 0, indexPath.item < parent.nodes.count else { return }
+
+            let menuItem = NSMenuItem()
+            menuItem.representedObject = indexPath
+            renameItem(menuItem)
         }
 
         func handleKeyDown(_ event: NSEvent) -> Bool {
@@ -416,7 +443,14 @@ struct PakIconView: NSViewRepresentable {
                   let item = collectionView.item(at: indexPath) as? PakIconItem else { return }
 
             collectionView.selectItems(at: [indexPath], scrollPosition: [])
-            item.beginRenaming(delegate: self)
+            
+            // Use a work item to be consistent with other rename paths
+            let workItem = DispatchWorkItem { [weak self] in
+                item.beginRenaming(delegate: self!)
+                self?.renameWorkItem = nil
+            }
+            renameWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
         }
 
         @objc private func deleteSelection(_ sender: NSMenuItem) {

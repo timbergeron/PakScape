@@ -115,6 +115,11 @@ struct PakEditCommands: Commands {
             .keyboardShortcut("A")
             .disabled(!(pakCommands?.canSelectAll ?? false))
 
+            Button("Rename…") {
+                pakCommands?.rename()
+            }
+            .disabled(!(pakCommands?.canRename ?? false))
+
             Divider()
 
             Button(role: .destructive) {

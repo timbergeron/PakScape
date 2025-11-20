@@ -7,6 +7,7 @@ import Foundation
 private final class PakListTableView: NSTableView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
     var contextMenuProvider: ((Int) -> NSMenu?)?
+    var renameHandler: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if let handler = onHandledKeyDown, handler(event) {
@@ -32,6 +33,10 @@ private final class PakListTableView: NSTableView {
         }
 
         return super.menu(for: event)
+    }
+
+    @objc func renameSelectedItem(_ sender: Any?) {
+        renameHandler?()
     }
 }
 
@@ -95,6 +100,9 @@ struct PakListView: NSViewRepresentable {
         tableView.contextMenuProvider = { [weak coordinator = context.coordinator] row in
             coordinator?.contextMenu(forRow: row)
         }
+        tableView.renameHandler = { [weak coordinator = context.coordinator] in
+            coordinator?.renameFromEditCommand()
+        }
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -108,7 +116,7 @@ struct PakListView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let tableView = context.coordinator.tableView else { return }
         let isEditing = tableView.currentEditor() != nil || (tableView.window?.firstResponder is NSTextView)
-        if isEditing {
+        if isEditing || context.coordinator.isRenamePending {
             return
         }
 
@@ -132,6 +140,7 @@ struct PakListView: NSViewRepresentable {
         var parent: PakListView
         weak var tableView: NSTableView?
         private var renameWorkItem: DispatchWorkItem?
+        var isRenamePending: Bool { renameWorkItem != nil }
         var lastSelectionChange = Date.distantPast
         private let nameColumnIdentifier = NSUserInterfaceItemIdentifier("name")
         private let typeSelectionResetInterval: TimeInterval = 1.0
@@ -247,12 +256,16 @@ struct PakListView: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
-            cancelPendingRename()
-            lastSelectionChange = Date()
+            // If we are currently editing, do NOT cancel or change selection logic
+            // that might disrupt the editor.
             guard let tableView = tableView else { return }
             if tableView.editedRow != -1 || tableView.currentEditor() != nil {
                 return
             }
+            
+            cancelPendingRename()
+            lastSelectionChange = Date()
+            
             let indexes = tableView.selectedRowIndexes
             var ids = Set<PakNode.ID>()
             for index in indexes {
@@ -293,6 +306,24 @@ struct PakListView: NSViewRepresentable {
             default:
                 break
             }
+        }
+
+        func renameFromEditCommand() {
+            cancelPendingRename()
+            guard let tableView = tableView else { return }
+
+            let row = tableView.selectedRow
+            guard row >= 0, row < parent.nodes.count else { return }
+
+            let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
+            guard nameColumn != -1 else { return }
+
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.tableView?.editColumn(nameColumn, row: row, with: nil, select: true)
+                self?.renameWorkItem = nil
+            }
+            renameWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
         }
         // MARK: - Type-to-select handling
 
@@ -380,29 +411,42 @@ struct PakListView: NSViewRepresentable {
                 modifiers.contains(.control) {
                 return
             }
-
             let row = sender.clickedRow
             let column = sender.clickedColumn
             let nameColumnIndex = sender.column(withIdentifier: nameColumnIdentifier)
             guard row >= 0,
                   row < parent.nodes.count,
                   nameColumnIndex != -1,
-                  column == nameColumnIndex,
-                  sender.selectedRowIndexes.contains(row),
-                  sender.selectedRowIndexes.count == 1 else { return }
+                  column == nameColumnIndex else { return }
 
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self = self, let tableView = self.tableView else { return }
-                guard row >= 0,
-                      row < self.parent.nodes.count,
-                      tableView.selectedRowIndexes.contains(row) else { return }
-                let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
-                guard nameColumn != -1 else { return }
+            // If the row is ALREADY selected, we might want to rename.
+            // But we must wait to see if it becomes a double-click.
+            let wasSelected = sender.selectedRowIndexes.contains(row)
+            
+            if wasSelected {
+                let workItem = DispatchWorkItem { [weak self] in
+                    guard let self = self, let tableView = self.tableView else { return }
+                    guard row >= 0,
+                          row < self.parent.nodes.count else { return }
+                    
+                    // Verify it's still the only selected item
+                    let selected = tableView.selectedRowIndexes
+                    guard selected.contains(row), selected.count == 1 else { return }
+                    
+                    // Verify mouse is still over the row
+                    let mouseLocation = tableView.window?.mouseLocationOutsideOfEventStream ?? .zero
+                    let localPoint = tableView.convert(mouseLocation, from: nil)
+                    let mouseRow = tableView.row(at: localPoint)
+                    guard mouseRow == row else { return }
+                    
+                    let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
+                    guard nameColumn != -1 else { return }
 
-                tableView.editColumn(nameColumn, row: row, with: nil, select: true)
+                    tableView.editColumn(nameColumn, row: row, with: nil, select: true)
+                }
+                renameWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
             }
-            renameWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
         }
 
         @objc func tableViewDoubleClicked(_ sender: Any?) {
@@ -507,15 +551,32 @@ struct PakListView: NSViewRepresentable {
 
         @objc private func renameFromMenu(_ sender: NSMenuItem) {
             cancelPendingRename()
-            guard let tableView = tableView,
-                  let row = sender.representedObject as? Int,
-                  row >= 0, row < parent.nodes.count else { return }
+            guard let tableView = tableView else { return }
+            
+            let row: Int
+            if let representedRow = sender.representedObject as? Int {
+                row = representedRow
+            } else {
+                row = tableView.selectedRow
+            }
+            
+            guard row >= 0, row < parent.nodes.count else { return }
 
             let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
             guard nameColumn != -1 else { return }
 
-            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            tableView.editColumn(nameColumn, row: row, with: nil, select: true)
+            // Ensure selection is correct if we came from context menu
+            if tableView.selectedRow != row {
+                tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            }
+            
+            // Set pending flag so updateNSView doesn't kill the edit
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.tableView?.editColumn(nameColumn, row: row, with: nil, select: true)
+                self?.renameWorkItem = nil
+            }
+            renameWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
         }
 
         private func open(node: PakNode) {
