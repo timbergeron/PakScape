@@ -20,11 +20,11 @@ fileprivate enum IconZoomLevel: Int {
     var itemSize: NSSize {
         switch self {
         case .small:
-            return NSSize(width: 120, height: 170)
+            return NSSize(width: 120, height: 125)
         case .medium:
-            return NSSize(width: 150, height: 200)
+            return NSSize(width: 150, height: 160)
         case .large:
-            return NSSize(width: 190, height: 240)
+            return NSSize(width: 190, height: 200)
         }
     }
 
@@ -263,6 +263,7 @@ struct PakIconView: NSViewRepresentable {
 final class PakIconItem: NSCollectionViewItem {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("PakIconItem")
 
+    private let iconContainerView = NSView()
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
     private var iconWidthConstraint: NSLayoutConstraint!
@@ -272,31 +273,44 @@ final class PakIconItem: NSCollectionViewItem {
         view = NSView()
         view.wantsLayer = true
 
+        iconContainerView.translatesAutoresizingMaskIntoConstraints = false
+        iconContainerView.wantsLayer = true
+        
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.wantsLayer = true
+        
         nameField.translatesAutoresizingMaskIntoConstraints = false
         nameField.alignment = .center
-        nameField.lineBreakMode = .byWordWrapping
+        nameField.lineBreakMode = .byCharWrapping
         nameField.maximumNumberOfLines = 2
         nameField.cell?.wraps = true
         nameField.cell?.isScrollable = false
         nameField.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        nameField.wantsLayer = true
 
-        view.addSubview(iconView)
+        view.addSubview(iconContainerView)
+        iconContainerView.addSubview(iconView)
         view.addSubview(nameField)
 
-        iconWidthConstraint = iconView.widthAnchor.constraint(equalToConstant: 96)
-        iconHeightConstraint = iconView.heightAnchor.constraint(equalToConstant: 96)
+        iconWidthConstraint = iconContainerView.widthAnchor.constraint(equalToConstant: 96)
+        iconHeightConstraint = iconContainerView.heightAnchor.constraint(equalToConstant: 96)
 
         NSLayoutConstraint.activate([
-            iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
-            iconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            iconContainerView.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
+            iconContainerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             iconWidthConstraint,
             iconHeightConstraint,
 
-            nameField.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
-            nameField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
-            nameField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            // Inset iconView within the container to create padding for the selection background
+            iconView.topAnchor.constraint(equalTo: iconContainerView.topAnchor, constant: 6),
+            iconView.leadingAnchor.constraint(equalTo: iconContainerView.leadingAnchor, constant: 6),
+            iconView.trailingAnchor.constraint(equalTo: iconContainerView.trailingAnchor, constant: -6),
+            iconView.bottomAnchor.constraint(equalTo: iconContainerView.bottomAnchor, constant: -6),
+
+            nameField.topAnchor.constraint(equalTo: iconContainerView.bottomAnchor, constant: 4),
+            nameField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            nameField.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -8),
             nameField.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -4)
         ])
     }
@@ -320,16 +334,40 @@ final class PakIconItem: NSCollectionViewItem {
         }
         nameField.stringValue = node.name
         nameField.toolTip = node.name
+        
+        updateSelectionState()
     }
 
     override var isSelected: Bool {
         didSet {
-            if isSelected {
-                view.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
-                view.layer?.cornerRadius = 8
-            } else {
-                view.layer?.backgroundColor = NSColor.clear.cgColor
-            }
+            updateSelectionState()
+        }
+    }
+    
+    private func updateSelectionState() {
+        if isSelected {
+            // Icon background (applied to container)
+            iconContainerView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
+            iconContainerView.layer?.cornerRadius = 8
+            
+            // Text background
+            nameField.drawsBackground = true
+            nameField.backgroundColor = NSColor.selectedContentBackgroundColor
+            nameField.textColor = NSColor.selectedControlTextColor
+            nameField.layer?.cornerRadius = 6
+            nameField.layer?.masksToBounds = true
+            
+            // Clear main view background
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+        } else {
+            iconContainerView.layer?.backgroundColor = NSColor.clear.cgColor
+            
+            nameField.drawsBackground = false
+            nameField.backgroundColor = .clear
+            nameField.textColor = NSColor.labelColor
+            nameField.layer?.cornerRadius = 0
+            
+            view.layer?.backgroundColor = NSColor.clear.cgColor
         }
     }
 }
