@@ -15,7 +15,7 @@ final class PakViewModel: ObservableObject {
     @Published private(set) var hasUnsavedChanges = false
     @Published private var backStack: [PakNode] = []
     @Published private var forwardStack: [PakNode] = []
-    private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
+    private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif", "tga"]
     var documentURL: URL?
     private var isNavigatingHistory = false
 
@@ -149,6 +149,9 @@ final class PakViewModel: ObservableObject {
         let ext = (node.name as NSString).pathExtension.lowercased()
         if ext == "lmp" {
             return LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
+        }
+        if ext == "tga" {
+            return TgaPreviewRenderer.renderImage(data: data)
         }
 
         guard Self.previewableImageExtensions.contains(ext) else { return nil }
@@ -383,6 +386,219 @@ final class PakViewModel: ObservableObject {
 
         backStack.append(previous)
         forwardStack.removeAll()
+    }
+}
+
+private enum TgaPreviewRenderer {
+    static func renderImage(data: Data) -> NSImage? {
+        guard data.count >= 18 else { return nil }
+
+        let idLength = Int(data[0])
+        let colorMapType = data[1]
+        let imageType = data[2]
+        guard colorMapType == 0 else { return nil }
+
+        let colorMapLength = readUInt16LE(data, offset: 5) ?? 0
+        let colorMapEntrySize = Int(data[7])
+        let colorMapBytesResult = colorMapLength.multipliedReportingOverflow(by: (colorMapEntrySize + 7) / 8)
+        guard !colorMapBytesResult.overflow else { return nil }
+        let baseOffset = 18 + idLength
+        let pixelDataOffsetResult = baseOffset.addingReportingOverflow(colorMapBytesResult.partialValue)
+        guard !pixelDataOffsetResult.overflow else { return nil }
+        let pixelDataOffset = pixelDataOffsetResult.partialValue
+        guard pixelDataOffset <= data.count else { return nil }
+
+        guard let width = readUInt16LE(data, offset: 12),
+              let height = readUInt16LE(data, offset: 14),
+              width > 0, height > 0 else { return nil }
+
+        let pixelDepth = data[16]
+        let descriptor = data[17]
+        let originTop = (descriptor & 0x20) != 0
+        let originLeft = (descriptor & 0x10) == 0
+
+        let supportedType = imageType == 2 || imageType == 3 || imageType == 10 || imageType == 11
+        guard supportedType else { return nil }
+        let isGrayscale = imageType == 3 || imageType == 11
+        let isRle = imageType == 10 || imageType == 11
+
+        let bytesPerPixel: Int
+        switch (isGrayscale, pixelDepth) {
+        case (true, 8):
+            bytesPerPixel = 1
+        case (true, 16):
+            bytesPerPixel = 2
+        case (false, 24):
+            bytesPerPixel = 3
+        case (false, 32):
+            bytesPerPixel = 4
+        case (false, 16):
+            bytesPerPixel = 2
+        default:
+            return nil
+        }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            data.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                func pixel(from offset: Int) -> (UInt8, UInt8, UInt8, UInt8)? {
+                    guard offset >= 0, offset + bytesPerPixel <= data.count else { return nil }
+                    let base = src + offset
+
+                    if isGrayscale {
+                        let value = base[0]
+                        let alpha: UInt8 = bytesPerPixel == 2 ? base[1] : 255
+                        return (value, value, value, alpha)
+                    }
+
+                    switch bytesPerPixel {
+                    case 2:
+                        let raw = UInt16(base[0]) | (UInt16(base[1]) << 8)
+                        let b5 = raw & 0x1F
+                        let g5 = (raw >> 5) & 0x1F
+                        let r5 = (raw >> 10) & 0x1F
+                        let alphaBit = (descriptor & 0x0F) > 0 ? ((raw & 0x8000) != 0) : true
+                        let r = UInt8((r5 << 3) | (r5 >> 2))
+                        let g = UInt8((g5 << 3) | (g5 >> 2))
+                        let b = UInt8((b5 << 3) | (b5 >> 2))
+                        let a: UInt8 = alphaBit ? 255 : 0
+                        return (r, g, b, a)
+                    case 3:
+                        return (base[2], base[1], base[0], 255)
+                    case 4:
+                        return (base[2], base[1], base[0], base[3])
+                    default:
+                        return nil
+                    }
+                }
+
+                func write(_ pixel: (UInt8, UInt8, UInt8, UInt8), at index: Int) -> Bool {
+                    guard index >= 0, index < pixelCount else { return false }
+                    let x = index % width
+                    let y = index / width
+                    let targetX = originLeft ? x : (width - 1 - x)
+                    let targetY = originTop ? y : (height - 1 - y)
+                    let destIndex = (targetY * width + targetX) * 4
+                    dest[destIndex] = pixel.0
+                    dest[destIndex + 1] = pixel.1
+                    dest[destIndex + 2] = pixel.2
+                    dest[destIndex + 3] = pixel.3
+                    return true
+                }
+
+                var sourceIndex = pixelDataOffset
+                var pixelIndex = 0
+
+                func decodeRawPixels(count: Int) -> Bool {
+                    for _ in 0..<count {
+                        guard let rgbaPixel = pixel(from: sourceIndex) else { return false }
+                        guard write(rgbaPixel, at: pixelIndex) else { return false }
+                        pixelIndex += 1
+                        sourceIndex += bytesPerPixel
+                    }
+                    return true
+                }
+
+                if isRle {
+                    while pixelIndex < pixelCount {
+                        guard sourceIndex < data.count else {
+                            conversionSucceeded = false
+                            break
+                        }
+                        let packetHeader = src[sourceIndex]
+                        sourceIndex += 1
+                        let packetCount = Int(packetHeader & 0x7F) + 1
+
+                        if (packetHeader & 0x80) != 0 {
+                            guard let rgbaPixel = pixel(from: sourceIndex) else {
+                                conversionSucceeded = false
+                                break
+                            }
+                            sourceIndex += bytesPerPixel
+                            for _ in 0..<packetCount {
+                                if pixelIndex >= pixelCount { break }
+                                guard write(rgbaPixel, at: pixelIndex) else {
+                                    conversionSucceeded = false
+                                    break
+                                }
+                                pixelIndex += 1
+                            }
+                            if !conversionSucceeded { break }
+                        } else {
+                            if !decodeRawPixels(count: packetCount) {
+                                conversionSucceeded = false
+                                break
+                            }
+                        }
+                    }
+                } else {
+                    let expectedBytesResult = pixelCount.multipliedReportingOverflow(by: bytesPerPixel)
+                    guard !expectedBytesResult.overflow else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    let expectedBytes = expectedBytesResult.partialValue
+                    let neededBytes = pixelDataOffset.addingReportingOverflow(expectedBytes)
+                    guard !neededBytes.overflow, neededBytes.partialValue <= data.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    conversionSucceeded = decodeRawPixels(count: pixelCount)
+                }
+
+                if conversionSucceeded && pixelIndex != pixelCount {
+                    conversionSucceeded = false
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private static func readUInt16LE(_ data: Data, offset: Int) -> Int? {
+        guard offset + 2 <= data.count else { return nil }
+        let low = UInt16(data[offset])
+        let high = UInt16(data[offset + 1]) << 8
+        return Int(low | high)
     }
 }
 
