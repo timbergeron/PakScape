@@ -48,6 +48,33 @@ struct ContentView: View {
         .onChange(of: model.hasUnsavedChanges) { _, newValue in
             window?.isDocumentEdited = newValue
         }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 8) {
+                    Button {
+                        model.navigateBack()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title2)
+                    }
+                    .help("Back")
+                    .disabled(!model.canNavigateBack)
+
+                    Button {
+                        model.navigateForward()
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.title2)
+                    }
+                    .help("Forward")
+                    .disabled(!model.canNavigateForward)
+                }
+                .padding(.leading, 10)
+                .padding(.trailing, 10)
+                .controlSize(.regular)
+                .buttonStyle(.borderless)
+            }
+        }
         .background(
             WindowAccessor { newWindow in
                 guard let newWindow else { return }
@@ -302,7 +329,7 @@ struct ContentView: View {
         }
         if node.isFolder {
             Button("Open Folder") {
-                model.currentFolder = node
+                model.navigate(to: node)
             }
         }
         if !node.isFolder {
@@ -332,7 +359,7 @@ struct ContentView: View {
             sortOrder: $sortOrder,
             viewModel: model,
             onOpenFolder: { folder in
-                model.currentFolder = folder
+                model.navigate(to: folder)
             }
         )
     }
@@ -345,7 +372,7 @@ struct ContentView: View {
             zoomLevel: iconZoomLevel,
             viewModel: model,
             onOpenFolder: { folder in
-                model.currentFolder = folder
+                model.navigate(to: folder)
             }
         )
     }
@@ -495,7 +522,7 @@ private extension ContentView {
         select(newNode)
         beginRenaming(newNode)
         if let folder = parent {
-            model.currentFolder = folder
+            model.navigate(to: folder)
         }
     }
 

@@ -5,21 +5,36 @@ import UniformTypeIdentifiers
 
 final class PakViewModel: ObservableObject {
     @Published var pakFile: PakFile?
-    @Published var currentFolder: PakNode? // Directory shown in right pane
+    @Published var currentFolder: PakNode? { // Directory shown in right pane
+        didSet {
+            handleNavigationChange(from: oldValue, to: currentFolder)
+        }
+    }
     @Published var selectedFile: PakNode?  // File selected in right pane (first of selection for backward compatibility)
     @Published var selectedNodes: [PakNode] = [] // Multi-selection support
     @Published private(set) var hasUnsavedChanges = false
+    @Published private var backStack: [PakNode] = []
+    @Published private var forwardStack: [PakNode] = []
     private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
     var documentURL: URL?
+    private var isNavigatingHistory = false
 
     var canSave: Bool {
         pakFile != nil && hasUnsavedChanges
     }
 
+    var canNavigateBack: Bool {
+        !backStack.isEmpty
+    }
+
+    var canNavigateForward: Bool {
+        !forwardStack.isEmpty
+    }
+
     init(pakFile: PakFile?, documentURL: URL? = nil) {
         self.pakFile = pakFile
-        self.currentFolder = pakFile?.root
         self.documentURL = documentURL
+        resetNavigation(to: pakFile?.root)
     }
 
     func updateDocumentURL(_ url: URL?) {
@@ -320,6 +335,54 @@ final class PakViewModel: ObservableObject {
             }
             return $0.name.lowercased() < $1.name.lowercased()
         }
+    }
+
+    func navigate(to folder: PakNode?) {
+        guard currentFolder !== folder else { return }
+        currentFolder = folder
+    }
+
+    func navigateBack() {
+        guard let previous = backStack.popLast() else { return }
+        if let current = currentFolder {
+            forwardStack.append(current)
+        }
+        isNavigatingHistory = true
+        currentFolder = previous
+        isNavigatingHistory = false
+    }
+
+    func navigateForward() {
+        guard let next = forwardStack.popLast() else { return }
+        if let current = currentFolder {
+            backStack.append(current)
+        }
+        isNavigatingHistory = true
+        currentFolder = next
+        isNavigatingHistory = false
+    }
+
+    func resetNavigation(to folder: PakNode?) {
+        isNavigatingHistory = true
+        backStack.removeAll()
+        forwardStack.removeAll()
+        currentFolder = folder
+        isNavigatingHistory = false
+    }
+
+    private func handleNavigationChange(from oldValue: PakNode?, to newValue: PakNode?) {
+        if newValue == nil {
+            backStack.removeAll()
+            forwardStack.removeAll()
+            return
+        }
+        guard !isNavigatingHistory else { return }
+        guard let previous = oldValue,
+              let destination = newValue,
+              previous != destination else { return }
+
+        backStack.append(previous)
+        forwardStack.removeAll()
     }
 }
 
