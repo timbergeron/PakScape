@@ -464,6 +464,9 @@ final class PakViewModel: ObservableObject {
         if ext == "tga" {
             return TgaPreviewRenderer.renderImage(data: data)
         }
+        if ext == "mdl" {
+            return MdlPreviewRenderer.renderImage(data: data)
+        }
 
         guard Self.previewableImageExtensions.contains(ext) else { return nil }
         return NSImage(data: data)
@@ -697,6 +700,142 @@ final class PakViewModel: ObservableObject {
 
         backStack.append(previous)
         forwardStack.removeAll()
+    }
+}
+
+private enum MdlPreviewRenderer {
+    private static let headerSize = 84
+
+    static func renderImage(data: Data) -> NSImage? {
+        guard data.count >= headerSize else { return nil }
+
+        let reportedSkins = readInt32LE(data, offset: 48) ?? 0
+        guard reportedSkins > 0,
+              let skinWidth = readInt32LE(data, offset: 52), skinWidth > 0,
+              let skinHeight = readInt32LE(data, offset: 56), skinHeight > 0 else {
+            return nil
+        }
+
+        let width = skinWidth
+        let height = skinHeight
+
+        guard let skinData = firstSkinBytes(in: data, width: width, height: height) else {
+            return nil
+        }
+
+        return image(from: skinData, width: width, height: height)
+    }
+
+    private static func firstSkinBytes(in data: Data, width: Int, height: Int) -> Data? {
+        let skinSizeResult = width.multipliedReportingOverflow(by: height)
+        guard !skinSizeResult.overflow else { return nil }
+        let skinByteCount = skinSizeResult.partialValue
+        guard skinByteCount > 0 else { return nil }
+
+        var cursor = headerSize
+        guard cursor + 4 <= data.count else { return nil }
+
+        var groupIndicator = readInt32LE(data, offset: cursor) ?? 0
+        cursor += 4
+
+        // Some legacy or malformed files might omit/garble the group flag.
+        if groupIndicator != 0 && groupIndicator != 1 {
+            cursor -= 4
+            groupIndicator = 0
+        }
+
+        if groupIndicator == 0 {
+            guard cursor + skinByteCount <= data.count else { return nil }
+            return data.subdata(in: cursor ..< cursor + skinByteCount)
+        }
+
+        guard cursor + 4 <= data.count else { return nil }
+        let groupCount = readInt32LE(data, offset: cursor) ?? 0
+        cursor += 4
+        guard groupCount > 0 else { return nil }
+
+        let timeBytesResult = groupCount.multipliedReportingOverflow(by: MemoryLayout<Float32>.size)
+        guard !timeBytesResult.overflow else { return nil }
+        let timeBytes = timeBytesResult.partialValue
+        guard cursor + timeBytes <= data.count else { return nil }
+        cursor += timeBytes
+
+        guard cursor + skinByteCount <= data.count else { return nil }
+        return data.subdata(in: cursor ..< cursor + skinByteCount)
+    }
+
+    private static func image(from skin: Data, width: Int, height: Int) -> NSImage? {
+        let palette = QuakePalette.bytes
+        guard palette.count >= 768 else { return nil }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard skin.count >= pixelCount else { return nil }
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            skin.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                for i in 0..<pixelCount {
+                    let paletteIndex = Int(src[i])
+                    let paletteOffset = paletteIndex * 3
+                    guard paletteOffset + 2 < palette.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    let destIndex = i * 4
+                    dest[destIndex] = palette[paletteOffset]
+                    dest[destIndex + 1] = palette[paletteOffset + 1]
+                    dest[destIndex + 2] = palette[paletteOffset + 2]
+                    dest[destIndex + 3] = 255
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    @inline(__always)
+    private static func readInt32LE(_ data: Data, offset: Int) -> Int? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        return data.subdata(in: offset ..< offset + 4).withUnsafeBytes {
+            Int(Int32(littleEndian: $0.load(as: Int32.self)))
+        }
     }
 }
 
