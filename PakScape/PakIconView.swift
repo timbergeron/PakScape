@@ -114,6 +114,8 @@ struct PakIconView: NSViewRepresentable {
 
         let doubleClickRecognizer = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleClick(_:)))
         doubleClickRecognizer.numberOfClicksRequired = 2
+        // Avoid delaying single-click selection while AppKit waits to see if this becomes a double-click.
+        doubleClickRecognizer.delaysPrimaryMouseButtonEvents = false
         collectionView.addGestureRecognizer(doubleClickRecognizer)
 
         let scrollView = NSScrollView()
