@@ -334,6 +334,12 @@ struct PakIconView: NSViewRepresentable {
             guard modifiers.isEmpty else { return false }
             guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else { return false }
 
+            // Finder uses Space for Quick Look.
+            if characters == " " {
+                quickLookSelection()
+                return true
+            }
+
             let scalars = characters.unicodeScalars.filter { scalar in
                 // Ignore control characters and space (space is reserved for Quick Look-like actions).
                 guard scalar.isASCII, scalar.value >= 0x21 else { return false }
@@ -356,6 +362,33 @@ struct PakIconView: NSViewRepresentable {
             collectionView.scrollToItems(at: set, scrollPosition: .centeredVertically)
             updateSelection(from: collectionView)
             return true
+        }
+
+        private func quickLookSelection() {
+            guard let collectionView else { return }
+            let selection = collectionView.selectionIndexPaths.sorted { $0.item < $1.item }
+            guard !selection.isEmpty else { return }
+
+            let selectedNodes: [PakNode] = selection.compactMap { indexPath in
+                let index = indexPath.item
+                guard index >= 0, index < parent.nodes.count else { return nil }
+                return parent.nodes[index]
+            }
+            guard !selectedNodes.isEmpty else { return }
+
+            var urls: [URL] = []
+            urls.reserveCapacity(selectedNodes.count)
+            for node in selectedNodes {
+                do {
+                    let url = try parent.viewModel.exportToTemporaryLocation(node: node)
+                    urls.append(url)
+                } catch {
+                    continue
+                }
+            }
+            guard !urls.isEmpty else { return }
+
+            PakQuickLook.shared.toggle(urls: urls)
         }
 
         private func updateTypeSelectionBuffer(with input: String) {
@@ -389,7 +422,7 @@ struct PakIconView: NSViewRepresentable {
 
         private func search(prefix: String, range: Range<Int>) -> Int? {
             for index in range {
-                if parent.nodes[index].name.lowercased().contains(prefix) {
+                if parent.nodes[index].name.lowercased().hasPrefix(prefix) {
                     return index
                 }
             }
@@ -538,11 +571,22 @@ struct PakIconView: NSViewRepresentable {
                 return
             }
 
-            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !newName.isEmpty else { return }
-
             let index = textField.tag
             guard index >= 0, index < parent.nodes.count else { return }
+
+            if let movement = obj.userInfo?[NSText.movementUserInfoKey] as? Int,
+               movement == NSCancelTextMovement {
+                let node = parent.nodes[index]
+                textField.stringValue = node.name
+                let indexPath = IndexPath(item: index, section: 0)
+                if let item = collectionView.item(at: indexPath) as? PakIconItem {
+                    item.endRenaming()
+                }
+                return
+            }
+
+            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newName.isEmpty else { return }
 
             let node = parent.nodes[index]
             guard newName != node.name else { return }
@@ -646,6 +690,24 @@ final class PakIconItem: NSCollectionViewItem {
         nameField.delegate = delegate
         view.window?.makeFirstResponder(nameField)
         nameField.selectText(nil)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let editor = self.nameField.currentEditor() as? NSTextView else { return }
+            editor.selectedRange = self.filenameBaseRange(for: self.nameField.stringValue)
+        }
+    }
+
+    private func filenameBaseRange(for name: String) -> NSRange {
+        let ns = name as NSString
+        let length = ns.length
+        guard length > 0 else { return NSRange(location: 0, length: 0) }
+
+        let lastDot = ns.range(of: ".", options: .backwards)
+        if lastDot.location != NSNotFound, lastDot.location > 0, lastDot.location < length - 1 {
+            return NSRange(location: 0, length: lastDot.location)
+        }
+        return NSRange(location: 0, length: length)
     }
 
     func endRenaming() {

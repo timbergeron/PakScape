@@ -295,8 +295,39 @@ struct PakListView: NSViewRepresentable {
             parent.viewModel.rename(node: node, to: newName)
         }
 
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            // For NSTableView inline editing, the notification's object is typically the shared field editor.
+            guard let editor = obj.object as? NSTextView else { return }
+            let range = filenameBaseRange(for: editor.string)
+
+            // Apply after AppKit's initial selection, and re-apply once to win any late selection changes.
+            DispatchQueue.main.async { [weak editor] in
+                editor?.selectedRange = range
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak editor] in
+                editor?.selectedRange = range
+            }
+        }
+
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let tableView = tableView else { return }
+
+            if let movement = obj.userInfo?[NSText.movementUserInfoKey] as? Int,
+               movement == NSCancelTextMovement {
+                if let textField = obj.object as? NSTextField {
+                    let row = tableView.row(for: textField)
+                    if row >= 0, row < parent.nodes.count {
+                        textField.stringValue = parent.nodes[row].name
+                    }
+                } else if let textView = obj.object as? NSTextView,
+                          let textField = textView.delegate as? NSTextField {
+                    let row = tableView.row(for: textField)
+                    if row >= 0, row < parent.nodes.count {
+                        textField.stringValue = parent.nodes[row].name
+                    }
+                }
+                return
+            }
 
             if let textField = obj.object as? NSTextField {
                 let row = tableView.row(for: textField)
@@ -306,6 +337,34 @@ struct PakListView: NSViewRepresentable {
                 let row = tableView.row(for: textField)
                 commitRename(row: row, newNameRaw: textView.string)
             }
+        }
+
+        private func filenameBaseRange(for name: String) -> NSRange {
+            let ns = name as NSString
+            let length = ns.length
+            guard length > 0 else { return NSRange(location: 0, length: 0) }
+
+            let lastDot = ns.range(of: ".", options: .backwards)
+            if lastDot.location != NSNotFound, lastDot.location > 0, lastDot.location < length - 1 {
+                return NSRange(location: 0, length: lastDot.location)
+            }
+            return NSRange(location: 0, length: length)
+        }
+
+        private func selectFilenameBase(row: Int) {
+            guard let tableView else { return }
+            guard row >= 0, row < parent.nodes.count else { return }
+            guard let editor = tableView.currentEditor() as? NSTextView else { return }
+            editor.selectedRange = filenameBaseRange(for: parent.nodes[row].name)
+        }
+
+        private func beginRenaming(row: Int) {
+            guard let tableView else { return }
+            let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
+            guard nameColumn != -1 else { return }
+
+            // Avoid AppKit "select all"; we'll set Finder-style selection in controlTextDidBeginEditing.
+            tableView.editColumn(nameColumn, row: row, with: nil, select: false)
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -368,11 +427,8 @@ struct PakListView: NSViewRepresentable {
             let row = tableView.selectedRow
             guard row >= 0, row < parent.nodes.count else { return }
 
-            let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
-            guard nameColumn != -1 else { return }
-
             let workItem = DispatchWorkItem { [weak self] in
-                self?.tableView?.editColumn(nameColumn, row: row, with: nil, select: true)
+                self?.beginRenaming(row: row)
                 self?.renameWorkItem = nil
             }
             renameWorkItem = workItem
@@ -389,6 +445,13 @@ struct PakListView: NSViewRepresentable {
 
             guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else {
                 return false
+            }
+
+            // Finder uses Space for Quick Look.
+            if characters == " " {
+                cancelPendingRename()
+                quickLookSelection()
+                return true
             }
 
             // Filter to printable ASCII characters; ignore control keys like arrows, etc.
@@ -412,6 +475,32 @@ struct PakListView: NSViewRepresentable {
             tableView.selectRowIndexes(IndexSet(integer: match), byExtendingSelection: false)
             tableView.scrollRowToVisible(match)
             return true
+        }
+
+        private func quickLookSelection() {
+            guard let tableView else { return }
+            let rows = tableView.selectedRowIndexes
+            guard !rows.isEmpty else { return }
+
+            let selectedNodes: [PakNode] = rows.compactMap { row in
+                guard row >= 0, row < parent.nodes.count else { return nil }
+                return parent.nodes[row]
+            }
+            guard !selectedNodes.isEmpty else { return }
+
+            var urls: [URL] = []
+            urls.reserveCapacity(selectedNodes.count)
+            for node in selectedNodes {
+                do {
+                    let url = try parent.viewModel.exportToTemporaryLocation(node: node)
+                    urls.append(url)
+                } catch {
+                    continue
+                }
+            }
+            guard !urls.isEmpty else { return }
+
+            PakQuickLook.shared.toggle(urls: urls)
         }
 
         private func updateTypeSelectionBuffer(with input: String) {
@@ -490,11 +579,11 @@ struct PakListView: NSViewRepresentable {
                 let selected = tableView.selectedRowIndexes
                 guard selected.contains(row), selected.count == 1 else { return }
 
-                let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
-                guard nameColumn != -1 else { return }
+                    let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
+                    guard nameColumn != -1 else { return }
 
-                tableView.editColumn(nameColumn, row: row, with: nil, select: true)
-            }
+                    self.beginRenaming(row: row)
+                }
             renameWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: workItem)
         }
@@ -612,9 +701,6 @@ struct PakListView: NSViewRepresentable {
             
             guard row >= 0, row < parent.nodes.count else { return }
 
-            let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
-            guard nameColumn != -1 else { return }
-
             // Ensure selection is correct if we came from context menu
             if tableView.selectedRow != row {
                 tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -622,7 +708,7 @@ struct PakListView: NSViewRepresentable {
             
             // Set pending flag so updateNSView doesn't kill the edit
             let workItem = DispatchWorkItem { [weak self] in
-                self?.tableView?.editColumn(nameColumn, row: row, with: nil, select: true)
+                self?.beginRenaming(row: row)
                 self?.renameWorkItem = nil
             }
             renameWorkItem = workItem
