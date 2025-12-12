@@ -5,12 +5,81 @@ private final class PakIconCollectionView: NSCollectionView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
     var contextMenuProvider: ((IndexPath) -> NSMenu?)?
     var renameHandler: (() -> Void)?
+    var onRenameClick: ((IndexPath) -> Void)?
+
+    private var lastMouseDownIndexPath: IndexPath?
+    private var lastMouseDownWasOnAlreadySelectedItem = false
+    private var lastMouseDownWasOnNameText = false
 
     override func keyDown(with event: NSEvent) {
         if let onHandledKeyDown, onHandledKeyDown(event) {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let indexPath = indexPathForItem(at: point)
+
+        lastMouseDownIndexPath = indexPath
+        lastMouseDownWasOnAlreadySelectedItem = false
+        lastMouseDownWasOnNameText = false
+
+        if let indexPath {
+            lastMouseDownWasOnAlreadySelectedItem = selectionIndexPaths.contains(indexPath)
+            if let item = item(at: indexPath) as? PakIconItem {
+                let pointInItem = item.view.convert(point, from: self)
+                let pointInNameField = item.nameField.convert(pointInItem, from: item.view)
+                lastMouseDownWasOnNameText = isPointInRenderedText(pointInNameField, textField: item.nameField)
+            }
+        }
+
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+
+        guard event.type == .leftMouseUp, event.clickCount == 1 else { return }
+        guard lastMouseDownWasOnAlreadySelectedItem,
+              lastMouseDownWasOnNameText,
+              let indexPath = lastMouseDownIndexPath else { return }
+
+        onRenameClick?(indexPath)
+    }
+
+    private func isPointInRenderedText(_ point: NSPoint, textField: NSTextField) -> Bool {
+        guard textField.bounds.contains(point) else { return false }
+
+        let drawingRect: NSRect
+        if let cell = textField.cell {
+            drawingRect = cell.drawingRect(forBounds: textField.bounds)
+        } else {
+            drawingRect = textField.bounds
+        }
+
+        let attributedString = textField.attributedStringValue
+        guard attributedString.length > 0 else { return false }
+
+        let textStorage = NSTextStorage(attributedString: attributedString)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(size: drawingRect.size)
+        textContainer.lineFragmentPadding = 0
+
+        layoutManager.addTextContainer(textContainer)
+        textStorage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let renderedRect = NSRect(
+            x: drawingRect.minX + usedRect.minX,
+            y: drawingRect.minY + usedRect.minY,
+            width: usedRect.width,
+            height: usedRect.height
+        )
+
+        return renderedRect.contains(point)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -111,6 +180,9 @@ struct PakIconView: NSViewRepresentable {
         collectionView.renameHandler = { [weak coordinator = context.coordinator] in
             coordinator?.renameFromEditCommand()
         }
+        collectionView.onRenameClick = { [weak coordinator = context.coordinator] indexPath in
+            coordinator?.renameFromSecondClick(at: indexPath)
+        }
 
         let doubleClickRecognizer = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleClick(_:)))
         doubleClickRecognizer.numberOfClicksRequired = 2
@@ -195,46 +267,6 @@ struct PakIconView: NSViewRepresentable {
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
             cancelPendingRename()
             updateSelection(from: collectionView)
-
-            guard indexPaths.count == 1,
-                  let indexPath = indexPaths.first else { return }
-
-            let event = NSApp.currentEvent
-            let modifiers = event?.modifierFlags ?? []
-            if modifiers.contains(.command) ||
-                modifiers.contains(.shift) ||
-                modifiers.contains(.option) ||
-                modifiers.contains(.control) {
-                return
-            }
-            if let type = event?.type,
-               type != .leftMouseUp && type != .leftMouseDown {
-                return
-            }
-
-            let selection = collectionView.selectionIndexPaths
-            guard selection.contains(indexPath), selection.count == 1 else { return }
-
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self = self,
-                      let collectionView = self.collectionView else { return }
-
-                let currentSelection = collectionView.selectionIndexPaths
-                guard currentSelection.contains(indexPath), currentSelection.count == 1 else { return }
-
-                // Verify mouse is still over the item
-                let mouseLocation = collectionView.window?.mouseLocationOutsideOfEventStream ?? .zero
-                let localPoint = collectionView.convert(mouseLocation, from: nil)
-                if let mouseIndexPath = collectionView.indexPathForItem(at: localPoint),
-                   mouseIndexPath == indexPath {
-                    if let item = collectionView.item(at: indexPath) as? PakIconItem {
-                        item.beginRenaming(delegate: self)
-                    }
-                }
-            }
-
-            renameWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
         }
 
         func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
@@ -255,6 +287,32 @@ struct PakIconView: NSViewRepresentable {
 
         private func previewImage(for node: PakNode) -> NSImage? {
             parent.viewModel.previewImage(for: node)
+        }
+
+        func renameFromSecondClick(at indexPath: IndexPath) {
+            cancelPendingRename()
+            guard let collectionView = collectionView else { return }
+
+            guard indexPath.item >= 0, indexPath.item < parent.nodes.count else { return }
+
+            let selection = collectionView.selectionIndexPaths
+            guard selection.count == 1, selection.contains(indexPath) else { return }
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self,
+                      let collectionView = self.collectionView else { return }
+
+                let currentSelection = collectionView.selectionIndexPaths
+                guard currentSelection.count == 1, currentSelection.contains(indexPath) else { return }
+
+                if let item = collectionView.item(at: indexPath) as? PakIconItem {
+                    item.beginRenaming(delegate: self)
+                }
+                self.renameWorkItem = nil
+            }
+
+            renameWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: workItem)
         }
 
         func renameFromEditCommand() {

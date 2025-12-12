@@ -2,12 +2,65 @@ import SwiftUI
 import AppKit
 import Foundation
 
+private let pakListNameColumnIdentifier = NSUserInterfaceItemIdentifier("name")
+
 // Custom table view so we can intercept key events and implement our own
 // Finder-style type-to-select behavior without triggering system beeps.
 private final class PakListTableView: NSTableView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
     var contextMenuProvider: ((Int) -> NSMenu?)?
     var renameHandler: (() -> Void)?
+
+    var lastMouseDownRow: Int = -1
+    var lastMouseDownWasOnAlreadySelectedRow: Bool = false
+    var lastMouseDownWasOnNameText: Bool = false
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        let column = self.column(at: point)
+
+        lastMouseDownRow = row
+        lastMouseDownWasOnAlreadySelectedRow = row >= 0 && selectedRowIndexes.contains(row)
+        lastMouseDownWasOnNameText = false
+
+        if row >= 0,
+           column >= 0,
+           column < tableColumns.count,
+           tableColumns[column].identifier == pakListNameColumnIdentifier,
+           let cell = view(atColumn: column, row: row, makeIfNecessary: false) as? NSTableCellView,
+           let textField = cell.textField {
+            let pointInCell = cell.convert(point, from: self)
+            let pointInTextField = textField.convert(pointInCell, from: cell)
+            lastMouseDownWasOnNameText = isPointInRenderedText(pointInTextField, textField: textField)
+        }
+
+        super.mouseDown(with: event)
+    }
+
+    private func isPointInRenderedText(_ point: NSPoint, textField: NSTextField) -> Bool {
+        guard textField.bounds.contains(point) else { return false }
+
+        let drawingRect: NSRect
+        if let cell = textField.cell {
+            drawingRect = cell.drawingRect(forBounds: textField.bounds)
+        } else {
+            drawingRect = textField.bounds
+        }
+
+        let font = textField.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let measuredWidth = (textField.stringValue as NSString).size(withAttributes: attributes).width
+        let displayedWidth = max(1, min(measuredWidth, drawingRect.width))
+
+        let renderedTextRect = NSRect(
+            x: drawingRect.minX,
+            y: drawingRect.minY,
+            width: displayedWidth,
+            height: drawingRect.height
+        )
+        return renderedTextRect.contains(point)
+    }
 
     override func keyDown(with event: NSEvent) {
         if let handler = onHandledKeyDown, handler(event) {
@@ -142,7 +195,7 @@ struct PakListView: NSViewRepresentable {
         private var renameWorkItem: DispatchWorkItem?
         var isRenamePending: Bool { renameWorkItem != nil }
         var lastSelectionChange = Date.distantPast
-        private let nameColumnIdentifier = NSUserInterfaceItemIdentifier("name")
+        private let nameColumnIdentifier = pakListNameColumnIdentifier
         private let typeSelectionResetInterval: TimeInterval = 1.0
         private var typeSelectionBuffer = ""
         private var lastTypeSelectionDate = Date.distantPast
@@ -411,6 +464,9 @@ struct PakListView: NSViewRepresentable {
                 modifiers.contains(.control) {
                 return
             }
+            guard (event?.clickCount ?? 1) == 1 else { return }
+            guard let pakTableView = sender as? PakListTableView else { return }
+
             let row = sender.clickedRow
             let column = sender.clickedColumn
             let nameColumnIndex = sender.column(withIdentifier: nameColumnIdentifier)
@@ -419,34 +475,28 @@ struct PakListView: NSViewRepresentable {
                   nameColumnIndex != -1,
                   column == nameColumnIndex else { return }
 
-            // If the row is ALREADY selected, we might want to rename.
-            // But we must wait to see if it becomes a double-click.
-            let wasSelected = sender.selectedRowIndexes.contains(row)
+            // Finder-like behavior: only begin renaming if the row was already selected
+            // before the click, and the click was directly on the rendered filename text.
+            guard pakTableView.lastMouseDownRow == row,
+                  pakTableView.lastMouseDownWasOnAlreadySelectedRow,
+                  pakTableView.lastMouseDownWasOnNameText else { return }
             
-            if wasSelected {
-                let workItem = DispatchWorkItem { [weak self] in
-                    guard let self = self, let tableView = self.tableView else { return }
-                    guard row >= 0,
-                          row < self.parent.nodes.count else { return }
-                    
-                    // Verify it's still the only selected item
-                    let selected = tableView.selectedRowIndexes
-                    guard selected.contains(row), selected.count == 1 else { return }
-                    
-                    // Verify mouse is still over the row
-                    let mouseLocation = tableView.window?.mouseLocationOutsideOfEventStream ?? .zero
-                    let localPoint = tableView.convert(mouseLocation, from: nil)
-                    let mouseRow = tableView.row(at: localPoint)
-                    guard mouseRow == row else { return }
-                    
-                    let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
-                    guard nameColumn != -1 else { return }
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self, let tableView = self.tableView else { return }
+                guard row >= 0,
+                      row < self.parent.nodes.count else { return }
 
-                    tableView.editColumn(nameColumn, row: row, with: nil, select: true)
-                }
-                renameWorkItem = workItem
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+                // Verify it's still the only selected item.
+                let selected = tableView.selectedRowIndexes
+                guard selected.contains(row), selected.count == 1 else { return }
+
+                let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
+                guard nameColumn != -1 else { return }
+
+                tableView.editColumn(nameColumn, row: row, with: nil, select: true)
             }
+            renameWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: workItem)
         }
 
         @objc func tableViewDoubleClicked(_ sender: Any?) {
