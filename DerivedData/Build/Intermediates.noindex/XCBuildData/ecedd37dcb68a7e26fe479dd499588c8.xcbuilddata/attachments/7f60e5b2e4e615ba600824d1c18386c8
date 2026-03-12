@@ -1,0 +1,129 @@
+{
+  "" : {
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakScape-primary.dia",
+    "emit-module-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakScape-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakScape-primary-emit-module.dia",
+    "pch" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakScape-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakScape-primary.swiftdeps"
+  },
+  "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/BspLevelPreviewRenderer.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/BspLevelPreviewRenderer~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/ContentView.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/ContentView~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/FinderServices.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/FinderServices~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakDocument.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakDocument~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakExplorerApp.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakExplorerApp~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakIconView.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakIconView~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakListView.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakListView~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakModels.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakModels~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakQuickLook.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakQuickLook~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PakViewModel.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PakViewModel~partial.swiftmodule"
+  },
+  "/Users/timbergeron/codedev/PakScape/PakScape/PreferencesView.swift" : {
+    "const-values" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.swiftconstvalues",
+    "dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.d",
+    "diagnostics" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.dia",
+    "index-unit-output-path" : "/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.o",
+    "llvm-bc" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.bc",
+    "object" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.o",
+    "swift-dependencies" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView.swiftdeps",
+    "swiftmodule" : "/Users/timbergeron/codedev/PakScape/DerivedData/Build/Intermediates.noindex/PakScape.build/Debug/PakScape.build/Objects-normal/arm64/PreferencesView~partial.swiftmodule"
+  }
+}

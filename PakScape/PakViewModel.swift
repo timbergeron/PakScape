@@ -29,6 +29,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var audioPreviewTimer: Timer?
     private var audioPreviewNodeID: PakNode.ID?
     private var audioPreviewProgress: Double = 0
+    private var previewImageCacheVersion: UUID?
+    private var previewImageCache: [PakNode.ID: NSImage] = [:]
+    private var previewImageMisses: Set<PakNode.ID> = []
 
     var canSave: Bool {
         pakFile != nil && hasUnsavedChanges
@@ -547,30 +550,45 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func previewImage(for node: PakNode) -> NSImage? {
+        invalidatePreviewImageCacheIfNeeded()
+
+        if let cachedImage = previewImageCache[node.id] {
+            return cachedImage
+        }
+        if previewImageMisses.contains(node.id) {
+            return nil
+        }
+
         guard !node.isFolder, let data = extractData(for: node) else { return nil }
 
         let ext = (node.name as NSString).pathExtension.lowercased()
+        let preview: NSImage?
         if ext == "lmp" {
-            return LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
-        }
-        if ext == "tga" {
-            return TgaPreviewRenderer.renderImage(data: data)
-        }
-        if ext == "mdl" {
-            return MdlPreviewRenderer.renderImage(data: data)
-        }
-        if ext == "spr" {
-            return SprPreviewRenderer.renderImage(data: data)
-        }
-        if ext == "bsp" {
-            return BspPreviewRenderer.renderImage(fileName: node.name, data: data)
-        }
-        if ext == "wad" {
-            return WadPreviewRenderer.renderImage(fileName: node.name, data: data)
+            preview = LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
+        } else if ext == "tga" {
+            preview = TgaPreviewRenderer.renderImage(data: data)
+        } else if ext == "mdl" {
+            preview = MdlPreviewRenderer.renderImage(data: data)
+        } else if ext == "spr" {
+            preview = SprPreviewRenderer.renderImage(data: data)
+        } else if ext == "bsp" {
+            preview = BspPreviewRenderer.renderImage(fileName: node.name, data: data)
+                ?? BspLevelPreviewRenderer.renderImage(data: data)
+        } else if ext == "wad" {
+            preview = WadPreviewRenderer.renderImage(fileName: node.name, data: data)
+        } else if Self.previewableImageExtensions.contains(ext) {
+            preview = NSImage(data: data)
+        } else {
+            preview = nil
         }
 
-        guard Self.previewableImageExtensions.contains(ext) else { return nil }
-        return NSImage(data: data)
+        if let preview {
+            previewImageCache[node.id] = preview
+        } else {
+            previewImageMisses.insert(node.id)
+        }
+
+        return preview
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {
@@ -757,6 +775,15 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
             return $0.name.lowercased() < $1.name.lowercased()
         }
+    }
+
+    private func invalidatePreviewImageCacheIfNeeded() {
+        let currentVersion = pakFile?.version
+        guard previewImageCacheVersion != currentVersion else { return }
+
+        previewImageCacheVersion = currentVersion
+        previewImageCache.removeAll(keepingCapacity: true)
+        previewImageMisses.removeAll(keepingCapacity: true)
     }
 
     func navigate(to folder: PakNode?) {
@@ -1931,7 +1958,7 @@ private enum LmpPreviewRenderer {
     }
 }
 
-private enum QuakePalette {
+enum QuakePalette {
     static let bytes: [UInt8] = {
         guard let data = Data(base64Encoded: """
 AAAADw8PHx8fLy8vPz8/S0tLW1tba2tre3t7i4uLm5ubq6uru7u7y8vL29vb6+vrDwsHFw8LHxcLJxsPLyMTNysXPy8XSzcbUzsbW0MfY0sfa1Mfc1cfe18jg2cjj28jCwsPExMbGxsnJyczLy8/NzdLPz9XR0dnT09zW1t/Y2OLa2uXc3Oje3uvg4O7i4vLAAAABwcACwsAExMAGxsAIyMAKysHLy8HNzcHPz8HR0cHS0sLU1MLW1sLY2MLa2sPBwAADwAAFwAAHwAAJwAALwAANwAAPwAARwAATwAAVwAAXwAAZwAAbwAAdwAAfwAAExMAGxsAIyMALysANy8AQzcASzsHV0MHX0cHa0sLd1MPg1cTi1sTl18bo2Mfr2cjIxMHLxcLOx8PSyMTVysXYy8fczcjfzsrj0Mzn08zr2Mvv3cvz48r36sn78sf//MbCwcAGxMAKyMPNysTRzMbUzcjYz8rb0czf1M/i19Hm2tTp3tft4drw5N706OL47OXq4ujn3+Xk3OHi2d7f1tvd1Nja0tXXz9LVzdDSy83QycvNx8jKxcbIxMTFwsLDwcHu3Ofr2uPo1+Dl1d3i09rf0tfc0NTaztLXzM/Uys3RyMrOx8jLxcbIxMTFwsLDwcH28O7y7Onv6Obr5eLo4d7l3tvh29fe2NTa1dHX0s7Uz8zQzMnNysfJx8XGxMPDwsHb4N7Z3tvX3NnV2tfT2NXR1tPP1NHN0s/L0M3KzsvIzMnHysfFyMXDxsTCxMLBwsH//Mb798X28sTy7cPu6cPq5cLm4MHi3MHe2MHa1MAW0cASzcAOysAKx8AGw8ACwcAAAD/CwvvExPfGxvPIyO/KyuvLy+fLy+PLy9/Ly9vLy9fKytPIyM/GxsvExMfCwsPKwAAOwAASwcAXwcAbw8AfxcHkx8HoycLtzMPw0sbz2Mr238745dP56tf779399OLp3s7t5s3x8M35+NXf7//q+f/1///ZwAAiwAAswAA1wAA/wAA//OT//fH////n1tT
