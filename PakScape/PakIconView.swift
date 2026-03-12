@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuartzCore
 
 private final class PakIconCollectionView: NSCollectionView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
@@ -137,6 +138,28 @@ fileprivate enum IconZoomLevel: Int {
             return 64
         }
     }
+
+    var audioOverlayDimension: CGFloat {
+        switch self {
+        case .small:
+            return 30
+        case .medium:
+            return 36
+        case .large:
+            return 42
+        }
+    }
+
+    var audioOverlaySymbolPointSize: CGFloat {
+        switch self {
+        case .small:
+            return 13
+        case .medium:
+            return 16
+        case .large:
+            return 18
+        }
+    }
 }
 
 struct PakIconView: NSViewRepresentable {
@@ -200,6 +223,7 @@ struct PakIconView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.bindAudioPreviewStateIfNeeded()
         guard let collectionView = context.coordinator.collectionView else { return }
 
         if let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout {
@@ -230,9 +254,19 @@ struct PakIconView: NSViewRepresentable {
         private var typeSelectionBuffer = ""
         private var lastTypeSelectionDate = Date.distantPast
         private var renameWorkItem: DispatchWorkItem?
+        private weak var observedViewModel: PakViewModel?
+        private var audioPreviewObserver: NSObjectProtocol?
 
         init(parent: PakIconView) {
             self.parent = parent
+            super.init()
+            bindAudioPreviewStateIfNeeded()
+        }
+
+        deinit {
+            if let audioPreviewObserver {
+                NotificationCenter.default.removeObserver(audioPreviewObserver)
+            }
         }
 
         func numberOfSections(in collectionView: NSCollectionView) -> Int {
@@ -248,7 +282,16 @@ struct PakIconView: NSViewRepresentable {
             guard let iconItem = item as? PakIconItem else { return item }
             let node = parent.nodes[indexPath.item]
             let preview = previewImage(for: node)
-            iconItem.configure(with: node, zoomLevel: parent.zoomLevel, previewImage: preview)
+            iconItem.configure(
+                with: node,
+                zoomLevel: parent.zoomLevel,
+                previewImage: preview,
+                canPreviewAudio: parent.viewModel.canPreviewAudio(node),
+                audioPreviewState: parent.viewModel.audioPreviewState(for: node)
+            )
+            iconItem.onAudioPreviewToggle = { [weak self] in
+                self?.parent.viewModel.toggleAudioPreview(for: node)
+            }
             iconItem.nameField.tag = indexPath.item
             return iconItem
         }
@@ -287,6 +330,39 @@ struct PakIconView: NSViewRepresentable {
 
         private func previewImage(for node: PakNode) -> NSImage? {
             parent.viewModel.previewImage(for: node)
+        }
+
+        func bindAudioPreviewStateIfNeeded() {
+            guard observedViewModel !== parent.viewModel else { return }
+
+            if let audioPreviewObserver {
+                NotificationCenter.default.removeObserver(audioPreviewObserver)
+            }
+
+            observedViewModel = parent.viewModel
+            audioPreviewObserver = NotificationCenter.default.addObserver(
+                forName: .pakAudioPreviewStateDidChange,
+                object: parent.viewModel,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateVisibleAudioPreviewStates()
+            }
+        }
+
+        private func updateVisibleAudioPreviewStates() {
+            guard let collectionView else { return }
+
+            for indexPath in collectionView.indexPathsForVisibleItems() {
+                guard indexPath.item >= 0,
+                      indexPath.item < parent.nodes.count,
+                      let item = collectionView.item(at: indexPath) as? PakIconItem else { continue }
+
+                let node = parent.nodes[indexPath.item]
+                item.updateAudioPreview(
+                    canPreviewAudio: parent.viewModel.canPreviewAudio(node),
+                    state: parent.viewModel.audioPreviewState(for: node)
+                )
+            }
         }
 
         func renameFromSecondClick(at indexPath: IndexPath) {
@@ -601,14 +677,109 @@ struct PakIconView: NSViewRepresentable {
     }
 }
 
+private final class AudioPreviewButton: NSButton {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+
+    var progress: Double = 0 {
+        didSet {
+            updateProgressRing()
+        }
+    }
+
+    var showsProgressRing: Bool = false {
+        didSet {
+            updateProgressRing()
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        wantsLayer = true
+        isBordered = false
+        imagePosition = .imageOnly
+        focusRingType = .none
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        contentTintColor = .white
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.48).cgColor
+        layer?.masksToBounds = true
+
+        trackLayer.fillColor = NSColor.clear.cgColor
+        trackLayer.strokeColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        trackLayer.lineWidth = 2.5
+
+        progressLayer.fillColor = NSColor.clear.cgColor
+        progressLayer.strokeColor = NSColor.controlAccentColor.cgColor
+        progressLayer.lineWidth = 2.5
+        progressLayer.lineCap = .round
+
+        layer?.addSublayer(trackLayer)
+        layer?.addSublayer(progressLayer)
+        updateProgressRing()
+    }
+
+    override func layout() {
+        super.layout()
+
+        layer?.cornerRadius = bounds.width / 2
+
+        let ringRect = bounds.insetBy(dx: 2, dy: 2)
+        let ringPath = CGPath(ellipseIn: ringRect, transform: nil)
+
+        trackLayer.frame = bounds
+        trackLayer.path = ringPath
+
+        progressLayer.frame = bounds
+        progressLayer.path = ringPath
+
+        updateProgressRing()
+    }
+
+    func setSymbol(_ systemName: String, pointSize: CGFloat) {
+        guard let baseImage = NSImage(systemSymbolName: systemName, accessibilityDescription: nil) else {
+            image = nil
+            return
+        }
+
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
+        image = baseImage.withSymbolConfiguration(config)
+    }
+
+    private func updateProgressRing() {
+        let clampedProgress = CGFloat(min(max(progress, 0), 1))
+        trackLayer.isHidden = !showsProgressRing
+        progressLayer.isHidden = !showsProgressRing
+        progressLayer.strokeEnd = clampedProgress
+    }
+}
+
 final class PakIconItem: NSCollectionViewItem {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("PakIconItem")
 
     private let iconContainerView = NSView()
     private let iconView = NSImageView()
+    private let audioPreviewButton = AudioPreviewButton()
     let nameField = NSTextField(string: "")
     private var iconWidthConstraint: NSLayoutConstraint!
     private var iconHeightConstraint: NSLayoutConstraint!
+    private var audioPreviewButtonWidthConstraint: NSLayoutConstraint!
+    private var audioPreviewButtonHeightConstraint: NSLayoutConstraint!
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+    private var canPreviewAudio = false
+    private var audioPreviewState = PakViewModel.AudioPreviewVisualState.inactive
+    private var currentZoomLevel: IconZoomLevel = .medium
+    var onAudioPreviewToggle: (() -> Void)?
 
     override func loadView() {
         view = NSView()
@@ -616,11 +787,16 @@ final class PakIconItem: NSCollectionViewItem {
 
         iconContainerView.translatesAutoresizingMaskIntoConstraints = false
         iconContainerView.wantsLayer = true
-        
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.wantsLayer = true
-        
+
+        audioPreviewButton.translatesAutoresizingMaskIntoConstraints = false
+        audioPreviewButton.target = self
+        audioPreviewButton.action = #selector(handleAudioPreviewButton)
+        audioPreviewButton.isHidden = true
+
         nameField.translatesAutoresizingMaskIntoConstraints = false
         nameField.isBordered = false
         nameField.isBezeled = false
@@ -637,10 +813,13 @@ final class PakIconItem: NSCollectionViewItem {
 
         view.addSubview(iconContainerView)
         iconContainerView.addSubview(iconView)
+        iconContainerView.addSubview(audioPreviewButton)
         view.addSubview(nameField)
 
         iconWidthConstraint = iconContainerView.widthAnchor.constraint(equalToConstant: 96)
         iconHeightConstraint = iconContainerView.heightAnchor.constraint(equalToConstant: 96)
+        audioPreviewButtonWidthConstraint = audioPreviewButton.widthAnchor.constraint(equalToConstant: 36)
+        audioPreviewButtonHeightConstraint = audioPreviewButton.heightAnchor.constraint(equalToConstant: 36)
 
         NSLayoutConstraint.activate([
             iconContainerView.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
@@ -654,18 +833,61 @@ final class PakIconItem: NSCollectionViewItem {
             iconView.trailingAnchor.constraint(equalTo: iconContainerView.trailingAnchor, constant: -6),
             iconView.bottomAnchor.constraint(equalTo: iconContainerView.bottomAnchor, constant: -6),
 
+            audioPreviewButton.centerXAnchor.constraint(equalTo: iconContainerView.centerXAnchor),
+            audioPreviewButton.centerYAnchor.constraint(equalTo: iconContainerView.centerYAnchor),
+            audioPreviewButtonWidthConstraint,
+            audioPreviewButtonHeightConstraint,
+
             nameField.topAnchor.constraint(equalTo: iconContainerView.bottomAnchor, constant: 4),
             nameField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             nameField.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -8),
             nameField.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -4)
         ])
+
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        view.addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
     }
 
-    func configure(with node: PakNode, zoomLevel: Int, previewImage: NSImage?) {
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onAudioPreviewToggle = nil
+        isHovered = false
+        updateAudioPreview(canPreviewAudio: false, state: .inactive)
+        endRenaming()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        isHovered = true
+        updateAudioOverlay()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        isHovered = false
+        updateAudioOverlay()
+    }
+
+    func configure(
+        with node: PakNode,
+        zoomLevel: Int,
+        previewImage: NSImage?,
+        canPreviewAudio: Bool,
+        audioPreviewState: PakViewModel.AudioPreviewVisualState
+    ) {
         let level = IconZoomLevel(rawValue: zoomLevel) ?? .medium
+        currentZoomLevel = level
 
         iconWidthConstraint.constant = level.iconDimension
         iconHeightConstraint.constant = level.iconDimension
+        audioPreviewButtonWidthConstraint.constant = level.audioOverlayDimension
+        audioPreviewButtonHeightConstraint.constant = level.audioOverlayDimension
 
         if let previewImage {
             iconView.image = previewImage
@@ -680,8 +902,15 @@ final class PakIconItem: NSCollectionViewItem {
         }
         nameField.stringValue = node.name
         nameField.toolTip = node.name
-        
+        updateAudioPreview(canPreviewAudio: canPreviewAudio, state: audioPreviewState)
+
         updateSelectionState()
+    }
+
+    func updateAudioPreview(canPreviewAudio: Bool, state: PakViewModel.AudioPreviewVisualState) {
+        self.canPreviewAudio = canPreviewAudio
+        audioPreviewState = state
+        updateAudioOverlay()
     }
 
     func beginRenaming(delegate: NSTextFieldDelegate) {
@@ -721,31 +950,50 @@ final class PakIconItem: NSCollectionViewItem {
             updateSelectionState()
         }
     }
-    
+
+    @objc private func handleAudioPreviewButton() {
+        onAudioPreviewToggle?()
+    }
+
     private func updateSelectionState() {
         if isSelected {
             // Icon background (applied to container)
             iconContainerView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
             iconContainerView.layer?.cornerRadius = 8
-            
+
             // Text background
             nameField.drawsBackground = true
             nameField.backgroundColor = NSColor.selectedContentBackgroundColor
             nameField.textColor = NSColor.selectedControlTextColor
             nameField.layer?.cornerRadius = 6
             nameField.layer?.masksToBounds = true
-            
+
             // Clear main view background
             view.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             iconContainerView.layer?.backgroundColor = NSColor.clear.cgColor
-            
+
             nameField.drawsBackground = false
             nameField.backgroundColor = .clear
             nameField.textColor = NSColor.labelColor
             nameField.layer?.cornerRadius = 0
-            
+
             view.layer?.backgroundColor = NSColor.clear.cgColor
         }
+    }
+
+    private func updateAudioOverlay() {
+        let shouldShowOverlay = canPreviewAudio && (isHovered || audioPreviewState.isCurrent)
+        audioPreviewButton.isHidden = !shouldShowOverlay
+
+        guard shouldShowOverlay else { return }
+
+        audioPreviewButton.showsProgressRing = audioPreviewState.isPlaying
+        audioPreviewButton.progress = audioPreviewState.progress
+        audioPreviewButton.setSymbol(
+            audioPreviewState.isPlaying ? "pause.fill" : "play.fill",
+            pointSize: currentZoomLevel.audioOverlaySymbolPointSize
+        )
+        audioPreviewButton.toolTip = audioPreviewState.isPlaying ? "Stop Audio Preview" : "Play Audio Preview"
     }
 }

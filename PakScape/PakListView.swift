@@ -296,17 +296,19 @@ struct PakListView: NSViewRepresentable {
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
-            // For NSTableView inline editing, the notification's object is typically the shared field editor.
-            guard let editor = obj.object as? NSTextView else { return }
-            let range = filenameBaseRange(for: editor.string)
+            let applySelection = { [weak self] in
+                guard let self else { return }
+                let editor = (self.tableView?.currentEditor() as? NSTextView)
+                    ?? (obj.object as? NSTextView)
+                    ?? ((obj.object as? NSTextField)?.currentEditor() as? NSTextView)
+                guard let editor else { return }
+                let range = self.filenameBaseRange(for: editor.string)
+                editor.selectedRange = range
+            }
 
             // Apply after AppKit's initial selection, and re-apply once to win any late selection changes.
-            DispatchQueue.main.async { [weak editor] in
-                editor?.selectedRange = range
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak editor] in
-                editor?.selectedRange = range
-            }
+            DispatchQueue.main.async(execute: applySelection)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01, execute: applySelection)
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
