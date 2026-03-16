@@ -565,6 +565,8 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let preview: NSImage?
         if ext == "lmp" {
             preview = LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
+        } else if ext == "pcx" {
+            preview = PcxPreviewRenderer.renderImage(data: data) ?? NSImage(data: data)
         } else if ext == "tga" {
             preview = TgaPreviewRenderer.renderImage(data: data)
         } else if ext == "mdl" {
@@ -1557,6 +1559,238 @@ private enum WadPreviewRenderer {
     private static func asciiStringFromNullTerminated(_ data: Data) -> String {
         let trimmed = data.prefix { $0 != 0 }
         return String(bytes: trimmed, encoding: .ascii) ?? ""
+    }
+}
+
+private enum PcxPreviewRenderer {
+    static func renderImage(data: Data) -> NSImage? {
+        guard data.count >= 128, data[0] == 0x0A else { return nil }
+
+        let encoding = data[2]
+        guard encoding == 0 || encoding == 1 else { return nil }
+
+        let bitsPerPixel = Int(data[3])
+        let xMin = readUInt16LE(data, offset: 4) ?? 0
+        let yMin = readUInt16LE(data, offset: 6) ?? 0
+        let xMax = readUInt16LE(data, offset: 8) ?? 0
+        let yMax = readUInt16LE(data, offset: 10) ?? 0
+        let width = xMax - xMin + 1
+        let height = yMax - yMin + 1
+
+        guard width > 0, height > 0 else { return nil }
+
+        let colorPlanes = Int(data[65])
+        let bytesPerLine = readUInt16LE(data, offset: 66) ?? 0
+        guard colorPlanes > 0, bytesPerLine >= width else { return nil }
+
+        let rowStrideResult = colorPlanes.multipliedReportingOverflow(by: bytesPerLine)
+        guard !rowStrideResult.overflow else { return nil }
+        let rowStride = rowStrideResult.partialValue
+
+        let decodedByteCountResult = rowStride.multipliedReportingOverflow(by: height)
+        guard !decodedByteCountResult.overflow else { return nil }
+        let decodedByteCount = decodedByteCountResult.partialValue
+
+        let sourceLimit: Int
+        let paletteOffset: Int?
+        if bitsPerPixel == 8, colorPlanes == 1, data.count >= 897 {
+            let candidate = data.count - 769
+            if candidate >= 128, data[candidate] == 0x0C {
+                sourceLimit = candidate
+                paletteOffset = candidate + 1
+            } else {
+                sourceLimit = data.count
+                paletteOffset = nil
+            }
+        } else {
+            sourceLimit = data.count
+            paletteOffset = nil
+        }
+
+        guard let decoded = decodeImageData(
+            data,
+            start: 128,
+            limit: sourceLimit,
+            expectedByteCount: decodedByteCount,
+            isRLE: encoding == 1
+        ) else {
+            return nil
+        }
+
+        let rgbaByteCountResult = width.multipliedReportingOverflow(by: height)
+        guard !rgbaByteCountResult.overflow else { return nil }
+        let pixelCount = rgbaByteCountResult.partialValue
+
+        let rgbaStorageResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaStorageResult.overflow else { return nil }
+        var rgba = Data(count: rgbaStorageResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            decoded.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                if bitsPerPixel == 8, colorPlanes == 1 {
+                    guard let paletteOffset, paletteOffset + 768 <= data.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+
+                    for y in 0..<height {
+                        let rowBase = y * rowStride
+                        for x in 0..<width {
+                            let paletteIndex = Int(src[rowBase + x])
+                            let colorBase = paletteOffset + paletteIndex * 3
+                            guard colorBase + 2 < data.count else {
+                                conversionSucceeded = false
+                                return
+                            }
+
+                            let destIndex = (y * width + x) * 4
+                            dest[destIndex] = data[colorBase]
+                            dest[destIndex + 1] = data[colorBase + 1]
+                            dest[destIndex + 2] = data[colorBase + 2]
+                            dest[destIndex + 3] = 255
+                        }
+                    }
+                    return
+                }
+
+                guard bitsPerPixel == 8, colorPlanes == 3 || colorPlanes == 4 else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                for y in 0..<height {
+                    let rowBase = y * rowStride
+                    let redBase = rowBase
+                    let greenBase = rowBase + bytesPerLine
+                    let blueBase = rowBase + bytesPerLine * 2
+                    let alphaBase = colorPlanes == 4 ? rowBase + bytesPerLine * 3 : -1
+
+                    for x in 0..<width {
+                        let destIndex = (y * width + x) * 4
+                        dest[destIndex] = src[redBase + x]
+                        dest[destIndex + 1] = src[greenBase + x]
+                        dest[destIndex + 2] = src[blueBase + x]
+                        dest[destIndex + 3] = colorPlanes == 4 ? src[alphaBase + x] : 255
+                    }
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+        return image(fromRGBA: rgba, width: width, height: height)
+    }
+
+    private static func decodeImageData(
+        _ data: Data,
+        start: Int,
+        limit: Int,
+        expectedByteCount: Int,
+        isRLE: Bool
+    ) -> Data? {
+        guard start >= 0, limit >= start, limit <= data.count, expectedByteCount >= 0 else {
+            return nil
+        }
+
+        if !isRLE {
+            guard limit - start >= expectedByteCount else { return nil }
+            return data.subdata(in: start ..< start + expectedByteCount)
+        }
+
+        var output = Data(count: expectedByteCount)
+        var sourceIndex = start
+        var success = true
+
+        output.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                success = false
+                return
+            }
+
+            data.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    success = false
+                    return
+                }
+
+                var destIndex = 0
+                while destIndex < expectedByteCount {
+                    guard sourceIndex < limit else {
+                        success = false
+                        break
+                    }
+
+                    let value = src[sourceIndex]
+                    sourceIndex += 1
+
+                    if (value & 0xC0) == 0xC0 {
+                        let runLength = Int(value & 0x3F)
+                        guard runLength > 0, sourceIndex < limit else {
+                            success = false
+                            break
+                        }
+
+                        let repeatedValue = src[sourceIndex]
+                        sourceIndex += 1
+
+                        guard destIndex + runLength <= expectedByteCount else {
+                            success = false
+                            break
+                        }
+
+                        for _ in 0..<runLength {
+                            dest[destIndex] = repeatedValue
+                            destIndex += 1
+                        }
+                    } else {
+                        dest[destIndex] = value
+                        destIndex += 1
+                    }
+                }
+            }
+        }
+
+        return success ? output : nil
+    }
+
+    private static func image(fromRGBA rgba: Data, width: Int, height: Int) -> NSImage? {
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private static func readUInt16LE(_ data: Data, offset: Int) -> Int? {
+        guard offset + 2 <= data.count else { return nil }
+        let low = Int(data[offset])
+        let high = Int(data[offset + 1]) << 8
+        return low | high
     }
 }
 
