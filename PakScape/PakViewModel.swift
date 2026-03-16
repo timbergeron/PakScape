@@ -45,6 +45,16 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         !forwardStack.isEmpty
     }
 
+    var canNavigateToParent: Bool {
+        guard let current = currentFolder, let root = pakFile?.root else { return false }
+        return current !== root
+    }
+
+    var canOpenSelectedFolder: Bool {
+        guard let selected = selectedFile else { return false }
+        return selected.isFolder
+    }
+
     var canCutCopy: Bool {
         !selectedNodes.isEmpty
     }
@@ -811,6 +821,27 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isNavigatingHistory = true
         currentFolder = next
         isNavigatingHistory = false
+    }
+
+    func navigateToParent() {
+        guard let current = currentFolder, let root = pakFile?.root, current !== root else { return }
+        if let parent = findParent(of: current, in: root) {
+            navigate(to: parent)
+        }
+    }
+
+    func openSelectedFolder() {
+        guard let selected = selectedFile, selected.isFolder else { return }
+        navigate(to: selected)
+    }
+
+    private func findParent(of target: PakNode, in node: PakNode) -> PakNode? {
+        guard let children = node.children else { return nil }
+        for child in children {
+            if child === target { return node }
+            if let found = findParent(of: target, in: child) { return found }
+        }
+        return nil
     }
 
     func resetNavigation(to folder: PakNode?) {

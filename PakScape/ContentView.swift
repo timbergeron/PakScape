@@ -458,6 +458,10 @@ struct PakCommands {
     let canPaste: Bool
     let selectAll: () -> Void
     let canSelectAll: Bool
+    let enclosingFolder: () -> Void
+    let canEnclosingFolder: Bool
+    let openSelection: () -> Void
+    let canOpenSelection: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -591,7 +595,15 @@ private extension ContentView {
             selectAll: {
                 selectAllInCurrentFolder()
             },
-            canSelectAll: canSelectAllInCurrentFolder
+            canSelectAll: canSelectAllInCurrentFolder,
+            enclosingFolder: {
+                model.navigateToParent()
+            },
+            canEnclosingFolder: model.canNavigateToParent,
+            openSelection: {
+                model.openSelectedFolder()
+            },
+            canOpenSelection: model.canOpenSelectedFolder
         )
     }
 

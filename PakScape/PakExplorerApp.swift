@@ -40,6 +40,7 @@ struct PakScapeApp: App {
             PakNewCommands()
             PakSaveCommands()
             PakEditCommands()
+            PakGoCommands()
             PakViewCommands()
         }
     }
@@ -183,6 +184,26 @@ struct PakAboutCommands: Commands {
             Button("About PakScape") {
                 aboutPresenter.show()
             }
+        }
+    }
+}
+
+struct PakGoCommands: Commands {
+    @FocusedValue(\.pakCommands) private var pakCommands
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            Button("Enclosing Folder") {
+                pakCommands?.enclosingFolder()
+            }
+            .keyboardShortcut(.upArrow, modifiers: [.command])
+            .disabled(!(pakCommands?.canEnclosingFolder ?? false))
+
+            Button("Open Selection") {
+                pakCommands?.openSelection()
+            }
+            .keyboardShortcut(.downArrow, modifiers: [.command])
+            .disabled(!(pakCommands?.canOpenSelection ?? false))
         }
     }
 }
