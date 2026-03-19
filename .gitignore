@@ -1,1 +1,8 @@
 .DS_Store
+DerivedData/
+.vs/
+windows/**/bin/
+windows/**/obj/
+windows/TestResults/
+*.user
+*.suo

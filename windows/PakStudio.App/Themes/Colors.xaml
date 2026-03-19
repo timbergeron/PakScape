@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="WindowBackgroundColor">#FFF6F2EA</Color>
+    <Color x:Key="PanelBackgroundColor">#FFFCFAF5</Color>
+    <Color x:Key="PanelBorderColor">#FFD8CCB7</Color>
+    <Color x:Key="TextForegroundColor">#FF2E2418</Color>
+    <Color x:Key="MutedForegroundColor">#FF7B6C58</Color>
+    <Color x:Key="AccentColor">#FF8B5E34</Color>
+    <Color x:Key="AccentSoftColor">#FFE7D9C8</Color>
+    <Color x:Key="SplitterColor">#FFCCBDA6</Color>
+
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="{StaticResource PanelBackgroundColor}" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="{StaticResource PanelBorderColor}" />
+    <SolidColorBrush x:Key="TextForegroundBrush" Color="{StaticResource TextForegroundColor}" />
+    <SolidColorBrush x:Key="MutedForegroundBrush" Color="{StaticResource MutedForegroundColor}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="{StaticResource AccentSoftColor}" />
+    <SolidColorBrush x:Key="SplitterBrush" Color="{StaticResource SplitterColor}" />
+</ResourceDictionary>

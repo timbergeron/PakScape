@@ -1,0 +1,295 @@
+<Window x:Class="PakStudio.App.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:converters="clr-namespace:PakStudio.App.Converters"
+        xmlns:viewModels="clr-namespace:PakStudio.App.ViewModels"
+        Title="{Binding WindowTitle}"
+        Height="760"
+        Width="1220"
+        MinHeight="600"
+        MinWidth="960"
+        Background="{StaticResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <converters:ArchiveViewModeEqualsConverter x:Key="ArchiveViewModeEqualsConverter" />
+        <converters:ArchiveViewModeToVisibilityConverter x:Key="ArchiveViewModeToVisibilityConverter" />
+
+        <ItemsPanelTemplate x:Key="WrapItemsPanel">
+            <WrapPanel Orientation="Horizontal" />
+        </ItemsPanelTemplate>
+
+        <ItemsPanelTemplate x:Key="LinearItemsPanel">
+            <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+
+        <HierarchicalDataTemplate DataType="{x:Type viewModels:FolderTreeNodeViewModel}"
+                                  ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontFamily="Segoe MDL2 Assets"
+                           Foreground="{StaticResource AccentBrush}"
+                           Margin="0,0,8,0"
+                           Text="&#xE8B7;" />
+                <TextBlock Text="{Binding DisplayName}" />
+            </StackPanel>
+        </HierarchicalDataTemplate>
+
+        <DataTemplate x:Key="LargeIconTemplate">
+            <Border Width="128"
+                    Margin="0,0,12,12"
+                    Padding="12"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <StackPanel>
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="30"
+                               HorizontalAlignment="Center"
+                               Foreground="{StaticResource AccentBrush}"
+                               Text="{Binding IconGlyph}" />
+                    <TextBlock Margin="0,10,0,0"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Text="{Binding Name}" />
+                    <TextBlock Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               Foreground="{StaticResource MutedForegroundBrush}"
+                               FontSize="11"
+                               Text="{Binding TypeText}" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SmallIconTemplate">
+            <Border Margin="0,0,8,8"
+                    Padding="8"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="18"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource AccentBrush}"
+                               Text="{Binding IconGlyph}" />
+                    <StackPanel Margin="8,0,0,0">
+                        <TextBlock Text="{Binding Name}" />
+                        <TextBlock FontSize="11"
+                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Text="{Binding TypeText}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ListTemplate">
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="160" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           FontFamily="Segoe MDL2 Assets"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource AccentBrush}"
+                           Text="{Binding IconGlyph}" />
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Text="{Binding Name}" />
+                <TextBlock Grid.Column="2"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedForegroundBrush}"
+                           Text="{Binding TypeText}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DetailsTemplate">
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="1.3*" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="1.5*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               Margin="0,0,8,0"
+                               Foreground="{StaticResource AccentBrush}"
+                               Text="{Binding IconGlyph}" />
+                    <TextBlock Text="{Binding Name}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Foreground="{StaticResource MutedForegroundBrush}"
+                           Text="{Binding TypeText}" />
+                <TextBlock Grid.Column="2"
+                           HorizontalAlignment="Right"
+                           Text="{Binding SizeText}" />
+                <TextBlock Grid.Column="3"
+                           HorizontalAlignment="Right"
+                           Text="{Binding ModifiedText}" />
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
+                <MenuItem Header="_Open..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O" />
+                <Separator />
+                <MenuItem Header="_Save" Command="{Binding SaveCommand}" InputGestureText="Ctrl+S" />
+                <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" />
+                <Separator />
+                <MenuItem Header="E_xit" Command="{Binding ExitCommand}" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="_Large Icons"
+                          Command="{Binding ShowLargeIconsCommand}"
+                          IsCheckable="True"
+                          IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=LargeIcons}" />
+                <MenuItem Header="_Small Icons"
+                          Command="{Binding ShowSmallIconsCommand}"
+                          IsCheckable="True"
+                          IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=SmallIcons}" />
+                <MenuItem Header="_List"
+                          Command="{Binding ShowListCommand}"
+                          IsCheckable="True"
+                          IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=List}" />
+                <MenuItem Header="_Details"
+                          Command="{Binding ShowDetailsCommand}"
+                          IsCheckable="True"
+                          IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=Details}" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About" Command="{Binding AboutCommand}" />
+            </MenuItem>
+        </Menu>
+
+        <ToolBarTray DockPanel.Dock="Top">
+            <ToolBar>
+                <Button Command="{Binding NewCommand}" Content="New" />
+                <Button Command="{Binding OpenCommand}" Content="Open" />
+                <Button Command="{Binding SaveCommand}" Content="Save" />
+                <Separator />
+                <Button Command="{Binding ShowLargeIconsCommand}" Content="Large" />
+                <Button Command="{Binding ShowSmallIconsCommand}" Content="Small" />
+                <Button Command="{Binding ShowListCommand}" Content="List" />
+                <Button Command="{Binding ShowDetailsCommand}" Content="Details" />
+            </ToolBar>
+        </ToolBarTray>
+
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem Content="{Binding StatusText}" />
+            <Separator />
+            <StatusBarItem Content="{Binding CurrentFolderPath}" />
+            <Separator />
+            <StatusBarItem Content="{Binding SelectionStatus}" />
+        </StatusBar>
+
+        <Grid Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Padding="8"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <TreeView x:Name="FolderTree"
+                          ItemsSource="{Binding FolderRoots}"
+                          SelectedItemChanged="FolderTree_OnSelectedItemChanged" />
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="{StaticResource SplitterBrush}" />
+
+            <Border Grid.Column="2"
+                    Padding="12"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top"
+                          Margin="0,0,0,8"
+                          Visibility="{Binding ActiveViewMode, Converter={StaticResource ArchiveViewModeToVisibilityConverter}, ConverterParameter=Details}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" />
+                            <ColumnDefinition Width="1.3*" />
+                            <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Text="Name" />
+                        <TextBlock Grid.Column="1"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Text="Type" />
+                        <TextBlock Grid.Column="2"
+                                   HorizontalAlignment="Right"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Text="Size" />
+                        <TextBlock Grid.Column="3"
+                                   HorizontalAlignment="Right"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Text="Modified" />
+                    </Grid>
+
+                    <ListView x:Name="ItemList"
+                              ItemsSource="{Binding CurrentItems}"
+                              SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                              MouseDoubleClick="ItemList_OnMouseDoubleClick"
+                              ScrollViewer.CanContentScroll="True"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ListView.Style>
+                            <Style TargetType="ListView">
+                                <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
+                                <Setter Property="ItemTemplate" Value="{StaticResource DetailsTemplate}" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                 Value="LargeIcons">
+                                        <Setter Property="ItemsPanel" Value="{StaticResource WrapItemsPanel}" />
+                                        <Setter Property="ItemTemplate" Value="{StaticResource LargeIconTemplate}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                 Value="SmallIcons">
+                                        <Setter Property="ItemsPanel" Value="{StaticResource WrapItemsPanel}" />
+                                        <Setter Property="ItemTemplate" Value="{StaticResource SmallIconTemplate}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                 Value="List">
+                                        <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
+                                        <Setter Property="ItemTemplate" Value="{StaticResource ListTemplate}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                 Value="Details">
+                                        <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
+                                        <Setter Property="ItemTemplate" Value="{StaticResource DetailsTemplate}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListView.Style>
+                    </ListView>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>
