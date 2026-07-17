@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=PakScape
+GenericName=Quake Archive Editor
+Comment=Browse and edit Quake PAK and PK3 archives
+Exec=pakscape %f
+TryExec=pakscape
+Icon=io.github.timbergeron.PakScape
+Terminal=false
+StartupNotify=true
+Categories=Utility;Archiving;
+MimeType=application/x-quake-pak;application/x-quake-pk3;
+Keywords=Quake;PAK;PK3;archive;

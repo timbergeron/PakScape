@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Test archive core
         run: swift test --configuration release
@@ -61,7 +61,7 @@ jobs:
             -format UDZO
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: PakScape
           path: PakScape.dmg
@@ -78,10 +78,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -93,3 +93,62 @@ jobs:
 
       - name: Test
         run: dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+
+  linux:
+    name: Build Ubuntu app (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            runtime: linux-x64
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            runtime: linux-arm64
+            architecture: arm64
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore linux/PakScape.Linux.slnx
+
+      - name: Build
+        run: dotnet build linux/PakScape.Linux.slnx --configuration Release --no-restore --maxcpucount:1
+
+      - name: Test portable archive core
+        run: dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+
+      - name: Test Linux services
+        run: dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release --no-build
+
+      - name: Build Debian package
+        run: linux/packaging/build-deb.sh 1.0.1 ${{ matrix.runtime }}
+
+      - name: Inspect Debian package
+        run: dpkg-deb --info linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: PakScape-Ubuntu-${{ matrix.architecture }}
+          path: |
+            linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
+            linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14

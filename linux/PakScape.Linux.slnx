@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="PakScape.Linux/PakScape.Linux.csproj" />
+  <Project Path="PakScape.Linux.Core/PakScape.Linux.Core.csproj" />
+  <Project Path="PakScape.Linux.Tests/PakScape.Linux.Tests.csproj" />
+  <Project Path="../windows/PakStudio.Core/PakStudio.Core.csproj" />
+  <Project Path="../windows/PakStudio.Formats/PakStudio.Formats.csproj" />
+  <Project Path="../windows/PakStudio.Tests/PakStudio.Tests.csproj" />
+</Solution>

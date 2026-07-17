@@ -9,6 +9,7 @@ Run the portable archive tests:
 ```bash
 swift test
 dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release
+dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release
 ```
 
 On macOS, also build the app:
@@ -31,4 +32,6 @@ xcodebuild \
 - Add a regression test for parsing, serialization, or path-validation fixes.
 - Keep platform-specific UI out of the portable archive-format code.
 
-GitHub Actions must pass for both the macOS and Windows jobs before merging.
+For Linux changes, build `linux/PakScape.Linux.slnx` in Release mode and validate the Debian package on Ubuntu 24.04.
+
+GitHub Actions must pass for the macOS, Windows, and Linux jobs before merging.

@@ -1,6 +1,6 @@
 # PakScape
 
-PakScape is a Quake `.pak` and `.pk3` archive browser and editor for macOS, inspired by the original PakScape developed by Peter Engström. A Windows WPF edition is under active development in [`windows/`](windows/README.md).
+PakScape is a Quake `.pak` and `.pk3` archive browser and editor for macOS, Windows, and Linux, inspired by the original PakScape developed by Peter Engström. The Windows WPF edition lives in [`windows/`](windows/README.md), and the Ubuntu-focused Avalonia edition lives in [`linux/`](linux/README.md).
 
 ## Features
 
@@ -36,7 +36,19 @@ dotnet build windows/PakStudio.sln --configuration Release
 dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release
 ```
 
-GitHub Actions builds the macOS app and builds/tests the Windows solution on every push and pull request to `main`.
+## Build the Linux app
+
+The Linux edition targets Ubuntu 24.04/26.04 on x86-64 and ARM64 and requires the .NET 10 SDK for development:
+
+```bash
+dotnet restore linux/PakScape.Linux.slnx
+dotnet build linux/PakScape.Linux.slnx --configuration Release --no-restore
+dotnet run --project linux/PakScape.Linux/PakScape.Linux.csproj
+```
+
+See the [Linux README](linux/README.md) for the architecture, native dependencies, tests, Debian packaging, and supported-distribution policy.
+
+GitHub Actions builds and tests the macOS, Windows, and Ubuntu editions on every push and pull request to `main`.
 
 ## Run the archive-core tests
 

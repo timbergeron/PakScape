@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-quake-pak">
+    <comment>Quake PAK archive</comment>
+    <glob pattern="*.pak" />
+    <glob pattern="*.PAK" />
+    <magic priority="60">
+      <match type="string" value="PACK" offset="0" />
+    </magic>
+  </mime-type>
+  <mime-type type="application/x-quake-pk3">
+    <comment>Quake PK3 archive</comment>
+    <sub-class-of type="application/zip" />
+    <glob pattern="*.pk3" />
+    <glob pattern="*.PK3" />
+  </mime-type>
+</mime-info>

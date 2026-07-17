@@ -12,5 +12,9 @@ dmg_staging/
 windows/**/bin/
 windows/**/obj/
 windows/TestResults/
+linux/**/bin/
+linux/**/obj/
+linux/TestResults/
+linux/artifacts/
 *.user
 *.suo

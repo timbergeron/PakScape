@@ -1,0 +1,13 @@
+Package: pakscape
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCHITECTURE@
+Maintainer: PakScape contributors <timbergeron@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: ca-certificates, libc6 (>= 2.38), libgcc-s1, libgssapi-krb5-2, libicu74 | libicu76 | libicu78, libssl3t64, libstdc++6, tzdata, zlib1g, libx11-6, libice6, libsm6, libfontconfig1, xdg-utils
+Homepage: https://github.com/timbergeron/PakScape
+Description: Quake PAK and PK3 archive browser and editor
+ PakScape provides folder navigation, search, drag-and-drop import,
+ archive editing, safe export, and desktop file associations for Quake
+ PAK and PK3 archives.

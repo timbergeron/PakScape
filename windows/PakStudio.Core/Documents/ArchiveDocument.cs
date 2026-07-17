@@ -14,6 +14,8 @@ public sealed class ArchiveDocument
 
     public string DisplayName =>
         string.IsNullOrWhiteSpace(FilePath)
-            ? "Untitled.pak"
+            ? string.Equals(FormatId, "pk3", StringComparison.OrdinalIgnoreCase)
+                ? "Untitled.pk3"
+                : "Untitled.pak"
             : Path.GetFileName(FilePath);
 }

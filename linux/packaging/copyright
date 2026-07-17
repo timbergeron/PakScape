@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: PakScape
+Source: https://github.com/timbergeron/PakScape
+
+Files: *
+Copyright: PakScape contributors
+License: licensing-undetermined
+ This repository does not currently include a standalone license. Confirm
+ the rights for the original PakScape work and current source before
+ redistributing this package. This package is intended for development and
+ evaluation while that licensing work remains open.
