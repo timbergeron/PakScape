@@ -284,7 +284,7 @@ struct PakListView: NSViewRepresentable {
             return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
         }
 
-        private func commitRename(row: Int, newNameRaw: String) {
+        private func commitRename(row: Int, newNameRaw: String, textField: NSTextField) {
             let newName = newNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !newName.isEmpty else { return }
             guard row >= 0, row < parent.nodes.count else { return }
@@ -335,11 +335,11 @@ struct PakListView: NSViewRepresentable {
 
             if let textField = obj.object as? NSTextField {
                 let row = tableView.row(for: textField)
-                commitRename(row: row, newNameRaw: textField.stringValue)
+                commitRename(row: row, newNameRaw: textField.stringValue, textField: textField)
             } else if let textView = obj.object as? NSTextView,
                       let textField = textView.delegate as? NSTextField {
                 let row = tableView.row(for: textField)
-                commitRename(row: row, newNameRaw: textView.string)
+                commitRename(row: row, newNameRaw: textView.string, textField: textField)
             }
         }
 

@@ -154,7 +154,7 @@ enum PakPathValidator {
         }
     }
 
-    static func isSafeNodeName(_ name: String) -> Bool {
+    nonisolated static func isSafeNodeName(_ name: String) -> Bool {
         !name.isEmpty &&
         name != "." &&
         name != ".." &&
