@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'PakScape' in project 'PakScape' (no dependencies)

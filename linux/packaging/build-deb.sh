@@ -79,7 +79,7 @@ install -m 0644 \
     "${script_directory}/io.github.timbergeron.PakScape.xml" \
     "${package_root}/usr/share/mime/packages/io.github.timbergeron.PakScape.xml"
 install -m 0644 \
-    "${repository_root}/PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png" \
+    "${repository_root}/macos/PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png" \
     "${package_root}/usr/share/icons/hicolor/256x256/apps/io.github.timbergeron.PakScape.png"
 install -m 0644 \
     "${script_directory}/copyright" \

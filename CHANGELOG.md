@@ -26,6 +26,8 @@ Notable user-visible changes are documented here.
 - The Windows edition now supports archive editing, import/export, recent files, navigation, keyboard shortcuts, and unsaved-change prompts.
 - Windows tests use the maintained xUnit.net v3 packages.
 - Linux builds use .NET 10 LTS and Avalonia 12 with warnings-as-errors and recommended analyzer rules.
+- macOS sources, tests, project metadata, and documentation now live under `macos/`.
+- Generated Xcode `DerivedData` is no longer tracked in the repository.
 
 ### Security
 

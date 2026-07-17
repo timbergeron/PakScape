@@ -7,7 +7,7 @@ Thanks for helping improve PakScape. Keep changes focused, explain user-visible 
 Run the portable archive tests:
 
 ```bash
-swift test
+swift test --package-path macos
 dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release
 dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release
 ```
@@ -16,9 +16,10 @@ On macOS, also build the app:
 
 ```bash
 xcodebuild \
-  -project PakScape.xcodeproj \
+  -project macos/PakScape.xcodeproj \
   -scheme PakScape \
   -configuration Debug \
+  -derivedDataPath macos/build \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY=""
 ```

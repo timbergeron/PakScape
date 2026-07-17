@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="../../PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png"
+    <AvaloniaResource Include="../../macos/PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png"
                       Link="Assets/pakscape.png" />
   </ItemGroup>
 </Project>
