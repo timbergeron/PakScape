@@ -15,5 +15,15 @@ public static class ArchiveNameValidator
         {
             throw new ArchiveValidationException("Names cannot contain path separators.");
         }
+
+        if (name is "." or "..")
+        {
+            throw new ArchiveValidationException("Names cannot be '.' or '..'.");
+        }
+
+        if (name.Any(char.IsControl))
+        {
+            throw new ArchiveValidationException("Names cannot contain control characters.");
+        }
     }
 }

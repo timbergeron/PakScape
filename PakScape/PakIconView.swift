@@ -615,8 +615,9 @@ struct PakIconView: NSViewRepresentable {
             
             // Use a work item to be consistent with other rename paths
             let workItem = DispatchWorkItem { [weak self] in
-                item.beginRenaming(delegate: self!)
-                self?.renameWorkItem = nil
+                guard let self else { return }
+                item.beginRenaming(delegate: self)
+                self.renameWorkItem = nil
             }
             renameWorkItem = workItem
             DispatchQueue.main.async(execute: workItem)
@@ -667,7 +668,9 @@ struct PakIconView: NSViewRepresentable {
             let node = parent.nodes[index]
             guard newName != node.name else { return }
 
-            parent.viewModel.rename(node: node, to: newName)
+            if !parent.viewModel.rename(node: node, to: newName) {
+                textField.stringValue = node.name
+            }
 
             let indexPath = IndexPath(item: index, section: 0)
             if let item = collectionView.item(at: indexPath) as? PakIconItem {

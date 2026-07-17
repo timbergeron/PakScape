@@ -2,23 +2,15 @@ import SwiftUI
 
 struct PreferencesView: View {
     @AppStorage(FinderPreferencesKey.actionsEnabled) private var actionsEnabled: Bool = true
-    @AppStorage(FinderPreferencesKey.nestActions) private var nestActions: Bool = false
-    @AppStorage(FinderPreferencesKey.showIcons) private var showIcons: Bool = true
 
     var body: some View {
         Form {
-            Toggle("Show PakScape actions in Finder's contextual menu", isOn: $actionsEnabled)
+            Toggle("Enable PakScape Finder services", isOn: $actionsEnabled)
                 .onChange(of: actionsEnabled) { _, newValue in
                     FinderServiceManager.shared.updateRegistration(isEnabled: newValue)
                 }
 
-            Toggle("Nest actions in a submenu", isOn: $nestActions)
-                .disabled(!actionsEnabled)
-
-            Toggle("Show icons in actions", isOn: $showIcons)
-                .disabled(!actionsEnabled)
-
-            Text("Changes may require reopening Finder menus for the updates to appear.")
+            Text("Use Finder's Services menu to extract selected PAK/PK3 archives or pack selected folders. PakScape will ask where to save the result. You can also manage Services in System Settings under Keyboard Shortcuts.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)

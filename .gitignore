@@ -1,6 +1,14 @@
 .DS_Store
+build/
+.build/
+.swiftpm/
 DerivedData/
+xcuserdata/
+*.xcuserstate
+*.dmg
+dmg_staging/
 .vs/
+.idea/
 windows/**/bin/
 windows/**/obj/
 windows/TestResults/

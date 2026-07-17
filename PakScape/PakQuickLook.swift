@@ -43,6 +43,7 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
     }
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        urls[index] as NSURL
+        guard urls.indices.contains(index) else { return nil }
+        return urls[index] as NSURL
     }
 }

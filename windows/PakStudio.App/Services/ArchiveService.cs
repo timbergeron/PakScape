@@ -20,7 +20,8 @@ public sealed class ArchiveService : IArchiveService
 
     public Task SaveAsync(ArchiveDocument document, string path, CancellationToken cancellationToken = default)
     {
-        var handler = _formatRegistry.ResolveForSave(document.FormatId);
+        var handler = _formatRegistry.All.FirstOrDefault(candidate => candidate.CanOpen(path))
+            ?? _formatRegistry.ResolveForSave(document.FormatId);
         return handler.SaveAsync(document, path, cancellationToken);
     }
 }

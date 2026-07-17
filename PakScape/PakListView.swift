@@ -292,7 +292,9 @@ struct PakListView: NSViewRepresentable {
             let node = parent.nodes[row]
             guard newName != node.name else { return }
 
-            parent.viewModel.rename(node: node, to: newName)
+            if !parent.viewModel.rename(node: node, to: newName) {
+                textField.stringValue = node.name
+            }
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {

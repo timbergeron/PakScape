@@ -9,6 +9,23 @@ fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+private final class LockedURLCollection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [URL] = []
+
+    func append(_ url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        urls.append(url)
+    }
+
+    func snapshot() -> [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls
+    }
+}
+
 struct ContentView: View {
     @Binding var document: PakDocument
     let fileURL: URL?
@@ -85,6 +102,7 @@ struct ContentView: View {
                     newWindow.delegate = windowDelegate
                 }
                 newWindow.isDocumentEdited = model.hasUnsavedChanges
+                newWindow.representedURL = model.documentURL
             }
         )
     }
@@ -145,16 +163,22 @@ struct ContentView: View {
                 .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
                     guard let folder = model.currentFolder else { return false }
                     let dispatchGroup = DispatchGroup()
-                    var urls: [URL] = []
+                    let collectedURLs = LockedURLCollection()
                     
                     for provider in providers {
                         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                             dispatchGroup.enter()
-                            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { (item, error) in
+                            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { (item, _) in
+                                let loadedURL: URL?
                                 if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
-                                    urls.append(url)
+                                    loadedURL = url
                                 } else if let url = item as? URL {
-                                    urls.append(url)
+                                    loadedURL = url
+                                } else {
+                                    loadedURL = nil
+                                }
+                                if let loadedURL {
+                                    collectedURLs.append(loadedURL)
                                 }
                                 dispatchGroup.leave()
                             }
@@ -162,7 +186,7 @@ struct ContentView: View {
                     }
                     
                     dispatchGroup.notify(queue: .main) {
-                        model.importFiles(urls: urls, to: folder)
+                        model.importFiles(urls: collectedURLs.snapshot(), to: folder)
                     }
                     return true
                 }
@@ -516,7 +540,7 @@ private final class PakWindowDelegate: NSObject, NSWindowDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Do you want to save changes to this PAK?"
+        alert.messageText = "Do you want to save changes to this archive?"
         alert.informativeText = "Your changes will be lost if you don’t save them."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
@@ -545,7 +569,7 @@ private extension ContentView {
                 _ = model.saveCurrentPak(promptForLocationIfNeeded: true)
             },
             saveAs: {
-                model.exportPakAs()
+                _ = model.saveCurrentPakAs()
             },
             canSave: model.canSave,
             deleteFile: {

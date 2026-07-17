@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_REGION)</string>
+	<key>CFBundleDisplayName</key>
+	<string>PakScape</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -47,10 +49,50 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>NSHumanReadableCopyright</key>
-	<string></string>
+	<string>Copyright © 2025–2026 PakScape contributors.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Extract with PakScape</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>extractPakService</string>
+			<key>NSPortName</key>
+			<string>PakScape</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>com.timbergeron.PakScape.pak</string>
+				<string>com.timbergeron.PakScape.pk3</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Pack as PAK with PakScape</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>packFolderService</string>
+			<key>NSPortName</key>
+			<string>PakScape</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

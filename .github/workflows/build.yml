@@ -1,4 +1,11 @@
-name: Build macOS App
+name: Build and Test
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -7,12 +14,17 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: macos-latest
+  macos:
+    name: Build macOS app
+    runs-on: macos-26
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Test archive core
+        run: swift test --configuration release
 
       - name: Build Release
         run: |
@@ -22,7 +34,9 @@ jobs:
             -configuration Release \
             -derivedDataPath build \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO
 
       - name: Package App
         run: |
@@ -38,6 +52,7 @@ jobs:
           rm -rf "$STAGING_DIR"
           mkdir "$STAGING_DIR"
           ditto "$APP_PATH" "$STAGING_DIR/PakScape.app"
+          ln -s /Applications "$STAGING_DIR/Applications"
 
           hdiutil create "$DMG_NAME" \
             -volname "PakScape" \
@@ -50,3 +65,31 @@ jobs:
         with:
           name: PakScape
           path: PakScape.dmg
+          retention-days: 14
+
+  windows:
+    name: Build and test Windows app
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: windows
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore PakStudio.sln
+
+      - name: Build
+        run: dotnet build PakStudio.sln --configuration Release --no-restore --maxcpucount:1
+
+      - name: Test
+        run: dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build

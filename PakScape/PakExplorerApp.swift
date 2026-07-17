@@ -3,6 +3,7 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        FinderServiceManager.shared.applyInitialSettings()
         removeBlankFileMenuItem()
     }
 
@@ -42,6 +43,10 @@ struct PakScapeApp: App {
             PakEditCommands()
             PakGoCommands()
             PakViewCommands()
+        }
+
+        Settings {
+            PreferencesView()
         }
     }
 }
@@ -300,7 +305,7 @@ private final class AboutWindowPresenter {
 }
 
 private struct AboutView: View {
-    private let urlString = "https://github.com/timbergeron/PakScape"
+    private let projectURL = URL(string: "https://github.com/timbergeron/PakScape")
     private let displayString = "github.com/timbergeron/PakScape"
     private var versionText: String? {
         let bundle = Bundle.main
@@ -336,8 +341,10 @@ private struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LinkButtonRepresentable(title: displayString, url: URL(string: urlString)!)
-                .fixedSize()
+            if let projectURL {
+                LinkButtonRepresentable(title: displayString, url: projectURL)
+                    .fixedSize()
+            }
         }
         .padding(.vertical, 24)
         .padding(.horizontal, 28)

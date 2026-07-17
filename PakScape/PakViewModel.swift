@@ -80,10 +80,6 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         documentURL = url
     }
 
-    enum ExportError: Error {
-        case missingData
-    }
-
     struct AudioPreviewVisualState {
         let isCurrent: Bool
         let isPlaying: Bool
@@ -115,6 +111,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func exportToTemporaryLocation(node: PakNode) throws -> URL {
+        try PakPathValidator.validateNodeName(node.name)
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
 
@@ -124,9 +121,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return destination
         }
 
-        guard let data = extractData(for: node) else {
-            throw ExportError.missingData
-        }
+        let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
 
         let destination = base.appendingPathComponent(node.name)
         try data.write(to: destination)
@@ -221,56 +216,64 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
-    func rename(node: PakNode, to newName: String) {
+    @discardableResult
+    func rename(node: PakNode, to newName: String) -> Bool {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != node.name else { return }
-
-        // Calculate potential path length
-        let currentEntryName = node.entry?.name ?? node.name
-        let parentPath: String
-        if let slashIndex = currentEntryName.lastIndex(of: "/") {
-            parentPath = String(currentEntryName[..<currentEntryName.index(after: slashIndex)])
-        } else {
-            parentPath = ""
+        guard !trimmed.isEmpty else {
+            presentWarning(title: "Invalid Name", message: "Names cannot be empty.")
+            return false
         }
 
-        // Enforce 56-byte limit for the full path
-        let maxPathLength = 55 // 56 bytes null-terminated
-        let parentLength = parentPath.utf8.count
-        let maxNameLength = maxPathLength - parentLength
-        
-        var validName = trimmed
-        if validName.utf8.count > maxNameLength {
-            let allowedBytes = validName.utf8.prefix(maxNameLength)
-            if let truncated = String(allowedBytes) {
-                validName = truncated
-            }
-        }
-        
-        guard !validName.isEmpty else { return }
+        guard trimmed != node.name else { return true }
 
-        node.name = validName
-        if let entry = node.entry {
-            let updatedPath = parentPath + validName
-            node.entry = PakEntry(name: updatedPath, offset: entry.offset, length: entry.length)
+        guard PakPathValidator.isSafeNodeName(trimmed) else {
+            presentWarning(
+                title: "Invalid Name",
+                message: "Names cannot be '.', '..', or contain slashes or control characters."
+            )
+            return false
         }
+
+        if let root = pakFile?.root,
+           let parent = parentNode(of: node, in: root),
+           parent.children?.contains(where: {
+               $0 !== node && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+           }) == true {
+            presentWarning(
+                title: "Name Already in Use",
+                message: "An item named '\(trimmed)' already exists in this folder."
+            )
+            return false
+        }
+
+        node.name = trimmed
         markDirty()
+        return true
+    }
+
+    private func presentWarning(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     func write(node: PakNode, toDirectory directory: URL) throws {
+        try PakPathValidator.validateNodeName(node.name)
         let destination = directory.appendingPathComponent(node.name, isDirectory: node.isFolder)
         if node.isFolder {
             try PakFilesystemExporter.export(node: node, originalData: pakFile?.data, to: destination)
         } else {
-            guard let data = extractData(for: node) else {
-                throw ExportError.missingData
-            }
+            let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
             try data.write(to: destination)
         }
     }
 
     func exportSelectionToTemporaryLocation(nodes: [PakNode]) throws -> URL {
-        precondition(!nodes.isEmpty)
+        guard !nodes.isEmpty else {
+            throw PakError.unknown("No items were selected for export.")
+        }
         if nodes.count == 1, let first = nodes.first {
             return try exportToTemporaryLocation(node: first)
         }
@@ -442,6 +445,20 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return nil
     }
 
+    private func parentNode(of node: PakNode, in root: PakNode) -> PakNode? {
+        if root.children?.contains(where: { $0 === node }) == true {
+            return root
+        }
+
+        for child in root.children ?? [] where child.isFolder {
+            if let parent = parentNode(of: node, in: child) {
+                return parent
+            }
+        }
+
+        return nil
+    }
+
     private func isDescendant(_ node: PakNode, of possibleAncestor: PakNode) -> Bool {
         for child in possibleAncestor.children ?? [] {
             if child === node {
@@ -466,43 +483,70 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
         var inserted: [PakNode] = []
+        var failures: [String] = []
+
         for url in urls {
-            if let node = createNodeFromFileURL(url, in: folder) {
+            do {
+                let node = try createNodeFromFileURL(url, in: folder)
                 insert(node: node, into: folder)
                 inserted.append(node)
+            } catch {
+                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
-        sortFolder(folder)
-        markDirty()
+
+        if !inserted.isEmpty {
+            sortFolder(folder)
+            markDirty()
+        }
+
+        if !failures.isEmpty {
+            presentImportFailures(failures)
+        }
+
         selectedNodes = inserted
         selectedFile = inserted.first
         return inserted
     }
 
-    private func createNodeFromFileURL(_ url: URL, in folder: PakNode) -> PakNode? {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return nil }
-        let name = availableName(for: url.lastPathComponent, in: folder)
-
-        if isDir.boolValue {
-            let node = PakNode(name: name)
-            do {
-                try PakLoader.buildTree(from: url, into: node)
-                PakLoader.sortNodeRecursively(node)
-                return node
-            } catch {
-                return nil
+    private func createNodeFromFileURL(_ url: URL, in folder: PakNode) throws -> PakNode {
+        let accessedSecurityScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessedSecurityScope {
+                url.stopAccessingSecurityScopedResource()
             }
         }
 
-        do {
-            let data = try Data(contentsOf: url)
-            let node = PakNode(name: name)
-            node.localData = data
-            return node
-        } catch {
-            return nil
+        let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        let values = try url.resourceValues(forKeys: resourceKeys)
+        guard values.isSymbolicLink != true else {
+            throw PakError.unsafePath(url.lastPathComponent)
         }
+
+        let name = availableName(for: url.lastPathComponent, in: folder)
+        try PakPathValidator.validateNodeName(name)
+
+        if values.isDirectory == true {
+            let node = PakNode(name: name)
+            try PakLoader.buildTree(from: url, into: node)
+            PakLoader.sortNodeRecursively(node)
+            return node
+        }
+
+        let data = try Data(contentsOf: url)
+        let node = PakNode(name: name)
+        node.localData = data
+        return node
+    }
+
+    private func presentImportFailures(_ failures: [String]) {
+        let shownFailures = failures.prefix(4).joined(separator: "\n")
+        let remainingCount = failures.count - min(failures.count, 4)
+        let suffix = remainingCount > 0 ? "\n…and \(remainingCount) more." : ""
+        presentWarning(
+            title: failures.count == 1 ? "Couldn’t Import Item" : "Some Items Weren’t Imported",
+            message: shownFailures + suffix
+        )
     }
 
     private func exportSelectionForPasteboard(nodes: [PakNode]) throws -> [URL] {
@@ -529,7 +573,16 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     // Export the currently-selected file
     func exportSelectedFile() {
-        guard let node = selectedNodes.first ?? selectedFile, let data = extractData(for: node) else { return }
+        guard let node = selectedNodes.first ?? selectedFile else { return }
+
+        let data: Data
+        do {
+            data = try PakNodeData.data(for: node, originalData: pakFile?.data)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+            return
+        }
 
         let save = NSSavePanel()
         save.nameFieldStringValue = node.name
@@ -537,7 +590,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         save.begin { response in
             guard response == .OK, let outURL = save.url else { return }
             do {
-                try data.write(to: outURL)
+                try data.write(to: outURL, options: .atomic)
             } catch {
                 let alert = NSAlert(error: error)
                 alert.runModal()
@@ -546,17 +599,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     
     func extractData(for node: PakNode) -> Data? {
-        if let local = node.localData {
-            return local
-        }
-        guard let pakFile = pakFile, let entry = node.entry else { return nil }
-        
-        let range = entry.offset ..< (entry.offset + entry.length)
-        // Safety check
-        if range.upperBound <= pakFile.data.count {
-            return pakFile.data.subdata(in: range)
-        }
-        return nil
+        try? PakNodeData.data(for: node, originalData: pakFile?.data)
     }
 
     func previewImage(for node: PakNode) -> NSImage? {
@@ -604,52 +647,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {
-        for url in urls {
-            importItem(at: url, into: folder)
-        }
-        sortFolder(folder)
-        markDirty()
-    }
-
-    private func importItem(at url: URL, into folder: PakNode) {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return }
-
-        if isDir.boolValue {
-            folder.children = folder.children ?? []
-            let targetFolder: PakNode
-            if let existing = folder.children?.first(where: { $0.name == url.lastPathComponent && $0.isFolder }) {
-                targetFolder = existing
-            } else {
-                let newFolder = PakNode(name: url.lastPathComponent)
-                folder.children?.append(newFolder)
-                targetFolder = newFolder
-            }
-
-            let contents = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-            for child in contents {
-                importItem(at: child, into: targetFolder)
-            }
-            sortFolder(targetFolder)
-            return
-        }
-
-        do {
-            let data = try Data(contentsOf: url)
-            let name = url.lastPathComponent
-
-            folder.children = folder.children ?? []
-            if let existingIndex = folder.children?.firstIndex(where: { $0.name == name }) {
-                folder.children?[existingIndex].localData = data
-                folder.children?[existingIndex].entry = nil
-            } else {
-                let newNode = PakNode(name: name)
-                newNode.localData = data
-                folder.children?.append(newNode)
-            }
-        } catch {
-            print("Failed to import \(url): \(error)")
-        }
+        _ = pasteFileURLs(urls, into: folder)
     }
     func deleteSelectedFile() {
         guard let folder = currentFolder else { return }
@@ -662,6 +660,15 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } else {
             return
         }
+
+        let selectedCount = idsToDelete.count
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = selectedCount == 1 ? "Delete This Item?" : "Delete \(selectedCount) Items?"
+        alert.informativeText = "This removes the selection from the archive. This operation cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         if let audioPreviewNodeID, idsToDelete.contains(audioPreviewNodeID) {
             stopAudioPreview()
@@ -693,7 +700,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let baseName = "New Folder"
         var candidate = baseName
         var suffix = 1
-        while target.children?.contains(where: { $0.name == candidate }) == true {
+        while target.children?.contains(where: {
+            $0.name.caseInsensitiveCompare(candidate) == .orderedSame
+        }) == true {
             suffix += 1
             candidate = "\(baseName) \(suffix)"
         }
@@ -705,24 +714,27 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return newNode
     }
 
-    func exportPakAs() {
-        guard let pakFile = pakFile else { return }
-        
+    @discardableResult
+    func saveCurrentPakAs() -> Bool {
+        guard let pakFile = pakFile else { return false }
+
         let save = NSSavePanel()
-        save.allowedContentTypes = PakDocument.readableContentTypes
+        save.allowedContentTypes = PakDocument.writableContentTypes
         save.nameFieldStringValue = pakFile.name
-        
-        save.begin { response in
-            guard response == .OK, let url = save.url else { return }
-            let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
-            do {
-                let data = try self.outputData(for: url, with: result)
-                try data.write(to: url)
-            } catch {
-                let alert = NSAlert(error: error)
-                alert.runModal()
-            }
+        save.canCreateDirectories = true
+        save.isExtensionHidden = false
+
+        guard save.runModal() == .OK, let url = save.url else {
+            return false
         }
+
+        guard write(pakFile: pakFile, to: url) else {
+            return false
+        }
+
+        documentURL = url
+        pakFile.name = url.lastPathComponent
+        return true
     }
 
     @discardableResult
@@ -735,27 +747,22 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
         guard promptForLocationIfNeeded else { return false }
 
-        let save = NSSavePanel()
-        save.allowedContentTypes = PakDocument.readableContentTypes
-        save.nameFieldStringValue = pakFile.name
-        let response = save.runModal()
-        if response == .OK, let url = save.url {
-            let success = write(pakFile: pakFile, to: url)
-            if success {
-                documentURL = url
-            }
-            return success
-        }
-        return false
+        return saveCurrentPakAs()
     }
 
     private func write(pakFile: PakFile, to url: URL) -> Bool {
-        let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
         do {
-            let data = try outputData(for: url, with: result)
-            try data.write(to: url)
-            pakFile.data = result.data
-            pakFile.entries = result.entries
+            if url.pathExtension.lowercased() == "pk3" {
+                let data = try PakZipWriter.write(root: pakFile.root, originalData: pakFile.data)
+                try data.write(to: url, options: .atomic)
+            } else {
+                let result = try PakWriter.write(root: pakFile.root, originalData: pakFile.data)
+                try result.data.write(to: url, options: .atomic)
+                result.applyToNodes()
+                pakFile.data = result.data
+                pakFile.entries = result.entries
+            }
+            pakFile.name = url.lastPathComponent
             pakFile.version = UUID()
             hasUnsavedChanges = false
             return true
@@ -764,14 +771,6 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             alert.runModal()
             return false
         }
-    }
-    
-    private func outputData(for url: URL, with result: PakWriter.Output) throws -> Data {
-        let ext = url.pathExtension.lowercased()
-        if ext == "pk3", let root = pakFile?.root {
-            return try PakZipWriter.write(root: root, originalData: result.data)
-        }
-        return result.data
     }
     
     func markDirty() {

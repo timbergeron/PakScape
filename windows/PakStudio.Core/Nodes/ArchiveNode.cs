@@ -14,7 +14,7 @@ public abstract class ArchiveNode
     public string Name
     {
         get => _name;
-        set => _name = value ?? string.Empty;
+        internal set => _name = value ?? string.Empty;
     }
 
     public ArchiveFolderNode? Parent { get; internal set; }

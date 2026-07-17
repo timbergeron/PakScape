@@ -46,20 +46,37 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         var output = Serialize(document);
-        var tempPath = path + ".tmp";
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new ArgumentException("The destination path has no parent directory.", nameof(path));
+        Directory.CreateDirectory(directory);
 
-        await File.WriteAllBytesAsync(tempPath, output, cancellationToken).ConfigureAwait(false);
+        var tempPath = Path.Combine(
+            directory,
+            $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
 
-        if (File.Exists(path))
+        try
         {
-            File.Replace(tempPath, path, null, true);
+            await File.WriteAllBytesAsync(tempPath, output, cancellationToken).ConfigureAwait(false);
+
+            if (File.Exists(fullPath))
+            {
+                File.Replace(tempPath, fullPath, null, true);
+            }
+            else
+            {
+                File.Move(tempPath, fullPath);
+            }
         }
-        else
+        finally
         {
-            File.Move(tempPath, path, overwrite: true);
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
         }
 
-        document.FilePath = path;
+        document.FilePath = fullPath;
         document.FormatId = FormatId;
         document.IsDirty = false;
     }
@@ -80,7 +97,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         var directoryOffset = LittleEndianReader.ReadInt32(bytes, 4);
         var directoryLength = LittleEndianReader.ReadInt32(bytes, 8);
         var directoryEnd = (long)directoryOffset + directoryLength;
-        if (directoryOffset < 0 || directoryLength < 0 || directoryEnd > bytes.Length)
+        if (directoryOffset < HeaderSize || directoryLength < 0 || directoryEnd > bytes.Length)
         {
             throw new ArchiveCorruptException("The directory table lies outside the archive bounds.");
         }
@@ -98,12 +115,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         {
             var entryOffset = directoryOffset + (index * DirectoryEntrySize);
             var entryName = ReadEntryName(bytes.Slice(entryOffset, EntryNameLength));
-            var normalizedPath = PathHelper.NormalizeArchivePath(entryName);
-
-            if (string.IsNullOrWhiteSpace(normalizedPath))
-            {
-                throw new ArchiveCorruptException("The archive contains an empty directory entry.");
-            }
+            var normalizedPath = ValidateAndNormalizeEntryPath(entryName);
 
             var fileOffset = LittleEndianReader.ReadInt32(bytes, entryOffset + EntryNameLength);
             var fileLength = LittleEndianReader.ReadInt32(bytes, entryOffset + EntryNameLength + sizeof(int));
@@ -138,10 +150,17 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
             FormatId = FormatId,
         };
 
-        foreach (var entry in directoryEntries)
+        try
         {
-            var payload = bytes.Slice(entry.Offset, entry.Length).ToArray();
-            ArchiveTreeBuilder.AddFile(document.Root, entry.Path, payload);
+            foreach (var entry in directoryEntries)
+            {
+                var payload = bytes.Slice(entry.Offset, entry.Length).ToArray();
+                ArchiveTreeBuilder.AddFile(document.Root, entry.Path, payload);
+            }
+        }
+        catch (ArchiveException exception) when (exception is not ArchiveCorruptException)
+        {
+            throw new ArchiveCorruptException($"The archive directory is invalid: {exception.Message}");
         }
 
         ArchiveTreeBuilder.SortRecursively(document.Root);
@@ -161,6 +180,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         stream.Write(new byte[HeaderSize]);
 
         var directory = new List<PakDirectoryEntry>(files.Count);
+        var encodedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in files)
         {
             var relativePath = PathHelper.ToRelativeArchivePath(entry.Path);
@@ -169,7 +189,15 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
                 continue;
             }
 
-            var data = entry.File.Data ?? Array.Empty<byte>();
+            var encodedName = EncodeEntryName(relativePath);
+            var storedPath = Encoding.ASCII.GetString(encodedName).TrimEnd('\0');
+            if (!encodedPaths.Add(storedPath))
+            {
+                throw new ArchiveValidationException(
+                    $"Path '{relativePath}' conflicts with another path when encoded as a PAK name.");
+            }
+
+            var data = entry.File.Data;
             var offset = checked((int)stream.Position);
             stream.Write(data, 0, data.Length);
             directory.Add(new PakDirectoryEntry(relativePath, offset, data.Length));
@@ -225,22 +253,67 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
     {
         var terminator = bytes.IndexOf((byte)0);
         var slice = terminator >= 0 ? bytes[..terminator] : bytes;
+
+        foreach (var value in slice)
+        {
+            if (value is < 0x20 or > 0x7E)
+            {
+                throw new ArchiveCorruptException(
+                    "The archive contains a PAK path outside printable ASCII.");
+            }
+        }
+
         return Encoding.ASCII.GetString(slice);
+    }
+
+    private static string ValidateAndNormalizeEntryPath(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var segments = normalized.Split('/', StringSplitOptions.None);
+
+        if (normalized.Length == 0 ||
+            normalized.StartsWith('/') ||
+            normalized.EndsWith('/') ||
+            segments.Any(string.IsNullOrEmpty))
+        {
+            throw new ArchiveCorruptException($"Entry '{path}' has an unsafe archive path.");
+        }
+
+        try
+        {
+            foreach (var segment in segments)
+            {
+                ArchiveNameValidator.ValidateNodeName(segment);
+            }
+        }
+        catch (ArchiveValidationException exception)
+        {
+            throw new ArchiveCorruptException($"Entry '{path}' has an unsafe archive path: {exception.Message}");
+        }
+
+        return string.Join('/', segments);
     }
 
     private static byte[] EncodeEntryName(string path)
     {
         var bytes = new byte[EntryNameLength];
-        var encoded = new List<byte>(MaxStoredPathLength);
+        var encoded = new List<byte>(path.Length);
 
         foreach (var character in path)
         {
-            if (encoded.Count >= MaxStoredPathLength)
+            if (character is < ' ' or > '~')
             {
-                break;
+                throw new ArchiveValidationException(
+                    $"PAK path '{path}' contains characters outside printable ASCII.");
             }
 
-            encoded.Add(character is >= ' ' and <= '~' ? (byte)character : (byte)'?');
+            encoded.Add((byte)character);
+        }
+
+        if (encoded.Count > MaxStoredPathLength)
+        {
+            throw new ArchiveValidationException(
+                $"PAK path '{path}' exceeds the {MaxStoredPathLength}-byte format limit.");
         }
 
         encoded.CopyTo(bytes, 0);

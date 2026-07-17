@@ -5,6 +5,7 @@ using PakStudio.App.ViewModels;
 using PakStudio.App.Views;
 using PakStudio.Core.Interfaces;
 using PakStudio.Formats.Pak;
+using PakStudio.Formats.Pk3;
 
 namespace PakStudio.App;
 
@@ -37,12 +38,15 @@ public partial class App : Application
         services.AddLogging();
 
         services.AddSingleton<IArchiveFormatHandler, PakFormatHandler>();
+        services.AddSingleton<IArchiveFormatHandler, Pk3FormatHandler>();
         services.AddSingleton<IArchiveFormatRegistry, ArchiveFormatRegistry>();
         services.AddSingleton<IArchiveService, ArchiveService>();
         services.AddSingleton<IFileDialogService, FileDialogService>();
         services.AddSingleton<IMessageBoxService, MessageBoxService>();
+        services.AddSingleton<ITextInputService, TextInputService>();
         services.AddSingleton<IRecentFilesService, JsonRecentFilesService>();
         services.AddSingleton<IIconService, GlyphIconService>();
+        services.AddSingleton<IArchiveFileTransferService, ArchiveFileTransferService>();
 
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();

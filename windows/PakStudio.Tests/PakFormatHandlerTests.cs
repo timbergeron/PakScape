@@ -30,6 +30,45 @@ public sealed class PakFormatHandlerTests
     }
 
     [Fact]
+    public void Parse_ParentTraversalPath_Throws()
+    {
+        var bytes = CreatePak(("../outside.txt", 12, [1, 2, 3, 4]));
+
+        Assert.Throws<ArchiveCorruptException>(() => _handler.Parse(bytes));
+    }
+
+    [Theory]
+    [InlineData("/absolute.txt")]
+    [InlineData("maps//bad.txt")]
+    [InlineData("maps/")]
+    public void Parse_MalformedPath_ThrowsInsteadOfNormalizing(string path)
+    {
+        var bytes = CreatePak((path, 12, [1]));
+
+        Assert.Throws<ArchiveCorruptException>(() => _handler.Parse(bytes));
+    }
+
+    [Fact]
+    public void Parse_NonAsciiPathByte_ThrowsInsteadOfReplacingCharacter()
+    {
+        var bytes = CreatePak(("maps/a.txt", 12, [1]));
+        var directoryOffset = BitConverter.ToInt32(bytes, 4);
+        bytes[directoryOffset + 5] = 0xFF;
+
+        Assert.Throws<ArchiveCorruptException>(() => _handler.Parse(bytes));
+    }
+
+    [Fact]
+    public void Parse_FileAndFolderPathConflict_ThrowsCorruptArchive()
+    {
+        var bytes = CreatePak(
+            ("maps", 12, [1]),
+            ("maps/start.bsp", 13, [2]));
+
+        Assert.Throws<ArchiveCorruptException>(() => _handler.Parse(bytes));
+    }
+
+    [Fact]
     public void Serialize_ThenParse_RoundTripsArchive()
     {
         var document = new ArchiveDocument
@@ -59,6 +98,61 @@ public sealed class PakFormatHandlerTests
                 Assert.Equal("progs/player.mdl", second.Path);
                 Assert.Equal(new byte[] { 0x49, 0x44, 0x50, 0x4F }, second.File.Data);
             });
+    }
+
+    [Fact]
+    public void Serialize_PathLongerThanFormatLimit_Throws()
+    {
+        var document = new ArchiveDocument
+        {
+            FormatId = "pak",
+        };
+        var path = new string('a', 56);
+        ArchiveTreeBuilder.AddFile(document.Root, path, [1]);
+
+        Assert.Throws<ArchiveValidationException>(() => _handler.Serialize(document));
+    }
+
+    [Fact]
+    public void Serialize_UnicodePath_ThrowsInsteadOfRenamingIt()
+    {
+        var document = new ArchiveDocument
+        {
+            FormatId = "pak",
+        };
+        ArchiveTreeBuilder.AddFile(document.Root, "maps/é.txt", [1]);
+
+        Assert.Throws<ArchiveValidationException>(() => _handler.Serialize(document));
+    }
+
+    [Fact]
+    public async Task SaveAsync_ReplacesAtomicallyWithoutLeavingTemporaryFiles()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"PakStudioTests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "test.pak");
+
+        try
+        {
+            var document = new ArchiveDocument
+            {
+                FormatId = "pak",
+            };
+            var file = ArchiveTreeBuilder.AddFile(document.Root, "maps/start.txt", [1, 2, 3]);
+
+            await _handler.SaveAsync(document, path, TestContext.Current.CancellationToken);
+            file.Data = [4, 5, 6];
+            await _handler.SaveAsync(document, path, TestContext.Current.CancellationToken);
+
+            var reloaded = await _handler.OpenAsync(path, TestContext.Current.CancellationToken);
+            var savedFile = Assert.Single(ArchiveTreeBuilder.FlattenFiles(reloaded.Root));
+            Assert.Equal(new byte[] { 4, 5, 6 }, savedFile.File.Data);
+            Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static byte[] CreatePak(params (string Path, int Offset, byte[] Data)[] entries)

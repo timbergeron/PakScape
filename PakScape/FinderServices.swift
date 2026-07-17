@@ -3,8 +3,6 @@ import Foundation
 
 enum FinderPreferencesKey {
     static let actionsEnabled = "finderActionsEnabled"
-    static let nestActions = "finderNestActions"
-    static let showIcons = "finderShowIcons"
 }
 
 @MainActor
@@ -28,7 +26,6 @@ final class FinderServiceManager {
 
     func updateRegistration(isEnabled: Bool) {
         NSApp.servicesProvider = isEnabled ? provider : nil
-        NSUpdateDynamicServices()
     }
 }
 
@@ -45,13 +42,37 @@ final class FinderServiceProvider: NSObject {
             return
         }
 
+        guard let outputDirectory = chooseOutputDirectory(
+            title: "Choose an Extraction Location",
+            message: pakURLs.count == 1
+                ? "PakScape will create a folder for the extracted archive."
+                : "PakScape will create one folder for each extracted archive.",
+            initialDirectory: pakURLs.first?.deletingLastPathComponent()
+        ) else {
+            return
+        }
+
+        let accessedOutputScope = outputDirectory.startAccessingSecurityScopedResource()
+        defer {
+            if accessedOutputScope {
+                outputDirectory.stopAccessingSecurityScopedResource()
+            }
+        }
+
         var revealURLs: [URL] = []
 
         for pakURL in pakURLs {
+            let accessedSecurityScope = pakURL.startAccessingSecurityScopedResource()
+            defer {
+                if accessedSecurityScope {
+                    pakURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
             do {
                 let pakFile = try loadPak(at: pakURL)
                 let destination = nextAvailableURL(
-                    in: pakURL.deletingLastPathComponent(),
+                    in: outputDirectory,
                     baseName: pakURL.deletingPathExtension().lastPathComponent,
                     pathExtension: nil
                 )
@@ -77,18 +98,42 @@ final class FinderServiceProvider: NSObject {
             return
         }
 
+        guard let outputDirectory = chooseOutputDirectory(
+            title: "Choose Where to Save the PAK",
+            message: folders.count == 1
+                ? "PakScape will create a PAK named after the selected folder."
+                : "PakScape will create one PAK for each selected folder.",
+            initialDirectory: folders.first?.deletingLastPathComponent()
+        ) else {
+            return
+        }
+
+        let accessedOutputScope = outputDirectory.startAccessingSecurityScopedResource()
+        defer {
+            if accessedOutputScope {
+                outputDirectory.stopAccessingSecurityScopedResource()
+            }
+        }
+
         var revealURLs: [URL] = []
 
         for folder in folders {
+            let accessedSecurityScope = folder.startAccessingSecurityScopedResource()
+            defer {
+                if accessedSecurityScope {
+                    folder.stopAccessingSecurityScopedResource()
+                }
+            }
+
             do {
                 let root = try PakLoader.loadDirectoryTree(at: folder)
-                let output = PakWriter.write(root: root, originalData: nil)
+                let output = try PakWriter.write(root: root, originalData: nil)
                 let destination = nextAvailableURL(
-                    in: folder.deletingLastPathComponent(),
+                    in: outputDirectory,
                     baseName: folder.lastPathComponent,
                     pathExtension: "pak"
                 )
-                try output.data.write(to: destination)
+                try output.data.write(to: destination, options: .atomic)
                 revealURLs.append(destination)
             } catch let serviceError {
                 errorOut?.pointee = serviceError.localizedDescription.NSStringValue
@@ -125,6 +170,19 @@ private extension FinderServiceProvider {
         var isDir: ObjCBool = false
         fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
         return isDir.boolValue
+    }
+
+    func chooseOutputDirectory(title: String, message: String, initialDirectory: URL?) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.message = message
+        panel.prompt = "Choose"
+        panel.directoryURL = initialDirectory
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     func nextAvailableURL(in directory: URL, baseName: String, pathExtension: String?) -> URL {

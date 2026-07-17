@@ -31,4 +31,24 @@ public sealed class ArchiveTreeBuilderTests
         Assert.Throws<ArchivePathConflictException>(() =>
             ArchiveTreeBuilder.AddFile(root, "maps/start.bsp", [4, 5, 6]));
     }
+
+    [Theory]
+    [InlineData("../outside.txt")]
+    [InlineData("maps/../../outside.txt")]
+    public void AddFile_RejectsParentTraversal(string path)
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+
+        Assert.Throws<ArchiveValidationException>(() =>
+            ArchiveTreeBuilder.AddFile(root, path, [1, 2, 3]));
+    }
+
+    [Fact]
+    public void AddFile_RejectsControlCharacters()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+
+        Assert.Throws<ArchiveValidationException>(() =>
+            ArchiveTreeBuilder.AddFile(root, "maps/bad\nname.txt", [1]));
+    }
 }

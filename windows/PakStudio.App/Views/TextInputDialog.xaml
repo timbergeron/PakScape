@@ -1,0 +1,38 @@
+<Window x:Class="PakStudio.App.Views.TextInputDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Name"
+        Width="440"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="MessageText"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,12" />
+        <TextBox x:Name="ValueTextBox"
+                 Grid.Row="1"
+                 MinWidth="380"
+                 Margin="0,0,0,18" />
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Cancel"
+                    IsCancel="True"
+                    MinWidth="82" />
+            <Button Content="OK"
+                    IsDefault="True"
+                    MinWidth="82"
+                    Margin="8,0,0,0"
+                    Click="Accept_OnClick" />
+        </StackPanel>
+    </Grid>
+</Window>

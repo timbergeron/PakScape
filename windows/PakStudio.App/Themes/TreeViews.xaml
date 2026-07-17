@@ -7,5 +7,7 @@
 
     <Style TargetType="TreeViewItem">
         <Setter Property="Padding" Value="4" />
+        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+        <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
     </Style>
 </ResourceDictionary>

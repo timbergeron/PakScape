@@ -1,19 +1,22 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using PakStudio.App.Commands;
-using PakStudio.App.Models;
 using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
+using PakStudio.Core.Operations;
 
 namespace PakStudio.App.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly IArchiveService _archiveService;
+    private readonly IArchiveFileTransferService _fileTransferService;
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
+    private readonly ITextInputService _textInputService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly IIconService _iconService;
     private readonly Dictionary<ArchiveFolderNode, FolderTreeNodeViewModel> _folderLookup = [];
@@ -21,32 +24,49 @@ public sealed class MainWindowViewModel : ViewModelBase
     private ArchiveDocument? _document;
     private FolderTreeNodeViewModel? _selectedFolder;
     private ArchiveItemViewModel? _selectedItem;
+    private IReadOnlyList<ArchiveItemViewModel> _selectedItems = [];
     private ArchiveFolderNode? _currentFolder;
     private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
     private string _statusText = "Ready";
     private string _selectionStatus = "0 selected";
+    private bool _isBusy;
     private bool _isInitialized;
 
     public MainWindowViewModel(
         IArchiveService archiveService,
+        IArchiveFileTransferService fileTransferService,
         IFileDialogService fileDialogService,
         IMessageBoxService messageBoxService,
+        ITextInputService textInputService,
         IRecentFilesService recentFilesService,
         IIconService iconService)
     {
         _archiveService = archiveService;
+        _fileTransferService = fileTransferService;
         _fileDialogService = fileDialogService;
         _messageBoxService = messageBoxService;
+        _textInputService = textInputService;
         _recentFilesService = recentFilesService;
         _iconService = iconService;
 
-        NewCommand = new RelayCommand(CreateNewArchive);
-        OpenCommand = new AsyncRelayCommand(OpenAsync);
+        NewCommand = new AsyncRelayCommand(CreateNewArchiveAsync, () => !IsBusy);
+        OpenCommand = new AsyncRelayCommand(OpenAsync, () => !IsBusy);
+        OpenRecentCommand = new AsyncRelayCommand<string>(OpenRecentAsync, path =>
+            !IsBusy && !string.IsNullOrWhiteSpace(path));
         SaveCommand = new AsyncRelayCommand(SaveAsync, CanSave);
-        SaveAsCommand = new AsyncRelayCommand(SaveAsAsync, () => Document is not null);
-        RefreshCommand = new RelayCommand(RefreshCurrentFolder, () => Document is not null);
-        ExitCommand = new RelayCommand(() => Application.Current.Shutdown());
+        SaveAsCommand = new AsyncRelayCommand(SaveAsAsync, () => Document is not null && !IsBusy);
+        RefreshCommand = new RelayCommand(RefreshCurrentFolder, () => Document is not null && !IsBusy);
+        ExitCommand = new RelayCommand(() => Application.Current.MainWindow?.Close());
         AboutCommand = new RelayCommand(ShowAbout);
+
+        NewFolderCommand = new RelayCommand(CreateFolder, CanModifyCurrentFolder);
+        AddFilesCommand = new AsyncRelayCommand(AddFilesAsync, CanModifyCurrentFolder);
+        AddFolderCommand = new AsyncRelayCommand(AddFolderAsync, CanModifyCurrentFolder);
+        RenameCommand = new RelayCommand(RenameSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
+        DeleteCommand = new RelayCommand(DeleteSelectedItems, CanModifySelectedItems);
+        ExportCommand = new AsyncRelayCommand(ExportSelectedItemsAsync, CanModifySelectedItems);
+        OpenSelectedCommand = new RelayCommand(OpenSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
+        UpCommand = new RelayCommand(NavigateUp, () => _currentFolder?.Parent is not null && !IsBusy);
 
         ShowLargeIconsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.LargeIcons));
         ShowSmallIconsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.SmallIcons));
@@ -85,7 +105,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _selectedItem, value))
             {
-                SelectionStatus = value is null ? "0 selected" : $"1 selected: {value.Name}";
+                CommandManager.InvalidateRequerySuggested();
             }
         }
     }
@@ -94,6 +114,18 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         get => _activeViewMode;
         private set => SetProperty(ref _activeViewMode, value);
+    }
+
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (SetProperty(ref _isBusy, value))
+            {
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
     }
 
     public string WindowTitle
@@ -126,9 +158,11 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public IReadOnlyList<string> RecentFiles => _recentFilesService.GetRecentFiles();
 
-    public RelayCommand NewCommand { get; }
+    public AsyncRelayCommand NewCommand { get; }
 
     public AsyncRelayCommand OpenCommand { get; }
+
+    public AsyncRelayCommand<string> OpenRecentCommand { get; }
 
     public AsyncRelayCommand SaveCommand { get; }
 
@@ -139,6 +173,22 @@ public sealed class MainWindowViewModel : ViewModelBase
     public RelayCommand ExitCommand { get; }
 
     public RelayCommand AboutCommand { get; }
+
+    public RelayCommand NewFolderCommand { get; }
+
+    public AsyncRelayCommand AddFilesCommand { get; }
+
+    public AsyncRelayCommand AddFolderCommand { get; }
+
+    public RelayCommand RenameCommand { get; }
+
+    public RelayCommand DeleteCommand { get; }
+
+    public AsyncRelayCommand ExportCommand { get; }
+
+    public RelayCommand OpenSelectedCommand { get; }
+
+    public RelayCommand UpCommand { get; }
 
     public RelayCommand ShowLargeIconsCommand { get; }
 
@@ -156,31 +206,416 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         _isInitialized = true;
-        LoadDocument(SampleDocumentFactory.Create());
-        StatusText = "Loaded sample archive shell.";
+        LoadDocument(CreateEmptyDocument());
+        StatusText = "Ready. Open an archive or add files to a new one.";
         return Task.CompletedTask;
     }
 
     public void SelectFolder(FolderTreeNodeViewModel? folder)
     {
-        if (folder is null)
+        if (folder is null || IsBusy)
         {
             return;
         }
+
+        SelectFolderCore(folder);
+    }
+
+    private void SelectFolderCore(FolderTreeNodeViewModel folder)
+    {
 
         SelectedFolder = folder;
         _currentFolder = folder.Folder;
         OnPropertyChanged(nameof(CurrentFolderPath));
         RebuildCurrentItems();
+        CommandManager.InvalidateRequerySuggested();
     }
 
     public void OpenItem(ArchiveItemViewModel? item)
     {
-        if (item?.Node is not ArchiveFolderNode folder)
+        if (item is null || IsBusy)
         {
             return;
         }
 
+        if (item.Node is ArchiveFolderNode folder)
+        {
+            NavigateToFolder(folder);
+            return;
+        }
+
+        if (item.Node is ArchiveFileNode file)
+        {
+            try
+            {
+                _fileTransferService.OpenWithDefaultApplication(file);
+                StatusText = $"Opened {file.Name} in its default application.";
+            }
+            catch (Exception exception)
+            {
+                StatusText = "Could not open the selected file.";
+                _messageBoxService.ShowError("Open File Failed", exception.Message);
+            }
+        }
+    }
+
+    public void SetSelectedItems(IEnumerable<ArchiveItemViewModel> items)
+    {
+        _selectedItems = items.Distinct().ToList();
+        SelectedItem = _selectedItems.FirstOrDefault();
+        SelectionStatus = _selectedItems.Count switch
+        {
+            0 => $"{CurrentItems.Count} item(s)",
+            1 => $"1 selected: {_selectedItems[0].Name}",
+            _ => $"{_selectedItems.Count} selected",
+        };
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    public async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0 || !CanModifyCurrentFolder())
+        {
+            return;
+        }
+
+        await ImportPathsAsync(paths).ConfigureAwait(true);
+    }
+
+    public async Task<bool> CanCloseAsync()
+    {
+        if (IsBusy)
+        {
+            _messageBoxService.ShowInfo("Operation in Progress", "Wait for the current archive operation to finish before closing PakStudio.");
+            return false;
+        }
+
+        return await ConfirmDocumentReplacementAsync().ConfigureAwait(true);
+    }
+
+    private async Task CreateNewArchiveAsync()
+    {
+        if (!await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
+        {
+            return;
+        }
+
+        LoadDocument(CreateEmptyDocument());
+        StatusText = "Created a new empty PAK archive.";
+    }
+
+    private async Task OpenAsync()
+    {
+        var path = _fileDialogService.PickArchiveToOpen();
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            await OpenPathAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    private async Task OpenRecentAsync(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        if (!File.Exists(path))
+        {
+            _messageBoxService.ShowError("File Not Found", $"The recent archive no longer exists:\n{path}");
+            return;
+        }
+
+        await OpenPathAsync(path).ConfigureAwait(true);
+    }
+
+    private async Task OpenPathAsync(string path)
+    {
+        if (!await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = "Opening archive...";
+            var document = await _archiveService.OpenAsync(path).ConfigureAwait(true);
+            LoadDocument(document);
+            RecordRecentFile(path);
+            StatusText = $"Opened {Path.GetFileName(path)}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Open failed.";
+            _messageBoxService.ShowError("Open Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _ = await SaveDocumentAsync(saveAs: false).ConfigureAwait(true);
+    }
+
+    private async Task SaveAsAsync()
+    {
+        _ = await SaveDocumentAsync(saveAs: true).ConfigureAwait(true);
+    }
+
+    private async Task<bool> SaveDocumentAsync(bool saveAs)
+    {
+        if (Document is null)
+        {
+            return false;
+        }
+
+        var path = Document.FilePath;
+        if (saveAs || string.IsNullOrWhiteSpace(path))
+        {
+            var suggestedName = string.IsNullOrWhiteSpace(Document.FilePath)
+                ? "Untitled.pak"
+                : Path.GetFileName(Document.FilePath);
+            path = _fileDialogService.PickArchiveSavePath(
+                suggestedName,
+                Document.FormatId,
+                Document.FilePath);
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = "Saving archive...";
+            await _archiveService.SaveAsync(Document, path).ConfigureAwait(true);
+            RecordRecentFile(path);
+            RebuildFolderTree(_currentFolder ?? Document.Root);
+            OnPropertyChanged(nameof(WindowTitle));
+            StatusText = $"Saved {Path.GetFileName(path)}";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Save failed.";
+            _messageBoxService.ShowError("Save Failed", exception.Message);
+            return false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task<bool> ConfirmDocumentReplacementAsync()
+    {
+        if (Document?.IsDirty != true)
+        {
+            return true;
+        }
+
+        return _messageBoxService.ConfirmSaveChanges(Document.DisplayName) switch
+        {
+            SaveChangesDecision.Discard => true,
+            SaveChangesDecision.Cancel => false,
+            SaveChangesDecision.Save => await SaveDocumentAsync(saveAs: false).ConfigureAwait(true),
+            _ => false,
+        };
+    }
+
+    private void CreateFolder()
+    {
+        if (_currentFolder is null)
+        {
+            return;
+        }
+
+        var initialName = ArchiveTreeEditor.GetAvailableName(
+            _currentFolder,
+            "New Folder",
+            preserveExtension: false);
+        var name = _textInputService.Prompt("New Folder", "Enter a name for the folder:", initialName)?.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        try
+        {
+            var folder = ArchiveTreeEditor.CreateFolder(_currentFolder, name);
+            MarkDirty($"Created folder '{folder.Name}'.");
+            RefreshAfterMutation(folder);
+        }
+        catch (Exception exception)
+        {
+            _messageBoxService.ShowError("Create Folder Failed", exception.Message);
+        }
+    }
+
+    private async Task AddFilesAsync()
+    {
+        if (_currentFolder is null)
+        {
+            return;
+        }
+
+        var paths = _fileDialogService.PickFilesToAdd();
+        if (paths.Count == 0)
+        {
+            return;
+        }
+
+        await ImportPathsAsync(paths).ConfigureAwait(true);
+    }
+
+    private async Task AddFolderAsync()
+    {
+        if (_currentFolder is null)
+        {
+            return;
+        }
+
+        var path = _fileDialogService.PickFolderToAdd();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        await ImportPathsAsync([path]).ConfigureAwait(true);
+    }
+
+    private void RenameSelectedItem()
+    {
+        var item = SelectedItem;
+        if (item is null)
+        {
+            return;
+        }
+
+        var name = _textInputService.Prompt(
+            "Rename Item",
+            $"Enter a new name for '{item.Name}':",
+            item.Name)?.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        try
+        {
+            ArchiveTreeEditor.Rename(item.Node, name);
+            MarkDirty($"Renamed item to '{name}'.");
+            RefreshAfterMutation(item.Node);
+        }
+        catch (Exception exception)
+        {
+            _messageBoxService.ShowError("Rename Failed", exception.Message);
+        }
+    }
+
+    private void DeleteSelectedItems()
+    {
+        var items = _selectedItems.ToList();
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var description = items.Count == 1
+            ? $"'{items[0].Name}'"
+            : $"these {items.Count} items";
+        if (!_messageBoxService.Confirm(
+                items.Count == 1 ? "Delete Item" : "Delete Items",
+                $"Delete {description} from this archive? Folder contents will also be removed.\n\nThis cannot be undone."))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var item in items)
+            {
+                ArchiveTreeEditor.Remove(item.Node);
+            }
+            MarkDirty(items.Count == 1 ? $"Deleted '{items[0].Name}'." : $"Deleted {items.Count} items.");
+            RefreshAfterMutation();
+        }
+        catch (Exception exception)
+        {
+            _messageBoxService.ShowError("Delete Failed", exception.Message);
+        }
+    }
+
+    private async Task ExportSelectedItemsAsync()
+    {
+        var items = _selectedItems.ToList();
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var directory = _fileDialogService.PickExportDirectory();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = items.Count == 1 ? $"Exporting {items[0].Name}..." : $"Exporting {items.Count} items...";
+            var outputs = new List<string>();
+            var failures = new List<string>();
+            foreach (var item in items)
+            {
+                try
+                {
+                    var output = await Task.Run(() =>
+                        _fileTransferService.Export(item.Node, directory)).ConfigureAwait(true);
+                    outputs.Add(output);
+                }
+                catch (Exception exception)
+                {
+                    failures.Add($"{item.Name}: {exception.Message}");
+                }
+            }
+            StatusText = outputs.Count == 1
+                ? $"Exported to {outputs[0]}"
+                : $"Exported {outputs.Count} items to {directory}";
+            ReportTransferFailures("Some Items Were Not Exported", failures);
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Export failed.";
+            _messageBoxService.ShowError("Export Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OpenSelectedItem()
+    {
+        OpenItem(SelectedItem);
+    }
+
+    private void NavigateUp()
+    {
+        if (_currentFolder?.Parent is { } parent)
+        {
+            NavigateToFolder(parent);
+        }
+    }
+
+    private void NavigateToFolder(ArchiveFolderNode folder)
+    {
         if (_folderLookup.TryGetValue(folder, out var folderViewModel))
         {
             SelectFolder(folderViewModel);
@@ -189,103 +624,24 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private void CreateNewArchive()
+    private bool CanSave()
     {
-        LoadDocument(new ArchiveDocument
-        {
-            FormatId = "pak",
-        });
-        StatusText = "Created a new empty archive.";
+        return Document is { IsDirty: true } && !IsBusy;
     }
 
-    private async Task OpenAsync()
+    private bool CanModifyCurrentFolder()
     {
-        var path = _fileDialogService.PickArchiveToOpen();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            StatusText = "Opening archive...";
-            var document = await _archiveService.OpenAsync(path).ConfigureAwait(true);
-            LoadDocument(document);
-            _recentFilesService.Add(path);
-            OnPropertyChanged(nameof(RecentFiles));
-            StatusText = $"Opened {Path.GetFileName(path)}";
-        }
-        catch (Exception ex)
-        {
-            StatusText = "Open failed.";
-            _messageBoxService.ShowError("Open Failed", ex.Message);
-        }
+        return Document is not null && _currentFolder is not null && !IsBusy;
     }
 
-    private async Task SaveAsync()
+    private bool CanModifySelectedItems()
     {
-        if (Document is null)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(Document.FilePath))
-        {
-            await SaveAsAsync().ConfigureAwait(true);
-            return;
-        }
-
-        try
-        {
-            StatusText = "Saving archive...";
-            await _archiveService.SaveAsync(Document, Document.FilePath).ConfigureAwait(true);
-            _recentFilesService.Add(Document.FilePath);
-            OnPropertyChanged(nameof(RecentFiles));
-            OnPropertyChanged(nameof(WindowTitle));
-            StatusText = $"Saved {Path.GetFileName(Document.FilePath)}";
-        }
-        catch (Exception ex)
-        {
-            StatusText = "Save failed.";
-            _messageBoxService.ShowError("Save Failed", ex.Message);
-        }
+        return _selectedItems.Count > 0 && !IsBusy;
     }
-
-    private async Task SaveAsAsync()
-    {
-        if (Document is null)
-        {
-            return;
-        }
-
-        var suggestedName = Document.FilePath is null ? "Untitled.pak" : Path.GetFileName(Document.FilePath);
-        var path = _fileDialogService.PickArchiveSavePath(suggestedName, Document.FormatId, Document.FilePath);
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            StatusText = "Saving archive...";
-            await _archiveService.SaveAsync(Document, path).ConfigureAwait(true);
-            _recentFilesService.Add(path);
-            OnPropertyChanged(nameof(RecentFiles));
-            OnPropertyChanged(nameof(WindowTitle));
-            StatusText = $"Saved {Path.GetFileName(path)}";
-        }
-        catch (Exception ex)
-        {
-            StatusText = "Save failed.";
-            _messageBoxService.ShowError("Save Failed", ex.Message);
-        }
-    }
-
-    private bool CanSave() => Document is not null;
 
     private void RefreshCurrentFolder()
     {
-        RebuildCurrentItems();
+        RebuildFolderTree(_currentFolder ?? Document?.Root);
         StatusText = "Refreshed current folder.";
     }
 
@@ -293,7 +649,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _messageBoxService.ShowInfo(
             "About PakStudio",
-            "PakStudio is a Windows WPF port scaffold for browsing and editing Quake PAK archives.");
+            "PakStudio is the Windows edition of PakScape, a browser and editor for Quake PAK and PK3 archives.");
     }
 
     private void SetViewMode(ArchiveViewMode mode)
@@ -305,16 +661,30 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void LoadDocument(ArchiveDocument document)
     {
         Document = document;
+        RebuildFolderTree(document.Root);
+        SetSelectedItems([]);
+        OnPropertyChanged(nameof(WindowTitle));
+    }
+
+    private void RebuildFolderTree(ArchiveFolderNode? folderToSelect)
+    {
+        if (Document is null)
+        {
+            return;
+        }
+
         _folderLookup.Clear();
         FolderRoots.Clear();
 
-        var rootDisplayName = document.DisplayName;
-        var rootViewModel = BuildFolderTree(document.Root, rootDisplayName);
+        var rootViewModel = BuildFolderTree(Document.Root, Document.DisplayName);
         rootViewModel.IsExpanded = true;
         FolderRoots.Add(rootViewModel);
 
-        SelectFolder(rootViewModel);
-        SelectedItem = null;
+        var selectedFolder = folderToSelect is not null && _folderLookup.TryGetValue(folderToSelect, out var selected)
+            ? selected
+            : rootViewModel;
+        selectedFolder.IsSelected = true;
+        SelectFolderCore(selectedFolder);
     }
 
     private FolderTreeNodeViewModel BuildFolderTree(ArchiveFolderNode folder, string displayName)
@@ -322,7 +692,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var viewModel = new FolderTreeNodeViewModel(folder, displayName);
         _folderLookup[folder] = viewModel;
 
-        foreach (var childFolder in folder.Folders)
+        foreach (var childFolder in folder.Folders.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase))
         {
             viewModel.Children.Add(BuildFolderTree(childFolder, childFolder.Name));
         }
@@ -330,7 +700,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         return viewModel;
     }
 
-    private void RebuildCurrentItems()
+    private void RebuildCurrentItems(ArchiveNode? nodeToSelect = null)
     {
         CurrentItems.Clear();
 
@@ -339,17 +709,117 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        foreach (var folder in _currentFolder.Folders)
+        foreach (var folder in _currentFolder.Folders.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase))
         {
             CurrentItems.Add(new ArchiveItemViewModel(folder, _iconService.GetGlyphForNode(folder)));
         }
 
-        foreach (var file in _currentFolder.Files)
+        foreach (var file in _currentFolder.Files.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase))
         {
             CurrentItems.Add(new ArchiveItemViewModel(file, _iconService.GetGlyphForNode(file)));
         }
 
-        SelectionStatus = $"{CurrentItems.Count} item(s)";
+        var selectedItem = nodeToSelect is null
+            ? null
+            : CurrentItems.FirstOrDefault(item => ReferenceEquals(item.Node, nodeToSelect));
+        SetSelectedItems(selectedItem is null ? [] : [selectedItem]);
         StatusText = $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
+    }
+
+    private void RefreshAfterMutation(ArchiveNode? nodeToSelect = null)
+    {
+        var status = StatusText;
+        var currentFolder = _currentFolder;
+        RebuildFolderTree(currentFolder);
+        RebuildCurrentItems(nodeToSelect);
+        StatusText = status;
+    }
+
+    private void MarkDirty(string status)
+    {
+        if (Document is null)
+        {
+            return;
+        }
+
+        Document.IsDirty = true;
+        OnPropertyChanged(nameof(WindowTitle));
+        StatusText = status;
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void RecordRecentFile(string path)
+    {
+        _recentFilesService.Add(path);
+        OnPropertyChanged(nameof(RecentFiles));
+    }
+
+    private void ReportTransferFailures(string title, IReadOnlyList<string> failures)
+    {
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
+        var visibleFailures = failures.Take(5).ToList();
+        if (failures.Count > visibleFailures.Count)
+        {
+            visibleFailures.Add($"...and {failures.Count - visibleFailures.Count} more.");
+        }
+        _messageBoxService.ShowError(title, string.Join(Environment.NewLine, visibleFailures));
+    }
+
+    private async Task ImportPathsAsync(IReadOnlyList<string> paths)
+    {
+        if (_currentFolder is null)
+        {
+            return;
+        }
+
+        var destination = _currentFolder;
+        var imported = new List<ArchiveNode>();
+        var failures = new List<string>();
+        try
+        {
+            IsBusy = true;
+            StatusText = paths.Count == 1 ? "Adding item..." : $"Adding {paths.Count} items...";
+            foreach (var path in paths)
+            {
+                try
+                {
+                    var node = await Task.Run(() =>
+                    {
+                        var attributes = File.GetAttributes(path);
+                        return attributes.HasFlag(FileAttributes.Directory)
+                            ? (ArchiveNode)_fileTransferService.ImportDirectory(destination, path)
+                            : _fileTransferService.ImportFile(destination, path);
+                    }).ConfigureAwait(true);
+                    imported.Add(node);
+                }
+                catch (Exception exception)
+                {
+                    failures.Add($"{Path.GetFileName(path)}: {exception.Message}");
+                }
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (imported.Count > 0)
+        {
+            MarkDirty(imported.Count == 1 ? "Added 1 item." : $"Added {imported.Count} items.");
+            RefreshAfterMutation(imported[0]);
+        }
+        ReportTransferFailures("Some Items Were Not Added", failures);
+    }
+
+    private static ArchiveDocument CreateEmptyDocument()
+    {
+        return new ArchiveDocument
+        {
+            FormatId = "pak",
+        };
     }
 }
