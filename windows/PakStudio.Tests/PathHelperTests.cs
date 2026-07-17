@@ -6,11 +6,11 @@ namespace PakStudio.Tests;
 public sealed class PathHelperTests
 {
     [Fact]
-    public void NormalizeArchivePath_TrimsAndNormalizesSeparators()
+    public void NormalizeArchivePath_NormalizesSeparatorsWithoutRenamingEntries()
     {
         var normalized = PathHelper.NormalizeArchivePath(@"\\maps// e1m1.bsp ");
 
-        Assert.Equal("maps/e1m1.bsp", normalized);
+        Assert.Equal("maps/ e1m1.bsp ", normalized);
     }
 
     [Fact]

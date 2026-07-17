@@ -87,6 +87,9 @@ enum PakError: Error, LocalizedError {
     case unsupportedPathCharacters(String)
     case duplicatePath(String)
     case missingData(String)
+    case tooManyEntries
+    case fileTooLarge(String)
+    case importTooLarge
     case archiveTooLarge
     case invalidZip
     case unsupportedZipFeature(String)
@@ -109,6 +112,12 @@ enum PakError: Error, LocalizedError {
             return "The archive contains a duplicate or conflicting path: \(path)"
         case .missingData(let path):
             return "The data for '\(path)' is missing or no longer readable."
+        case .tooManyEntries:
+            return "The archive contains more than 50,000 entries."
+        case .fileTooLarge(let path):
+            return "'\(path)' exceeds PakScape's 1 GiB per-file safety limit."
+        case .importTooLarge:
+            return "The operation exceeds PakScape's 2 GiB total-size safety limit."
         case .archiveTooLarge:
             return "The archive is too large for the Quake PAK format."
         case .invalidZip:
@@ -123,6 +132,79 @@ enum PakError: Error, LocalizedError {
     }
 }
 
+enum PakSafetyLimits {
+    static let maximumEntryCount = 50_000
+    static let maximumPathDepth = 256
+    static let maximumFileSize = 1 * 1_024 * 1_024 * 1_024
+    static let maximumTotalSize = 2 * 1_024 * 1_024 * 1_024
+}
+
+struct PakImportBudget {
+    private(set) var entryCount = 0
+    private(set) var totalSize = 0
+
+    init() {}
+
+    init(existingRoot: PakNode?) throws {
+        if let existingRoot {
+            for child in existingRoot.children ?? [] {
+                try registerTree(child)
+            }
+        }
+    }
+
+    mutating func registerEntry() throws {
+        guard entryCount < PakSafetyLimits.maximumEntryCount else {
+            throw PakError.tooManyEntries
+        }
+        entryCount += 1
+    }
+
+    func validateFile(size: Int, name: String) throws {
+        guard size >= 0, size <= PakSafetyLimits.maximumFileSize else {
+            throw PakError.fileTooLarge(name)
+        }
+        guard totalSize <= PakSafetyLimits.maximumTotalSize - size else {
+            throw PakError.importTooLarge
+        }
+    }
+
+    mutating func commitFile(size: Int, name: String) throws {
+        try validateFile(size: size, name: name)
+        totalSize += size
+    }
+
+    mutating func registerTree(_ node: PakNode, depth: Int = 1) throws {
+        guard depth <= PakSafetyLimits.maximumPathDepth else {
+            throw PakError.unsafePath(node.name)
+        }
+        try registerEntry()
+        if node.isFolder {
+            for child in node.children ?? [] {
+                try registerTree(child, depth: depth + 1)
+            }
+        } else {
+            try commitFile(size: node.fileSize, name: node.name)
+        }
+    }
+}
+
+enum PakPreviewLimits {
+    static let maximumDimension = 8_192
+    static let maximumPixelCount = 16_777_216
+
+    static func isSafe(width: Int, height: Int) -> Bool {
+        guard width > 0,
+              height > 0,
+              width <= maximumDimension,
+              height <= maximumDimension else {
+            return false
+        }
+        let result = width.multipliedReportingOverflow(by: height)
+        return !result.overflow && result.partialValue <= maximumPixelCount
+    }
+}
+
 enum PakPathValidator {
     static func normalizeArchiveEntryName(_ rawName: String) throws -> String {
         let normalized = rawName.replacingOccurrences(of: "\\", with: "/")
@@ -131,6 +213,7 @@ enum PakPathValidator {
         guard !normalized.isEmpty,
               !normalized.hasPrefix("/"),
               !normalized.hasSuffix("/"),
+              components.count <= PakSafetyLimits.maximumPathDepth,
               components.allSatisfy(isSafeNodeName) else {
             throw PakError.unsafePath(rawName)
         }
@@ -143,6 +226,7 @@ enum PakPathValidator {
         guard !path.isEmpty,
               !path.hasPrefix("/"),
               !path.hasSuffix("/"),
+              components.count <= PakSafetyLimits.maximumPathDepth,
               components.allSatisfy(isSafeNodeName) else {
             throw PakError.unsafePath(path)
         }
@@ -156,6 +240,7 @@ enum PakPathValidator {
 
     nonisolated static func isSafeNodeName(_ name: String) -> Bool {
         !name.isEmpty &&
+        !name.unicodeScalars.allSatisfy { CharacterSet.whitespaces.contains($0) } &&
         name != "." &&
         name != ".." &&
         !name.contains("/") &&
@@ -189,6 +274,7 @@ struct PakLoader {
     static func load(data: Data, name: String) throws -> PakFile {
         // Header: "PACK" + dirOffset (int32) + dirLength (int32)
         guard data.count >= 12 else { throw PakError.invalidHeader }
+        guard data.count <= PakSafetyLimits.maximumTotalSize else { throw PakError.importTooLarge }
 
         let ident = String(bytes: data[0..<4], encoding: .ascii) ?? ""
         guard ident == "PACK" else { throw PakError.invalidHeader }
@@ -207,11 +293,13 @@ struct PakLoader {
         }
 
         let count = dirLength / entrySize
+        guard count <= PakSafetyLimits.maximumEntryCount else { throw PakError.tooManyEntries }
         var entries: [PakEntry] = []
         entries.reserveCapacity(count)
         var filePaths = Set<String>()
         var folderPaths = Set<String>()
         var dataRanges: [(range: Range<Int>, name: String)] = []
+        var totalPayloadSize = 0
 
         for i in 0..<count {
             let base = dirOffset + i * entrySize
@@ -228,6 +316,13 @@ struct PakLoader {
                   filePos + fileLen <= data.count else {
                 throw PakError.badDirectory
             }
+            guard fileLen <= PakSafetyLimits.maximumFileSize else {
+                throw PakError.fileTooLarge(name)
+            }
+            guard totalPayloadSize <= PakSafetyLimits.maximumTotalSize - fileLen else {
+                throw PakError.importTooLarge
+            }
+            totalPayloadSize += fileLen
 
             if fileLen > 0 {
                 guard filePos >= 12,
@@ -355,13 +450,23 @@ struct PakLoader {
         }
 
         let root = PakNode(name: "/")
-        try buildTree(from: directory, into: root)
+        var budget = PakImportBudget()
+        try buildTree(from: directory, into: root, budget: &budget, depth: 1)
         sortNodeRecursively(root)
         return root
     }
 
     static func loadZip(from url: URL, name: String) throws -> PakFile {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
+        guard values.isSymbolicLink != true else { throw PakError.unsafePath(name) }
+        if let fileSize = values.fileSize,
+           fileSize > PakSafetyLimits.maximumTotalSize {
+            throw PakError.importTooLarge
+        }
         let archiveData = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard archiveData.count <= PakSafetyLimits.maximumTotalSize else {
+            throw PakError.importTooLarge
+        }
         try PakZipValidator.validate(data: archiveData)
 
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -379,19 +484,31 @@ struct PakLoader {
         }
 
         let root = PakNode(name: "/")
-        try buildTree(from: tempDir, into: root)
+        var budget = PakImportBudget()
+        try buildTree(from: tempDir, into: root, budget: &budget, depth: 1)
         sortNodeRecursively(root)
         return PakFile(name: name, data: Data(), entries: [], root: root)
     }
 
     static func buildTree(from directory: URL, into parent: PakNode) throws {
-        let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        var budget = PakImportBudget()
+        try buildTree(from: directory, into: parent, budget: &budget, depth: 1)
+    }
+
+    static func buildTree(
+        from directory: URL,
+        into parent: PakNode,
+        budget: inout PakImportBudget,
+        depth: Int = 1
+    ) throws {
+        let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
         let contents = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: Array(resourceKeys),
             options: []
         )
         for item in contents {
+            try budget.registerEntry()
             try PakPathValidator.validateNodeName(item.lastPathComponent)
             let values = try item.resourceValues(forKeys: resourceKeys)
             guard values.isSymbolicLink != true else {
@@ -399,12 +516,16 @@ struct PakLoader {
             }
 
             if values.isDirectory == true {
+                let childDepth = depth + 1
+                guard childDepth <= PakSafetyLimits.maximumPathDepth else {
+                    throw PakError.unsafePath(item.path)
+                }
                 let folder = PakNode(name: item.lastPathComponent)
                 parent.children?.append(folder)
-                try buildTree(from: item, into: folder)
+                try buildTree(from: item, into: folder, budget: &budget, depth: childDepth)
             } else {
                 let child = PakNode(name: item.lastPathComponent)
-                child.localData = try Data(contentsOf: item)
+                child.localData = try readFile(at: item, budget: &budget)
                 parent.children?.append(child)
             }
         }
@@ -415,6 +536,52 @@ struct PakLoader {
             return $0.name.lowercased() < $1.name.lowercased()
         }
     }
+
+    static func readFile(at url: URL, budget: inout PakImportBudget) throws -> Data {
+        let resourceKeys: Set<URLResourceKey> = [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey
+        ]
+        let values = try url.resourceValues(forKeys: resourceKeys)
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw PakError.unsafePath(url.lastPathComponent)
+        }
+
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let sizeValue = try handle.seekToEnd()
+        guard sizeValue <= UInt64(Int.max) else {
+            throw PakError.fileTooLarge(url.lastPathComponent)
+        }
+        let expectedSize = Int(sizeValue)
+        try budget.validateFile(size: expectedSize, name: url.lastPathComponent)
+        try handle.seek(toOffset: 0)
+
+        var data = Data()
+        data.reserveCapacity(expectedSize)
+        while data.count < expectedSize {
+            let requested = min(1_048_576, expectedSize - data.count)
+            guard let chunk = try handle.read(upToCount: requested), !chunk.isEmpty else {
+                throw PakError.missingData(url.lastPathComponent)
+            }
+            data.append(chunk)
+        }
+        if let trailing = try handle.read(upToCount: 1), !trailing.isEmpty {
+            throw PakError.unknown("'\(url.lastPathComponent)' changed size while it was being imported.")
+        }
+        let finalValues = try url.resourceValues(forKeys: resourceKeys)
+        guard finalValues.isRegularFile == true,
+              finalValues.isSymbolicLink != true,
+              finalValues.fileSize == data.count,
+              finalValues.contentModificationDate == values.contentModificationDate else {
+            throw PakError.unknown("'\(url.lastPathComponent)' changed while it was being imported.")
+        }
+
+        try budget.commitFile(size: data.count, name: url.lastPathComponent)
+        return data
+    }
 }
 
 enum PakZipValidator {
@@ -422,9 +589,6 @@ enum PakZipValidator {
     private static let centralDirectorySignature: UInt32 = 0x0201_4B50
     private static let localFileSignature: UInt32 = 0x0403_4B50
     private static let maximumCommentLength = 65_535
-    private static let maximumEntryCount = 50_000
-    private static let maximumExpandedFileSize = 1 * 1_024 * 1_024 * 1_024
-    private static let maximumExpandedArchiveSize = 2 * 1_024 * 1_024 * 1_024
 
     static func validate(data: Data) throws {
         guard let endOffset = endOfCentralDirectoryOffset(in: data) else {
@@ -443,7 +607,7 @@ enum PakZipValidator {
               diskEntryCount == entryCount else {
             throw PakError.unsupportedZipFeature("multi-disk archives")
         }
-        guard entryCount <= maximumEntryCount else {
+        guard entryCount <= PakSafetyLimits.maximumEntryCount else {
             throw PakError.expandedArchiveTooLarge
         }
         guard directorySizeValue != UInt32.max,
@@ -521,8 +685,8 @@ enum PakZipValidator {
             }
 
             let expandedSize = Int(expandedSizeValue)
-            guard expandedSize <= maximumExpandedFileSize,
-                  totalExpandedSize <= maximumExpandedArchiveSize - expandedSize else {
+            guard expandedSize <= PakSafetyLimits.maximumFileSize,
+                  totalExpandedSize <= PakSafetyLimits.maximumTotalSize - expandedSize else {
                 throw PakError.expandedArchiveTooLarge
             }
             totalExpandedSize += expandedSize
@@ -648,7 +812,10 @@ struct PakWriter {
 
     static func write(root: PakNode, originalData: Data?) throws -> Output {
         var files: [(path: String, node: PakNode)] = []
-        collectFiles(node: root, currentPath: "", into: &files)
+        try collectFiles(node: root, currentPath: "", depth: 0, into: &files)
+        guard files.count <= PakSafetyLimits.maximumEntryCount else {
+            throw PakError.tooManyEntries
+        }
 
         var encodedPaths = Set<String>()
         for (path, _) in files {
@@ -669,10 +836,19 @@ struct PakWriter {
         output.append(Data(count: 12))
 
         var newEntries: [PakEntry] = []
+        var totalPayloadSize = 0
 
         for (path, node) in files {
             let offset = output.count
             let payload = try PakNodeData.data(for: node, originalData: originalData)
+
+            guard payload.count <= PakSafetyLimits.maximumFileSize else {
+                throw PakError.fileTooLarge(path)
+            }
+            guard totalPayloadSize <= PakSafetyLimits.maximumTotalSize - payload.count else {
+                throw PakError.importTooLarge
+            }
+            totalPayloadSize += payload.count
 
             guard output.count <= Int(Int32.max) - payload.count else {
                 throw PakError.archiveTooLarge
@@ -707,10 +883,19 @@ struct PakWriter {
         return Output(data: output, entries: newEntries, nodes: files.map { $0.node })
     }
 
-    private static func collectFiles(node: PakNode, currentPath: String, into files: inout [(path: String, node: PakNode)]) {
+    private static func collectFiles(
+        node: PakNode,
+        currentPath: String,
+        depth: Int,
+        into files: inout [(path: String, node: PakNode)]
+    ) throws {
         guard let children = node.children else { return }
 
         for child in children {
+            let childDepth = depth + 1
+            guard childDepth <= PakSafetyLimits.maximumPathDepth else {
+                throw PakError.unsafePath(child.name)
+            }
             let nextPath: String
             if currentPath.isEmpty {
                 nextPath = child.name
@@ -719,7 +904,7 @@ struct PakWriter {
             }
 
             if child.isFolder {
-                collectFiles(node: child, currentPath: nextPath, into: &files)
+                try collectFiles(node: child, currentPath: nextPath, depth: childDepth, into: &files)
             } else {
                 files.append((nextPath, child))
             }
@@ -757,6 +942,9 @@ struct PakZipWriter {
     }
 
     static func write(root: PakNode, originalData: Data?) throws -> Data {
+        var budget = PakImportBudget()
+        try validateForWrite(root.children ?? [], originalData: originalData, budget: &budget)
+
         if root.children?.isEmpty != false {
             // End-of-central-directory record for a valid empty ZIP archive.
             let signature: [UInt8] = [0x50, 0x4B, 0x05, 0x06]
@@ -784,7 +972,35 @@ struct PakZipWriter {
             throw ZipError.processFailed
         }
 
-        return try Data(contentsOf: zipURL)
+        let data = try Data(contentsOf: zipURL)
+        try PakZipValidator.validate(data: data)
+        return data
+    }
+
+    private static func validateForWrite(
+        _ nodes: [PakNode],
+        originalData: Data?,
+        budget: inout PakImportBudget,
+        depth: Int = 1
+    ) throws {
+        guard depth <= PakSafetyLimits.maximumPathDepth else {
+            throw PakError.unsafePath("archive path")
+        }
+        for node in nodes {
+            try budget.registerEntry()
+            try PakPathValidator.validateNodeName(node.name)
+            if node.isFolder {
+                try validateForWrite(
+                    node.children ?? [],
+                    originalData: originalData,
+                    budget: &budget,
+                    depth: depth + 1
+                )
+            } else {
+                let payload = try PakNodeData.data(for: node, originalData: originalData)
+                try budget.commitFile(size: payload.count, name: node.name)
+            }
+        }
     }
 
     private static func writeChildren(_ nodes: [PakNode], to directory: URL, originalData: Data?) throws {
@@ -805,20 +1021,39 @@ struct PakZipWriter {
 
 struct PakFilesystemExporter {
     static func export(root: PakNode, originalData: Data?, to directory: URL) throws {
-        let fileManager = FileManager.default
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try writeChildren(root.children ?? [], to: directory, originalData: originalData)
+        try exportFolderContents(root.children ?? [], originalData: originalData, to: directory)
     }
 
     static func export(node: PakNode, originalData: Data?, to url: URL) throws {
         try PakPathValidator.validateNodeName(node.name)
         if node.isFolder {
-            let fileManager = FileManager.default
-            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
-            try writeChildren(node.children ?? [], to: url, originalData: originalData)
+            try exportFolderContents(node.children ?? [], originalData: originalData, to: url)
         } else {
             let payload = try PakNodeData.data(for: node, originalData: originalData)
-            try payload.write(to: url)
+            try payload.write(to: url, options: .atomic)
+        }
+    }
+
+    private static func exportFolderContents(
+        _ nodes: [PakNode],
+        originalData: Data?,
+        to destination: URL
+    ) throws {
+        let fileManager = FileManager.default
+        let parent = destination.deletingLastPathComponent()
+        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        let staging = parent.appendingPathComponent(".pakscape-export-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: false)
+        do {
+            try writeChildren(nodes, to: staging, originalData: originalData)
+            if fileManager.fileExists(atPath: destination.path) {
+                _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: destination)
+            }
+        } catch {
+            try? fileManager.removeItem(at: staging)
+            throw error
         }
     }
 
@@ -832,7 +1067,7 @@ struct PakFilesystemExporter {
             } else {
                 let fileURL = directory.appendingPathComponent(node.name, isDirectory: false)
                 let payload = try PakNodeData.data(for: node, originalData: originalData)
-                try payload.write(to: fileURL)
+                try payload.write(to: fileURL, options: .atomic)
             }
         }
     }

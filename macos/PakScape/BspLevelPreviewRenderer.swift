@@ -3,6 +3,9 @@ import CoreGraphics
 import Foundation
 
 enum BspLevelPreviewRenderer {
+    private static let maximumGeometryElementCount = 1_000_000
+    private static let maximumTextureCount = 4_096
+
     private struct Lump {
         let offset: Int
         let size: Int
@@ -162,6 +165,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 12 else { return [] }
 
         let count = lump.size / 12
+        guard count <= maximumGeometryElementCount else { return [] }
         var vertices: [Vertex] = []
         vertices.reserveCapacity(count)
 
@@ -185,6 +189,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 4 else { return [] }
 
         let count = lump.size / 4
+        guard count <= maximumGeometryElementCount else { return [] }
         var edges: [(Int, Int)] = []
         edges.reserveCapacity(count)
 
@@ -206,6 +211,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 4 else { return [] }
 
         let count = lump.size / 4
+        guard count <= maximumGeometryElementCount else { return [] }
         var surfEdges: [Int] = []
         surfEdges.reserveCapacity(count)
 
@@ -224,6 +230,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 20 else { return [] }
 
         let count = lump.size / 20
+        guard count <= maximumGeometryElementCount else { return [] }
         var faces: [Face] = []
         faces.reserveCapacity(count)
 
@@ -258,6 +265,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 40 else { return [] }
 
         let count = lump.size / 40
+        guard count <= maximumGeometryElementCount else { return [] }
         var texInfo: [TexInfo] = []
         texInfo.reserveCapacity(count)
 
@@ -279,6 +287,7 @@ enum BspLevelPreviewRenderer {
         guard lump.size >= 20 else { return [] }
 
         let count = lump.size / 20
+        guard count <= maximumGeometryElementCount else { return [] }
         var planes: [Plane] = []
         planes.reserveCapacity(count)
 
@@ -306,7 +315,9 @@ enum BspLevelPreviewRenderer {
         let lump = header.lumps[lumpTextures]
         guard lump.size >= 4,
               let textureCount = readInt32LE(data, offset: lump.offset),
-              textureCount > 0 else {
+              textureCount > 0,
+              textureCount <= maximumTextureCount,
+              textureCount <= (lump.size - 4) / 4 else {
             return []
         }
 

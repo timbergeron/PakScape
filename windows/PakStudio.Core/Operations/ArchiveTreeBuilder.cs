@@ -10,13 +10,11 @@ public static class ArchiveTreeBuilder
     {
         ArgumentNullException.ThrowIfNull(root);
 
-        var segments = PathHelper.SplitArchivePath(folderPath);
+        var segments = SplitValidatedPath(folderPath, allowEmpty: true);
         var current = root;
 
         foreach (var segment in segments)
         {
-            ArchiveNameValidator.ValidateNodeName(segment);
-
             if (current.Files.Any(file => string.Equals(file.Name, segment, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new ArchivePathConflictException($"A file already exists at '{segment}'.");
@@ -49,11 +47,7 @@ public static class ArchiveTreeBuilder
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(data);
 
-        var segments = PathHelper.SplitArchivePath(path);
-        if (segments.Count == 0)
-        {
-            throw new ArchiveValidationException("File path cannot be empty.");
-        }
+        var segments = SplitValidatedPath(path, allowEmpty: false);
 
         var fileName = segments[^1];
         ArchiveNameValidator.ValidateNodeName(fileName);
@@ -116,5 +110,34 @@ public static class ArchiveTreeBuilder
                 PathHelper.ToRelativeArchivePath(file.FullPath),
                 file));
         }
+    }
+
+    private static IReadOnlyList<string> SplitValidatedPath(string? path, bool allowEmpty)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            if (allowEmpty)
+            {
+                return [];
+            }
+
+            throw new ArchiveValidationException("Archive paths cannot be empty.");
+        }
+
+        var normalized = path.Replace('\\', '/');
+        var segments = normalized.Split('/', StringSplitOptions.None);
+        if (normalized.StartsWith('/') || normalized.EndsWith('/') || segments.Any(string.IsNullOrEmpty))
+        {
+            throw new ArchiveValidationException(
+                $"Archive path '{path}' contains an empty or absolute path segment.");
+        }
+        ArchiveSafetyLimits.EnsurePathDepth(segments.Length, $"Archive path '{path}'");
+
+        foreach (var segment in segments)
+        {
+            ArchiveNameValidator.ValidateNodeName(segment);
+        }
+
+        return segments;
     }
 }

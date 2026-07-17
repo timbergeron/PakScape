@@ -35,6 +35,9 @@ public sealed class ArchiveTreeBuilderTests
     [Theory]
     [InlineData("../outside.txt")]
     [InlineData("maps/../../outside.txt")]
+    [InlineData("/absolute.txt")]
+    [InlineData("maps//broken.txt")]
+    [InlineData("maps/")]
     public void AddFile_RejectsParentTraversal(string path)
     {
         var root = ArchiveFolderNode.CreateRoot();
@@ -50,5 +53,16 @@ public sealed class ArchiveTreeBuilderTests
 
         Assert.Throws<ArchiveValidationException>(() =>
             ArchiveTreeBuilder.AddFile(root, "maps/bad\nname.txt", [1]));
+    }
+
+    [Fact]
+    public void AddFile_RejectsExcessivePathDepth()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var path = string.Join('/', Enumerable.Repeat("folder", ArchiveSafetyLimits.MaximumPathDepth))
+            + "/file.txt";
+
+        Assert.Throws<ArchiveValidationException>(() =>
+            ArchiveTreeBuilder.AddFile(root, path, [1]));
     }
 }

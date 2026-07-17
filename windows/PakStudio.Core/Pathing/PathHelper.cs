@@ -4,26 +4,26 @@ public static class PathHelper
 {
     public static string NormalizeArchivePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrEmpty(path))
         {
             return string.Empty;
         }
 
-        var normalized = path.Replace('\\', '/').Trim();
+        var normalized = path.Replace('\\', '/');
         var segments = normalized
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
 
         return string.Join('/', segments);
     }
 
     public static string NormalizeArchiveSegment(string? name)
     {
-        if (string.IsNullOrWhiteSpace(name))
+        if (string.IsNullOrEmpty(name))
         {
             throw new ArgumentException("Archive names cannot be empty.", nameof(name));
         }
 
-        var normalized = name.Replace('\\', '/').Trim();
+        var normalized = name.Replace('\\', '/');
         if (normalized.Contains('/'))
         {
             throw new ArgumentException("Archive names cannot contain path separators.", nameof(name));

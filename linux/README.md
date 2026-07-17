@@ -45,7 +45,7 @@ The package follows the XDG Base Directory, desktop-entry, icon-theme, and share
 
 - MVVM keeps archive workflows testable and UI event code thin.
 - Nullable analysis, recommended analyzers, deterministic builds, and warnings-as-errors are enabled.
-- Imports reject symbolic links and enforce 50,000-entry, 1 GiB per-file, and 2 GiB total limits.
+- Imports reject symbolic links and enforce 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total limits across the existing document and each import.
 - Archive and export writes are atomic; existing exported files are never overwritten silently.
 - Ubuntu 24.04 CI builds x86-64 and ARM64 Release configurations, runs the portable and Linux-specific tests, and validates Debian packaging.
 

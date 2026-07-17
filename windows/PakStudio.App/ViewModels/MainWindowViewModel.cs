@@ -27,6 +27,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<ArchiveItemViewModel> _selectedItems = [];
     private ArchiveFolderNode? _currentFolder;
     private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
+    private string _searchText = string.Empty;
     private string _statusText = "Ready";
     private string _selectionStatus = "0 selected";
     private bool _isBusy;
@@ -49,7 +50,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         _recentFilesService = recentFilesService;
         _iconService = iconService;
 
-        NewCommand = new AsyncRelayCommand(CreateNewArchiveAsync, () => !IsBusy);
+        NewCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("pak"), () => !IsBusy);
+        NewPk3Command = new AsyncRelayCommand(() => CreateNewArchiveAsync("pk3"), () => !IsBusy);
         OpenCommand = new AsyncRelayCommand(OpenAsync, () => !IsBusy);
         OpenRecentCommand = new AsyncRelayCommand<string>(OpenRecentAsync, path =>
             !IsBusy && !string.IsNullOrWhiteSpace(path));
@@ -128,17 +130,29 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                RebuildCurrentItems();
+            }
+        }
+    }
+
     public string WindowTitle
     {
         get
         {
             if (Document is null)
             {
-                return "PakStudio";
+                return "PakScape";
             }
 
             var dirtyMarker = Document.IsDirty ? "*" : string.Empty;
-            return $"{Document.DisplayName}{dirtyMarker} - PakStudio";
+            return $"{Document.DisplayName}{dirtyMarker} - PakScape";
         }
     }
 
@@ -159,6 +173,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public IReadOnlyList<string> RecentFiles => _recentFilesService.GetRecentFiles();
 
     public AsyncRelayCommand NewCommand { get; }
+
+    public AsyncRelayCommand NewPk3Command { get; }
 
     public AsyncRelayCommand OpenCommand { get; }
 
@@ -198,17 +214,20 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public RelayCommand ShowDetailsCommand { get; }
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync(string? archivePath = null)
     {
         if (_isInitialized)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         _isInitialized = true;
-        LoadDocument(CreateEmptyDocument());
+        LoadDocument(CreateEmptyDocument("pak"));
         StatusText = "Ready. Open an archive or add files to a new one.";
-        return Task.CompletedTask;
+        if (!string.IsNullOrWhiteSpace(archivePath))
+        {
+            await OpenPathAsync(archivePath, confirmReplacement: false).ConfigureAwait(true);
+        }
     }
 
     public void SelectFolder(FolderTreeNodeViewModel? folder)
@@ -286,22 +305,22 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         if (IsBusy)
         {
-            _messageBoxService.ShowInfo("Operation in Progress", "Wait for the current archive operation to finish before closing PakStudio.");
+            _messageBoxService.ShowInfo("Operation in Progress", "Wait for the current archive operation to finish before closing PakScape.");
             return false;
         }
 
         return await ConfirmDocumentReplacementAsync().ConfigureAwait(true);
     }
 
-    private async Task CreateNewArchiveAsync()
+    private async Task CreateNewArchiveAsync(string formatId)
     {
         if (!await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
         {
             return;
         }
 
-        LoadDocument(CreateEmptyDocument());
-        StatusText = "Created a new empty PAK archive.";
+        LoadDocument(CreateEmptyDocument(formatId));
+        StatusText = $"Created a new empty {formatId.ToUpperInvariant()} archive.";
     }
 
     private async Task OpenAsync()
@@ -309,7 +328,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         var path = _fileDialogService.PickArchiveToOpen();
         if (!string.IsNullOrWhiteSpace(path))
         {
-            await OpenPathAsync(path).ConfigureAwait(true);
+            await OpenPathAsync(path, confirmReplacement: true).ConfigureAwait(true);
         }
     }
 
@@ -326,12 +345,12 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        await OpenPathAsync(path).ConfigureAwait(true);
+        await OpenPathAsync(path, confirmReplacement: true).ConfigureAwait(true);
     }
 
-    private async Task OpenPathAsync(string path)
+    private async Task OpenPathAsync(string path, bool confirmReplacement)
     {
-        if (!await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
+        if (confirmReplacement && !await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
         {
             return;
         }
@@ -377,7 +396,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (saveAs || string.IsNullOrWhiteSpace(path))
         {
             var suggestedName = string.IsNullOrWhiteSpace(Document.FilePath)
-                ? "Untitled.pak"
+                ? Document.DisplayName
                 : Path.GetFileName(Document.FilePath);
             path = _fileDialogService.PickArchiveSavePath(
                 suggestedName,
@@ -648,8 +667,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void ShowAbout()
     {
         _messageBoxService.ShowInfo(
-            "About PakStudio",
-            "PakStudio is the Windows edition of PakScape, a browser and editor for Quake PAK and PK3 archives.");
+            "About PakScape",
+            "PakScape for Windows is a browser and editor for Quake PAK and PK3 archives.");
     }
 
     private void SetViewMode(ArchiveViewMode mode)
@@ -661,6 +680,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void LoadDocument(ArchiveDocument document)
     {
         Document = document;
+        SearchText = string.Empty;
         RebuildFolderTree(document.Root);
         SetSelectedItems([]);
         OnPropertyChanged(nameof(WindowTitle));
@@ -709,14 +729,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        foreach (var folder in _currentFolder.Folders.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase))
+        var children = _currentFolder.Children
+            .Where(child => string.IsNullOrWhiteSpace(SearchText)
+                || child.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(child => child is ArchiveFolderNode)
+            .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var child in children)
         {
-            CurrentItems.Add(new ArchiveItemViewModel(folder, _iconService.GetGlyphForNode(folder)));
-        }
-
-        foreach (var file in _currentFolder.Files.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            CurrentItems.Add(new ArchiveItemViewModel(file, _iconService.GetGlyphForNode(file)));
+            CurrentItems.Add(new ArchiveItemViewModel(child, _iconService.GetGlyphForNode(child)));
         }
 
         var selectedItem = nodeToSelect is null
@@ -815,11 +835,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         ReportTransferFailures("Some Items Were Not Added", failures);
     }
 
-    private static ArchiveDocument CreateEmptyDocument()
+    private static ArchiveDocument CreateEmptyDocument(string formatId)
     {
         return new ArchiveDocument
         {
-            FormatId = "pak",
+            FormatId = formatId,
         };
     }
 }

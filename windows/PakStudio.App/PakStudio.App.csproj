@@ -3,6 +3,12 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <AssemblyName>PakScape</AssemblyName>
+    <Product>PakScape</Product>
+    <Title>PakScape for Windows</Title>
+    <Description>A native Windows browser and editor for Quake PAK and PK3 archives.</Description>
+    <Version>1.0.1</Version>
+    <Authors>Tim Bergeron</Authors>
   </PropertyGroup>
 
   <ItemGroup>

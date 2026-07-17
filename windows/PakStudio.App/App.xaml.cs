@@ -23,6 +23,9 @@ public partial class App : Application
         _serviceProvider = services.BuildServiceProvider();
 
         var window = _serviceProvider.GetRequiredService<MainWindow>();
+        var startupArchive = e.Args.FirstOrDefault(argument =>
+            !string.IsNullOrWhiteSpace(argument) && !argument.StartsWith("-", StringComparison.Ordinal));
+        window.ConfigureStartupArchive(startupArchive);
         MainWindow = window;
         window.Show();
     }

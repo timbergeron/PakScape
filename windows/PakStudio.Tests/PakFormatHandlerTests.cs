@@ -69,6 +69,19 @@ public sealed class PakFormatHandlerTests
     }
 
     [Fact]
+    public void Parse_RejectsArchivesOverTheEntryLimitBeforeWalkingTheDirectory()
+    {
+        const int entryCount = ArchiveSafetyLimits.MaximumEntryCount + 1;
+        var directoryLength = entryCount * 64;
+        var bytes = new byte[12 + directoryLength];
+        Encoding.ASCII.GetBytes("PACK").CopyTo(bytes, 0);
+        BitConverter.GetBytes(12).CopyTo(bytes, 4);
+        BitConverter.GetBytes(directoryLength).CopyTo(bytes, 8);
+
+        Assert.Throws<ArchiveValidationException>(() => _handler.Parse(bytes));
+    }
+
+    [Fact]
     public void Serialize_ThenParse_RoundTripsArchive()
     {
         var document = new ArchiveDocument

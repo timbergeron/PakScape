@@ -33,9 +33,16 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
+        var file = new FileInfo(path);
+        if (!file.Exists)
+        {
+            throw new FileNotFoundException("The selected PAK does not exist.", path);
+        }
+        ArchiveSafetyLimits.EnsureTotalSize(0, file.Length, "The PAK archive");
+
         var buffer = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
         var document = Parse(buffer);
-        document.FilePath = path;
+        document.FilePath = Path.GetFullPath(path);
         document.IsDirty = false;
         return document;
     }
@@ -57,7 +64,18 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
 
         try
         {
-            await File.WriteAllBytesAsync(tempPath, output, cancellationToken).ConfigureAwait(false);
+            await using (var stream = new FileStream(
+                             tempPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 128 * 1024,
+                             useAsync: true))
+            {
+                await stream.WriteAsync(output, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
+            }
 
             if (File.Exists(fullPath))
             {
@@ -108,6 +126,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         }
 
         var entryCount = directoryLength / DirectoryEntrySize;
+        ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PAK archive");
         var directoryEntries = new List<PakDirectoryEntry>(entryCount);
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -124,6 +143,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
             {
                 throw new ArchiveCorruptException($"Entry '{normalizedPath}' has invalid data bounds.");
             }
+            ArchiveSafetyLimits.EnsureFileSize(fileLength, $"PAK entry '{normalizedPath}'");
 
             if (fileLength > 0 && fileOffset < HeaderSize)
             {
@@ -175,12 +195,14 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
             .FlattenFiles(document.Root)
             .OrderBy(entry => entry.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        ArchiveSafetyLimits.EnsureEntryCount(files.Count, "The PAK archive");
 
         using var stream = new MemoryStream();
         stream.Write(new byte[HeaderSize]);
 
         var directory = new List<PakDirectoryEntry>(files.Count);
         var encodedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long totalPayloadSize = 0;
         foreach (var entry in files)
         {
             var relativePath = PathHelper.ToRelativeArchivePath(entry.Path);
@@ -198,12 +220,29 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
             }
 
             var data = entry.File.Data;
+            ArchiveSafetyLimits.EnsureFileSize(data.LongLength, $"PAK entry '{relativePath}'");
+            ArchiveSafetyLimits.EnsureTotalSize(
+                totalPayloadSize,
+                data.LongLength,
+                "The PAK archive");
+            totalPayloadSize += data.LongLength;
+
+            var projectedSize = stream.Position + data.LongLength;
+            if (projectedSize > int.MaxValue)
+            {
+                throw new ArchiveValidationException("The PAK archive exceeds the format's 2 GiB limit.");
+            }
             var offset = checked((int)stream.Position);
             stream.Write(data, 0, data.Length);
             directory.Add(new PakDirectoryEntry(relativePath, offset, data.Length));
         }
 
         var directoryOffset = checked((int)stream.Position);
+        var projectedFinalSize = (long)directoryOffset + ((long)directory.Count * DirectoryEntrySize);
+        if (projectedFinalSize > int.MaxValue)
+        {
+            throw new ArchiveValidationException("The PAK archive exceeds the format's 2 GiB limit.");
+        }
         foreach (var entry in directory)
         {
             stream.Write(EncodeEntryName(entry.Path));

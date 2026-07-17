@@ -36,3 +36,8 @@ Notable user-visible changes are documented here.
 - Inspect PK3 paths, features, symlinks, and declared expanded sizes before extraction.
 - Refuse to serialize missing payload data instead of producing corrupt zero-byte entries.
 - Reject Linux symlink imports, enforce bounded folder imports, use atomic exports, and isolate temporary previews in private XDG runtime storage.
+- Apply shared 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total limits to macOS, Windows, and Linux imports and archive writers.
+- Account for existing document contents during batch imports and clipboard paste operations.
+- Reject Windows device names, alternate data stream paths, reparse points, and unstable source files during transfer operations.
+- Bound macOS image, WAD, and BSP preview allocations before decoding untrusted assets.
+- Avoid mutating the macOS document model before a generated save is committed.

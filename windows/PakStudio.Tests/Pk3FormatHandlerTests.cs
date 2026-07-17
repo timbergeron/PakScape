@@ -73,6 +73,27 @@ public sealed class Pk3FormatHandlerTests
     }
 
     [Fact]
+    public async Task Open_RejectsExcessivePathDepth()
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, "deep.pk3");
+
+        try
+        {
+            var entryPath = string.Join('/',
+                Enumerable.Repeat("folder", ArchiveSafetyLimits.MaximumPathDepth)) + "/file.txt";
+            CreateZip(path, archive => archive.CreateEntry(entryPath));
+
+            await Assert.ThrowsAsync<ArchiveCorruptException>(() =>
+                _handler.OpenAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Open_RejectsSymbolicLinkEntry()
     {
         var directory = CreateTemporaryDirectory();

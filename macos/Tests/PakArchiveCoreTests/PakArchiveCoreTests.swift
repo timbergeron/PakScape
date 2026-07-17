@@ -165,6 +165,48 @@ final class PakArchiveCoreTests: XCTestCase {
         }
     }
 
+    func testLoaderRejectsTooManyEntriesBeforeWalkingTheDirectory() {
+        let entryCount = PakSafetyLimits.maximumEntryCount + 1
+        let directoryLength = entryCount * 64
+        var data = Data("PACK".utf8)
+        appendInt32(12, to: &data)
+        appendInt32(directoryLength, to: &data)
+        data.append(Data(count: directoryLength))
+
+        XCTAssertThrowsError(try PakLoader.load(data: data, name: "oversized.pak")) { error in
+            guard let pakError = error as? PakError,
+                  case .tooManyEntries = pakError else {
+                return XCTFail("Expected tooManyEntries, got \(error)")
+            }
+        }
+    }
+
+    func testImportBudgetIncludesExistingArchiveEntries() throws {
+        let root = PakNode(name: "/")
+        root.children = (0..<PakSafetyLimits.maximumEntryCount).map { PakNode(name: "file-\($0)") }
+        var budget = try PakImportBudget(existingRoot: root)
+
+        XCTAssertThrowsError(try budget.registerEntry()) { error in
+            guard let pakError = error as? PakError,
+                  case .tooManyEntries = pakError else {
+                return XCTFail("Expected tooManyEntries, got \(error)")
+            }
+        }
+    }
+
+    func testPreviewDimensionsAreBounded() {
+        XCTAssertTrue(PakPreviewLimits.isSafe(width: 4_096, height: 4_096))
+        XCTAssertFalse(PakPreviewLimits.isSafe(width: 8_193, height: 1))
+        XCTAssertFalse(PakPreviewLimits.isSafe(width: 8_192, height: 8_192))
+    }
+
+    func testArchivePathsRejectExcessiveDepth() {
+        let path = Array(repeating: "folder", count: PakSafetyLimits.maximumPathDepth).joined(separator: "/")
+            + "/file.txt"
+
+        XCTAssertThrowsError(try PakPathValidator.validateArchivePath(path))
+    }
+
     private func makePak(path: String, payload: Data) -> Data {
         let directoryOffset = 12 + payload.count
         var data = Data("PACK".utf8)

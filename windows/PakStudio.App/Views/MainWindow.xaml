@@ -13,6 +13,7 @@
         Background="{StaticResource WindowBackgroundBrush}">
     <Window.InputBindings>
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewCommand}" />
+        <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding NewPk3Command}" />
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
         <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsCommand}" />
@@ -154,7 +155,8 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_File">
-                <MenuItem Header="_New" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
+                <MenuItem Header="New _PAK" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
+                <MenuItem Header="New P_K3" Command="{Binding NewPk3Command}" InputGestureText="Ctrl+Shift+N" />
                 <MenuItem Header="_Open..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O" />
                 <MenuItem Header="Open _Recent" ItemsSource="{Binding RecentFiles}">
                     <MenuItem.ItemContainerStyle>
@@ -285,6 +287,12 @@
                                     Content="Up"
                                     Padding="8,2"
                                     Margin="0,0,10,0" />
+                            <TextBox DockPanel.Dock="Right"
+                                     Width="220"
+                                     Padding="6,2"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="Search the current folder" />
                             <TextBlock VerticalAlignment="Center"
                                        FontWeight="SemiBold"
                                        Text="{Binding CurrentFolderPath}" />

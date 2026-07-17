@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using PakStudio.Core.Interfaces;
 
@@ -6,6 +7,7 @@ namespace PakScape.Linux.Services;
 public sealed class XdgRecentFilesService : IRecentFilesService
 {
     private const int MaximumRecentFiles = 10;
+    private const long MaximumSettingsFileSize = 1024 * 1024;
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -37,9 +39,8 @@ public sealed class XdgRecentFilesService : IRecentFilesService
         var directory = Path.Combine(stateHome, "pakscape");
         try
         {
-            var existed = Directory.Exists(directory);
             Directory.CreateDirectory(directory);
-            if (!existed && OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux())
             {
                 File.SetUnixFileMode(
                     directory,
@@ -67,9 +68,15 @@ public sealed class XdgRecentFilesService : IRecentFilesService
 
         try
         {
-            var files = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(_settingsPath));
+            var json = ReadSettingsText(_settingsPath);
+            if (json is null)
+            {
+                return [];
+            }
+
+            var files = JsonSerializer.Deserialize<List<string>>(json);
             return files?
-                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Where(path => !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path))
                 .Distinct(StringComparer.Ordinal)
                 .Take(MaximumRecentFiles)
                 .ToList() ?? [];
@@ -83,6 +90,10 @@ public sealed class XdgRecentFilesService : IRecentFilesService
             return [];
         }
         catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+        catch (DecoderFallbackException)
         {
             return [];
         }
@@ -110,7 +121,17 @@ public sealed class XdgRecentFilesService : IRecentFilesService
 
         try
         {
-            File.WriteAllText(temporaryPath, json);
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporaryPath, _settingsPath, overwrite: true);
         }
         catch (IOException)
@@ -139,5 +160,30 @@ public sealed class XdgRecentFilesService : IRecentFilesService
                 // Best-effort cleanup.
             }
         }
+    }
+
+    private static string? ReadSettingsText(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 16 * 1024,
+            FileOptions.SequentialScan);
+        if (stream.Length < 0 || stream.Length > MaximumSettingsFileSize)
+        {
+            return null;
+        }
+
+        var bytes = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1)
+        {
+            return null;
+        }
+        return new UTF8Encoding(
+            encoderShouldEmitUTF8Identifier: false,
+            throwOnInvalidBytes: true).GetString(bytes);
     }
 }

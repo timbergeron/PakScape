@@ -19,6 +19,26 @@ public sealed class LinuxArchiveFileTransferServiceTests
     }
 
     [Fact]
+    public void RecentFilesRejectOversizedOrInvalidState()
+    {
+        var stateHome = CreateTemporaryDirectory();
+        try
+        {
+            var service = new XdgRecentFilesService(stateHome);
+            var statePath = Path.Combine(stateHome, "pakscape", "recent-files.json");
+            File.WriteAllBytes(statePath, new byte[(1024 * 1024) + 1]);
+            Assert.Empty(service.GetRecentFiles());
+
+            File.WriteAllBytes(statePath, [0xFF]);
+            Assert.Empty(service.GetRecentFiles());
+        }
+        finally
+        {
+            Directory.Delete(stateHome, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ImportDirectoryRemovesPartialTreeWhenAnEntryNameIsInvalid()
     {
         var source = CreateTemporaryDirectory();
@@ -93,6 +113,53 @@ public sealed class LinuxArchiveFileTransferServiceTests
         var document = new PakStudio.Core.Documents.ArchiveDocument { FormatId = "pk3" };
 
         Assert.Equal("Untitled.pk3", document.DisplayName);
+    }
+
+    [Fact]
+    public void ImportFileRejectsSparseFilesOverThePerFileLimitBeforeReading()
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(source, "oversized.bin");
+            using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+            {
+                stream.SetLength(ArchiveSafetyLimits.MaximumFileSize + 1);
+            }
+            var destination = ArchiveFolderNode.CreateRoot();
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Throws<ArchiveValidationException>(() => service.ImportFile(destination, path));
+            Assert.Empty(destination.Files);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ImportAccountsForEntriesAlreadyInTheArchive()
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(source, "one-more.txt");
+            File.WriteAllText(path, "content");
+            var destination = ArchiveFolderNode.CreateRoot();
+            for (var index = 0; index < ArchiveSafetyLimits.MaximumEntryCount; index++)
+            {
+                destination.Files.Add(new ArchiveFileNode($"file-{index}", []));
+            }
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Throws<ArchiveValidationException>(() => service.ImportFile(destination, path));
+            Assert.Equal(ArchiveSafetyLimits.MaximumEntryCount, destination.Files.Count);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
     }
 
     private static string CreateTemporaryDirectory()

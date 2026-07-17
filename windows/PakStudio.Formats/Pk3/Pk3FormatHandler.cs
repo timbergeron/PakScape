@@ -9,10 +9,6 @@ namespace PakStudio.Formats.Pk3;
 
 public sealed class Pk3FormatHandler : IArchiveFormatHandler
 {
-    private const int MaximumEntryCount = 50_000;
-    private const long MaximumExpandedFileSize = 1L * 1024 * 1024 * 1024;
-    private const long MaximumExpandedArchiveSize = 2L * 1024 * 1024 * 1024;
-
     public string FormatId => "pk3";
 
     public string DisplayName => "Quake PK3 Archive";
@@ -34,6 +30,13 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
 
         try
         {
+            var file = new FileInfo(path);
+            if (!file.Exists)
+            {
+                throw new FileNotFoundException("The selected PK3 does not exist.", path);
+            }
+            ArchiveSafetyLimits.EnsureTotalSize(0, file.Length, "The PK3 archive");
+
             await using var stream = new FileStream(
                 path,
                 FileMode.Open,
@@ -43,11 +46,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
                 useAsync: true);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
 
-            if (archive.Entries.Count > MaximumEntryCount)
-            {
-                throw new ArchiveValidationException(
-                    $"The PK3 contains more than {MaximumEntryCount:N0} entries.");
-            }
+            ArchiveSafetyLimits.EnsureEntryCount(archive.Entries.Count, "The PK3 archive");
 
             var document = new ArchiveDocument
             {
@@ -76,16 +75,11 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
                     continue;
                 }
 
-                if (entry.Length < 0 || entry.Length > MaximumExpandedFileSize)
-                {
-                    throw new ArchiveValidationException(
-                        $"PK3 entry '{entryPath}' exceeds the 1 GiB per-file safety limit.");
-                }
-                if (totalExpandedSize > MaximumExpandedArchiveSize - entry.Length)
-                {
-                    throw new ArchiveValidationException(
-                        "The PK3 exceeds the 2 GiB expanded-size safety limit.");
-                }
+                ArchiveSafetyLimits.EnsureFileSize(entry.Length, $"PK3 entry '{entryPath}'");
+                ArchiveSafetyLimits.EnsureTotalSize(
+                    totalExpandedSize,
+                    entry.Length,
+                    "The expanded PK3 archive");
 
                 var payload = await ReadEntryAsync(entry, entryPath, cancellationToken)
                     .ConfigureAwait(false);
@@ -136,13 +130,17 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
                              bufferSize: 128 * 1024,
                              useAsync: true))
             {
-                using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-                await WriteFolderAsync(
-                        archive,
-                        document.Root,
-                        parentPath: string.Empty,
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    await WriteFolderAsync(
+                            archive,
+                            document.Root,
+                            parentPath: string.Empty,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
             }
 
             if (File.Exists(fullPath))
@@ -222,13 +220,10 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             {
                 ArchiveNameValidator.ValidateNodeName(childFolder.Name);
                 var path = CombinePath(parentPath, childFolder.Name);
+                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"PK3 entry '{path}'");
                 RegisterPath(path, isDirectory: true, filePaths, folderPaths, explicitFolderPaths);
                 entryCount++;
-                if (entryCount > MaximumEntryCount)
-                {
-                    throw new ArchiveValidationException(
-                        $"The PK3 cannot contain more than {MaximumEntryCount:N0} entries.");
-                }
+                ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PK3 archive");
                 ValidateFolder(childFolder, path);
             }
 
@@ -236,18 +231,15 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             {
                 ArchiveNameValidator.ValidateNodeName(file.Name);
                 var path = CombinePath(parentPath, file.Name);
+                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"PK3 entry '{path}'");
                 RegisterPath(path, isDirectory: false, filePaths, folderPaths, explicitFolderPaths);
                 entryCount++;
-                if (entryCount > MaximumEntryCount || file.Data.LongLength > MaximumExpandedFileSize)
-                {
-                    throw new ArchiveValidationException(
-                        $"PK3 entry '{path}' exceeds an archive safety limit.");
-                }
-                if (totalExpandedSize > MaximumExpandedArchiveSize - file.Data.LongLength)
-                {
-                    throw new ArchiveValidationException(
-                        "The PK3 exceeds the 2 GiB expanded-size safety limit.");
-                }
+                ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PK3 archive");
+                ArchiveSafetyLimits.EnsureFileSize(file.Data.LongLength, $"PK3 entry '{path}'");
+                ArchiveSafetyLimits.EnsureTotalSize(
+                    totalExpandedSize,
+                    file.Data.LongLength,
+                    "The expanded PK3 archive");
                 totalExpandedSize += file.Data.LongLength;
             }
         }
@@ -273,7 +265,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             }
 
             actualLength += read;
-            if (actualLength > MaximumExpandedFileSize || actualLength > entry.Length)
+            if (actualLength > ArchiveSafetyLimits.MaximumFileSize || actualLength > entry.Length)
             {
                 throw new ArchiveCorruptException(
                     $"PK3 entry '{entryPath}' expands beyond its declared safe size.");
@@ -306,6 +298,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
 
         try
         {
+            ArchiveSafetyLimits.EnsurePathDepth(segments.Length, $"PK3 entry '{rawPath}'");
             foreach (var segment in segments)
             {
                 ArchiveNameValidator.ValidateNodeName(segment);

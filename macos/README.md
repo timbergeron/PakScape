@@ -38,6 +38,14 @@ swift test --package-path macos --configuration release
 
 The tests cover round trips, malformed and duplicate paths, traversal attempts, format limits, missing payloads, atomic document behavior, and PK3 extraction preflight checks.
 
+## Engineering standards
+
+- PAK, PK3, folder, and clipboard imports enforce 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total limits across the existing document and each operation.
+- Folder imports reject symbolic links and read regular files through stable, bounded file handles.
+- Document generation does not mutate the live model before SwiftUI commits the save, and exports use staged or atomic writes.
+- Custom Quake image and BSP preview parsers cap dimensions, pixel counts, table sizes, and geometry counts before allocation.
+- Native image previews are dimension-checked and downsampled through Image I/O.
+
 ## Platform integration
 
 The app uses sandbox-approved file access, native document windows, Quick Look, default-application previews, and Finder Services. Treat all archive paths and payloads as untrusted input when changing import, preview, extraction, or save behavior.

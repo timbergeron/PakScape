@@ -8,9 +8,6 @@ namespace PakScape.Linux.Services;
 
 public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferService, IDisposable
 {
-    private const int MaximumEntryCount = 50_000;
-    private const long MaximumFileSize = 1L * 1024 * 1024 * 1024;
-    private const long MaximumImportSize = 2L * 1024 * 1024 * 1024;
     private readonly string _previewDirectory = CreatePrivatePreviewDirectory();
     private bool _disposed;
 
@@ -26,7 +23,7 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
             throw new FileNotFoundException("The selected file does not exist.", sourcePath);
         }
 
-        var budget = new ImportBudget();
+        var budget = new ImportBudget(destination);
         budget.RegisterEntry();
         var data = ReadFileWithLimits(info, budget);
 
@@ -49,11 +46,13 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
             throw new DirectoryNotFoundException($"The selected folder does not exist: {sourcePath}");
         }
 
-        PreflightDirectory(source.FullName);
+        var preflightBudget = new ImportBudget(destination);
+        preflightBudget.RegisterEntry();
+        PreflightDirectory(source.FullName, preflightBudget);
         var importedRoot = ArchiveTreeEditor.CreateFolder(destination, source.Name);
         try
         {
-            PopulateFolder(importedRoot, source.FullName, new ImportBudget());
+            PopulateFolder(importedRoot, source.FullName, new ImportBudget(importedRoot));
             return importedRoot;
         }
         catch
@@ -142,47 +141,33 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
         }
     }
 
-    private static void PreflightDirectory(string sourcePath)
+    private static void PreflightDirectory(string sourcePath, ImportBudget budget)
     {
-        var pending = new Stack<string>();
-        pending.Push(sourcePath);
-        var entryCount = 0;
-        long totalSize = 0;
+        var pending = new Stack<(string Path, int Depth)>();
+        pending.Push((sourcePath, 1));
 
-        while (pending.TryPop(out var directory))
+        while (pending.TryPop(out var pendingDirectory))
         {
-            foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+            foreach (var path in Directory.EnumerateFileSystemEntries(pendingDirectory.Path))
             {
                 FileSystemInfo info = Directory.Exists(path)
                     ? new DirectoryInfo(path)
                     : new FileInfo(path);
                 RejectLink(info);
 
-                entryCount++;
-                if (entryCount > MaximumEntryCount)
-                {
-                    throw new ArchiveValidationException(
-                        $"The selected folder contains more than {MaximumEntryCount:N0} entries.");
-                }
+                budget.RegisterEntry();
 
                 if (info is DirectoryInfo childDirectory)
                 {
-                    pending.Push(childDirectory.FullName);
+                    var childDepth = pendingDirectory.Depth + 1;
+                    ArchiveSafetyLimits.EnsurePathDepth(childDepth, "The selected folder");
+                    pending.Push((childDirectory.FullName, childDepth));
                     continue;
                 }
 
                 var file = (FileInfo)info;
-                if (file.Length > MaximumFileSize)
-                {
-                    throw new ArchiveValidationException(
-                        $"'{file.Name}' exceeds the 1 GiB per-file import limit.");
-                }
-                if (totalSize > MaximumImportSize - file.Length)
-                {
-                    throw new ArchiveValidationException(
-                        "The selected folder exceeds the 2 GiB total import limit.");
-                }
-                totalSize += file.Length;
+                ArchiveSafetyLimits.EnsureFileSize(file.Length, $"'{file.Name}'");
+                budget.CommitSize(file.Length);
             }
         }
     }
@@ -190,7 +175,8 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
     private static void PopulateFolder(
         ArchiveFolderNode destination,
         string sourcePath,
-        ImportBudget budget)
+        ImportBudget budget,
+        int depth = 1)
     {
         foreach (var entry in Directory
                      .EnumerateFileSystemEntries(sourcePath)
@@ -204,8 +190,10 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
 
             if (info is DirectoryInfo directory)
             {
+                var childDepth = depth + 1;
+                ArchiveSafetyLimits.EnsurePathDepth(childDepth, "The selected folder");
                 var folder = ArchiveTreeEditor.CreateFolder(destination, directory.Name);
-                PopulateFolder(folder, directory.FullName, budget);
+                PopulateFolder(folder, directory.FullName, budget, childDepth);
             }
             else
             {
@@ -223,6 +211,7 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
     {
         file.Refresh();
         RejectLink(file);
+        var initialModifiedUtc = file.LastWriteTimeUtc;
         using var stream = new FileStream(
             file.FullName,
             FileMode.Open,
@@ -231,11 +220,7 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
             bufferSize: 128 * 1024,
             FileOptions.SequentialScan);
         var length = stream.Length;
-        if (length > MaximumFileSize)
-        {
-            throw new ArchiveValidationException(
-                $"'{file.Name}' exceeds the 1 GiB per-file import limit.");
-        }
+        ArchiveSafetyLimits.EnsureFileSize(length, $"'{file.Name}'");
         budget.EnsureSizeAvailable(length);
 
         var data = new byte[checked((int)length)];
@@ -244,6 +229,12 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
         {
             throw new ArchiveValidationException(
                 $"'{file.Name}' changed size while it was being imported.");
+        }
+        file.Refresh();
+        if (!file.Exists || file.Length != data.LongLength || file.LastWriteTimeUtc != initialModifiedUtc)
+        {
+            throw new ArchiveValidationException(
+                $"'{file.Name}' changed while it was being imported.");
         }
 
         budget.CommitSize(data.LongLength);
@@ -383,29 +374,46 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
         private int _entryCount;
         private long _totalSize;
 
+        public ImportBudget(ArchiveFolderNode destination)
+        {
+            var root = destination;
+            while (root.Parent is { } parent)
+            {
+                root = parent;
+            }
+            RegisterExistingChildren(root);
+        }
+
         public void RegisterEntry()
         {
             _entryCount++;
-            if (_entryCount > MaximumEntryCount)
-            {
-                throw new ArchiveValidationException(
-                    $"The selected folder contains more than {MaximumEntryCount:N0} entries.");
-            }
+            ArchiveSafetyLimits.EnsureEntryCount(_entryCount, "The selected folder");
         }
 
         public void EnsureSizeAvailable(long length)
         {
-            if (_totalSize > MaximumImportSize - length)
-            {
-                throw new ArchiveValidationException(
-                    "The selected folder exceeds the 2 GiB total import limit.");
-            }
+            ArchiveSafetyLimits.EnsureTotalSize(_totalSize, length, "The selected folder");
         }
 
         public void CommitSize(long length)
         {
             EnsureSizeAvailable(length);
             _totalSize += length;
+        }
+
+        private void RegisterExistingChildren(ArchiveFolderNode folder)
+        {
+            foreach (var childFolder in folder.Folders)
+            {
+                RegisterEntry();
+                RegisterExistingChildren(childFolder);
+            }
+            foreach (var file in folder.Files)
+            {
+                RegisterEntry();
+                ArchiveSafetyLimits.EnsureFileSize(file.Size, $"'{file.Name}'");
+                CommitSize(file.Size);
+            }
         }
     }
 }

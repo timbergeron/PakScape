@@ -44,16 +44,10 @@ struct PakDocument: FileDocument {
         let ext = preferredExt ?? "pak"
         if ext == "pk3" {
             let zipData = try PakZipWriter.write(root: root, originalData: pakFile.data)
-            pakFile.version = UUID()
             return FileWrapper(regularFileWithContents: zipData)
         }
 
         let packResult = try PakWriter.write(root: root, originalData: pakFile.data)
-        packResult.applyToNodes()
-        pakFile.data = packResult.data
-        pakFile.entries = packResult.entries
-        pakFile.version = UUID()
-
         return FileWrapper(regularFileWithContents: packResult.data)
     }
 }

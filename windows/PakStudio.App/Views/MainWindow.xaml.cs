@@ -10,6 +10,7 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
     private bool _allowClose;
+    private string? _startupArchivePath;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -19,10 +20,15 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
     }
 
+    public void ConfigureStartupArchive(string? path)
+    {
+        _startupArchivePath = path;
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await _viewModel.InitializeAsync().ConfigureAwait(true);
+        await _viewModel.InitializeAsync(_startupArchivePath).ConfigureAwait(true);
     }
 
     private void FolderTree_OnSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)

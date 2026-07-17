@@ -27,9 +27,11 @@ xcodebuild \
 ## Engineering expectations
 
 - Treat archive contents and paths as untrusted input.
+- Preserve the shared 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total safety limits unless a reviewed format change requires otherwise.
 - Never replace missing or unreadable payloads with empty data.
 - Preserve the open document when an export fails.
 - Use atomic replacement for user documents where the platform supports it.
+- Bound dimensions, counts, and allocation sizes before decoding previews or walking archive tables.
 - Add a regression test for parsing, serialization, or path-validation fixes.
 - Keep platform-specific UI out of the portable archive-format code.
 

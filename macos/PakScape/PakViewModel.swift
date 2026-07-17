@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import AVFoundation
+import ImageIO
 import UniformTypeIdentifiers
 
 final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
@@ -23,6 +24,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif", "tga"]
     private static let previewableAudioExtensions: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "au", "snd"]
+    private static let maximumPreviewFileSize = 128 * 1_024 * 1_024
     var documentURL: URL?
     private var isNavigatingHistory = false
     private var audioPreviewPlayer: AVAudioPlayer?
@@ -144,7 +146,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func canPreviewAudio(_ node: PakNode) -> Bool {
-        guard !node.isFolder else { return false }
+        guard !node.isFolder, node.fileSize <= Self.maximumPreviewFileSize else { return false }
 
         let ext = (node.name as NSString).pathExtension.lowercased()
         guard !ext.isEmpty else { return false }
@@ -301,6 +303,18 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         guard let destination = currentFolder else { return [] }
 
         if let payload = clipboard {
+            if !payload.isCut || payload.sourceModel !== self {
+                do {
+                    var budget = try PakImportBudget(existingRoot: pakFile?.root)
+                    for template in payload.nodes {
+                        try budget.registerTree(template)
+                    }
+                } catch {
+                    presentWarning(title: "Couldn’t Paste Items", message: error.localizedDescription)
+                    return []
+                }
+            }
+
             if payload.isCut,
                let source = payload.sourceModel {
                 for id in payload.originalIDs {
@@ -484,10 +498,17 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
         var inserted: [PakNode] = []
         var failures: [String] = []
+        var budget: PakImportBudget
+        do {
+            budget = try PakImportBudget(existingRoot: pakFile?.root)
+        } catch {
+            presentImportFailures([error.localizedDescription])
+            return []
+        }
 
         for url in urls {
             do {
-                let node = try createNodeFromFileURL(url, in: folder)
+                let node = try createNodeFromFileURL(url, in: folder, budget: &budget)
                 insert(node: node, into: folder)
                 inserted.append(node)
             } catch {
@@ -509,7 +530,11 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return inserted
     }
 
-    private func createNodeFromFileURL(_ url: URL, in folder: PakNode) throws -> PakNode {
+    private func createNodeFromFileURL(
+        _ url: URL,
+        in folder: PakNode,
+        budget: inout PakImportBudget
+    ) throws -> PakNode {
         let accessedSecurityScope = url.startAccessingSecurityScopedResource()
         defer {
             if accessedSecurityScope {
@@ -522,18 +547,19 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         guard values.isSymbolicLink != true else {
             throw PakError.unsafePath(url.lastPathComponent)
         }
+        try budget.registerEntry()
 
         let name = availableName(for: url.lastPathComponent, in: folder)
         try PakPathValidator.validateNodeName(name)
 
         if values.isDirectory == true {
             let node = PakNode(name: name)
-            try PakLoader.buildTree(from: url, into: node)
+            try PakLoader.buildTree(from: url, into: node, budget: &budget)
             PakLoader.sortNodeRecursively(node)
             return node
         }
 
-        let data = try Data(contentsOf: url)
+        let data = try PakLoader.readFile(at: url, budget: &budget)
         let node = PakNode(name: name)
         node.localData = data
         return node
@@ -612,14 +638,18 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return nil
         }
 
-        guard !node.isFolder, let data = extractData(for: node) else { return nil }
+        guard !node.isFolder, node.fileSize <= Self.maximumPreviewFileSize else {
+            previewImageMisses.insert(node.id)
+            return nil
+        }
+        guard let data = extractData(for: node) else { return nil }
 
         let ext = (node.name as NSString).pathExtension.lowercased()
         let preview: NSImage?
         if ext == "lmp" {
             preview = LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
         } else if ext == "pcx" {
-            preview = PcxPreviewRenderer.renderImage(data: data) ?? NSImage(data: data)
+            preview = PcxPreviewRenderer.renderImage(data: data) ?? NativeImagePreviewRenderer.renderImage(data: data)
         } else if ext == "tga" {
             preview = TgaPreviewRenderer.renderImage(data: data)
         } else if ext == "mdl" {
@@ -632,7 +662,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } else if ext == "wad" {
             preview = WadPreviewRenderer.renderImage(fileName: node.name, data: data)
         } else if Self.previewableImageExtensions.contains(ext) {
-            preview = NSImage(data: data)
+            preview = NativeImagePreviewRenderer.renderImage(data: data)
         } else {
             preview = nil
         }
@@ -913,6 +943,32 @@ extension Notification.Name {
     static let pakAudioPreviewStateDidChange = Notification.Name("PakAudioPreviewStateDidChange")
 }
 
+private enum NativeImagePreviewRenderer {
+    static func renderImage(data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              PakPreviewLimits.isSafe(width: width, height: height) else {
+            return nil
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2_048,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(
+            cgImage: image,
+            size: NSSize(width: CGFloat(image.width), height: CGFloat(image.height))
+        )
+    }
+}
+
 private enum MdlPreviewRenderer {
     private static let headerSize = 84
 
@@ -928,6 +984,7 @@ private enum MdlPreviewRenderer {
 
         let width = skinWidth
         let height = skinHeight
+        guard PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         guard let skinData = firstSkinBytes(in: data, width: width, height: height) else {
             return nil
@@ -976,7 +1033,8 @@ private enum MdlPreviewRenderer {
 
     private static func image(from skin: Data, width: Int, height: Int) -> NSImage? {
         let palette = QuakePalette.bytes
-        guard palette.count >= 768 else { return nil }
+        guard palette.count >= 768,
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
@@ -1069,7 +1127,7 @@ private enum SprPreviewRenderer {
         let width = readInt32LE(data, offset: 16) ?? 0
         let height = readInt32LE(data, offset: 20) ?? 0
         let frames = readInt32LE(data, offset: 24) ?? 0
-        guard width > 0, height > 0, frames > 0 else { return nil }
+        guard PakPreviewLimits.isSafe(width: width, height: height), frames > 0 else { return nil }
 
         guard let frame = firstFrame(in: data, defaultWidth: width, defaultHeight: height) else {
             return nil
@@ -1118,6 +1176,7 @@ private enum SprPreviewRenderer {
         let frameWidth = readInt32LE(data, offset: cursor + 8) ?? defaultWidth
         let frameHeight = readInt32LE(data, offset: cursor + 12) ?? defaultHeight
         cursor += 16
+        guard PakPreviewLimits.isSafe(width: frameWidth, height: frameHeight) else { return nil }
 
         let pixelCountResult = frameWidth.multipliedReportingOverflow(by: frameHeight)
         guard !pixelCountResult.overflow else { return nil }
@@ -1132,7 +1191,8 @@ private enum SprPreviewRenderer {
 
     private static func image(from skin: Data, width: Int, height: Int) -> NSImage? {
         let palette = QuakePalette.bytes
-        guard palette.count >= 768 else { return nil }
+        guard palette.count >= 768,
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
@@ -1263,7 +1323,7 @@ private enum BspPreviewRenderer {
 
         guard let width = readInt32LE(data, offset: mipBase + 16),
               let height = readInt32LE(data, offset: mipBase + 20),
-              width > 0, height > 0 else {
+              PakPreviewLimits.isSafe(width: width, height: height) else {
             return nil
         }
 
@@ -1300,7 +1360,8 @@ private enum BspPreviewRenderer {
 
     private static func image(from pixels: Data, width: Int, height: Int) -> NSImage? {
         let palette = QuakePalette.bytes
-        guard palette.count >= 768 else { return nil }
+        guard palette.count >= 768,
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
@@ -1397,12 +1458,14 @@ private enum WadPreviewRenderer {
 
         guard let dirEntries = BspPreviewRenderer.readInt32LE(data, offset: 4),
               let dirOffset = BspPreviewRenderer.readInt32LE(data, offset: 8),
-              dirEntries > 0, dirOffset >= 0 else {
+              dirEntries > 0, dirEntries <= 4_096, dirOffset >= 0 else {
             return nil
         }
 
         let entrySize = 32
-        let directoryEndResult = dirOffset.addingReportingOverflow(dirEntries * entrySize)
+        let directorySizeResult = dirEntries.multipliedReportingOverflow(by: entrySize)
+        guard !directorySizeResult.overflow else { return nil }
+        let directoryEndResult = dirOffset.addingReportingOverflow(directorySizeResult.partialValue)
         guard !directoryEndResult.overflow else { return nil }
         let directoryEnd = directoryEndResult.partialValue
         guard directoryEnd <= data.count else { return nil }
@@ -1427,7 +1490,7 @@ private enum WadPreviewRenderer {
             entries.append(Entry(offset: offset, dsize: dsize, size: size, type: type, name: name))
         }
 
-        let images = entries.compactMap { decodeImage(entry: $0, data: data) }
+        let images = entries.prefix(64).compactMap { decodeImage(entry: $0, data: data) }
         guard !images.isEmpty else { return nil }
         return contactSheet(from: images)
     }
@@ -1444,7 +1507,7 @@ private enum WadPreviewRenderer {
         guard entry.offset + 8 <= data.count else { return nil }
         guard let width = BspPreviewRenderer.readInt32LE(data, offset: entry.offset),
               let height = BspPreviewRenderer.readInt32LE(data, offset: entry.offset + 4),
-              width > 0, height > 0 else { return nil }
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
@@ -1466,7 +1529,7 @@ private enum WadPreviewRenderer {
         guard let width = BspPreviewRenderer.readInt32LE(data, offset: base + 16),
               let height = BspPreviewRenderer.readInt32LE(data, offset: base + 20),
               let ofs1 = BspPreviewRenderer.readInt32LE(data, offset: base + 24),
-              width > 0, height > 0, ofs1 >= 0 else {
+              PakPreviewLimits.isSafe(width: width, height: height), ofs1 >= 0 else {
             return nil
         }
 
@@ -1487,7 +1550,8 @@ private enum WadPreviewRenderer {
 
     private static func image(from pixels: Data, width: Int, height: Int) -> NSImage? {
         let palette = QuakePalette.bytes
-        guard palette.count >= 768 else { return nil }
+        guard palette.count >= 768,
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
@@ -1607,7 +1671,7 @@ private enum PcxPreviewRenderer {
         let width = xMax - xMin + 1
         let height = yMax - yMin + 1
 
-        guard width > 0, height > 0 else { return nil }
+        guard PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let colorPlanes = Int(data[65])
         let bytesPerLine = readUInt16LE(data, offset: 66) ?? 0
@@ -1620,6 +1684,7 @@ private enum PcxPreviewRenderer {
         let decodedByteCountResult = rowStride.multipliedReportingOverflow(by: height)
         guard !decodedByteCountResult.overflow else { return nil }
         let decodedByteCount = decodedByteCountResult.partialValue
+        guard decodedByteCount <= PakPreviewLimits.maximumPixelCount * 4 else { return nil }
 
         let sourceLimit: Int
         let paletteOffset: Int?
@@ -1794,6 +1859,7 @@ private enum PcxPreviewRenderer {
     }
 
     private static func image(fromRGBA rgba: Data, width: Int, height: Int) -> NSImage? {
+        guard PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
         guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
@@ -1845,7 +1911,7 @@ private enum TgaPreviewRenderer {
 
         guard let width = readUInt16LE(data, offset: 12),
               let height = readUInt16LE(data, offset: 14),
-              width > 0, height > 0 else { return nil }
+              PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
         let pixelDepth = data[16]
         let descriptor = data[17]
@@ -2109,7 +2175,7 @@ private enum LmpPreviewRenderer {
             height = parsedHeight
         }
 
-        guard width > 0, height > 0 else { return nil }
+        guard PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
         let pixelCountResult = width.multipliedReportingOverflow(by: height)
         guard !pixelCountResult.overflow else { return nil }
         let pixelCount = pixelCountResult.partialValue
