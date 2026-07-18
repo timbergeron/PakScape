@@ -54,6 +54,9 @@
         <Separator />
         <MenuItem Header="Open in Default _Application" Command="{Binding OpenSelectedCommand}" />
       </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="_Quick Preview" InputGesture="Space" Click="OnQuickPreviewClick" />
+      </MenuItem>
       <MenuItem Header="_Help">
         <MenuItem Header="_About PakScape" Command="{Binding AboutCommand}" />
       </MenuItem>

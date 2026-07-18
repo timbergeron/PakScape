@@ -486,6 +486,8 @@ struct PakCommands {
     let canEnclosingFolder: Bool
     let openSelection: () -> Void
     let canOpenSelection: Bool
+    let quickLook: () -> Void
+    let canQuickLook: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -627,8 +629,16 @@ private extension ContentView {
             openSelection: {
                 model.openSelectedFolder()
             },
-            canOpenSelection: model.canOpenSelectedFolder
+            canOpenSelection: model.canOpenSelectedFolder,
+            quickLook: {
+                quickLookSelection()
+            },
+            canQuickLook: renamingNodeID == nil && !model.selectedNodes.isEmpty
         )
+    }
+
+    func quickLookSelection() {
+        model.toggleQuickLook(for: model.selectedNodes)
     }
 
     func createFolder(at parent: PakNode?) {

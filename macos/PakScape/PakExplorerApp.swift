@@ -7,6 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         removeBlankFileMenuItem()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        PakQuickLook.shared.hide()
+    }
+
     private func removeBlankFileMenuItem() {
         DispatchQueue.main.async {
             guard let fileMenu = NSApp.mainMenu?.item(withTitle: "File")?.submenu else { return }
@@ -218,6 +222,13 @@ struct PakViewCommands: Commands {
 
     var body: some Commands {
         CommandMenu("View") {
+            Button("Quick Look") {
+                pakCommands?.quickLook()
+            }
+            .disabled(!(pakCommands?.canQuickLook ?? false))
+
+            Divider()
+
             Button("Bigger Icons") {
                 pakCommands?.zoomInIcons()
             }

@@ -16,7 +16,7 @@ Each edition uses the platform's native desktop conventions while sharing the sa
 
 - Browse archives as a folder tree, list, or icon grid.
 - Add, rename, move, copy, remove, and export files and folders.
-- Preview common images, sounds, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files.
+- Press Space to preview selected text, common images, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files.
 - Read and write PAK and PK3 archives with traversal, duplicate-path, symlink, and size validation.
 - Integrate with platform file pickers, recent files, drag and drop, and native keyboard navigation.
 

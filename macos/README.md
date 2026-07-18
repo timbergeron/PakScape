@@ -48,6 +48,10 @@ The tests cover round trips, malformed and duplicate paths, traversal attempts, 
 
 ## Platform integration
 
-The app uses sandbox-approved file access, native document windows, Quick Look, default-application previews, and Finder Services. Treat all archive paths and payloads as untrusted input when changing import, preview, extraction, or save behavior.
+The app uses sandbox-approved file access, native document windows, Quick Look, default-application previews, and Finder Services. Select one or more archive items and press Space to open a Finder-style Quick Look preview.
+
+PakScape renders deterministic still-image previews for Quake BSP, LMP, MDL, PCX, SPR, TGA, and `gfx.wad` content, and treats `.cfg` files as plain text. Other files are passed to the system Quick Look service, which handles common images, text, PDFs, office documents, audio, and video according to the macOS version and installed preview extensions. Unknown, malformed, or unsupported formats still receive Quick Look's generic file preview. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection; decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
+
+Treat all archive paths and payloads as untrusted input when changing import, preview, extraction, or save behavior.
 
 See the root [contribution guide](../CONTRIBUTING.md), [changelog](../CHANGELOG.md), and [security policy](../SECURITY.md) before submitting changes.

@@ -9,6 +9,7 @@ namespace PakStudio.App.Views;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private PreviewWindow? _previewWindow;
     private bool _allowClose;
     private string? _startupArchivePath;
 
@@ -51,6 +52,69 @@ public partial class MainWindow : Window
     private void ItemList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _viewModel.SetSelectedItems(ItemList.SelectedItems.Cast<ArchiveItemViewModel>());
+    }
+
+    private void ItemList_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            ToggleQuickPreview();
+            e.Handled = true;
+        }
+    }
+
+    private void QuickPreview_OnClick(object sender, RoutedEventArgs e)
+    {
+        ToggleQuickPreview();
+    }
+
+    private void ToggleQuickPreview()
+    {
+        if (_previewWindow is { IsVisible: true })
+        {
+            _previewWindow.Close();
+            return;
+        }
+
+        var nodes = ItemList.SelectedItems
+            .Cast<ArchiveItemViewModel>()
+            .Select(item => item.Node)
+            .ToList();
+        if (nodes.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var previewWindow = new PreviewWindow(nodes) { Owner = this };
+            previewWindow.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_previewWindow, previewWindow))
+                {
+                    _previewWindow = null;
+                }
+            };
+            _previewWindow = previewWindow;
+            try
+            {
+                previewWindow.Show();
+            }
+            catch
+            {
+                _previewWindow = null;
+                throw;
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "Unable to Preview Selection",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 
     private void ItemList_OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)

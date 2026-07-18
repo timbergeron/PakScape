@@ -5,6 +5,27 @@ import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 
+private enum QuickLookPreparationError: LocalizedError {
+    case tooManyItems(maximum: Int)
+    case fileTooLarge(name: String, maximumSize: Int)
+    case selectionTooLarge(maximumSize: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .tooManyItems(let maximum):
+            return "Quick Look supports up to \(maximum) selected items at a time."
+        case .fileTooLarge(let name, let maximumSize):
+            return "“\(name)” is larger than the \(formattedSize(maximumSize)) preview limit."
+        case .selectionTooLarge(let maximumSize):
+            return "The selection is larger than the \(formattedSize(maximumSize)) combined preview limit."
+        }
+    }
+
+    private func formattedSize(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
 final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var pakFile: PakFile?
     @Published var currentFolder: PakNode? { // Directory shown in right pane
@@ -24,7 +45,11 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif", "tga"]
     private static let previewableAudioExtensions: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "au", "snd"]
+    private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
+    private static let textQuickLookExtensions: Set<String> = ["cfg"]
     private static let maximumPreviewFileSize = 128 * 1_024 * 1_024
+    private static let maximumQuickLookSelectionSize = 256 * 1_024 * 1_024
+    private static let maximumQuickLookItemCount = 1_000
     var documentURL: URL?
     private var isNavigatingHistory = false
     private var audioPreviewPlayer: AVAudioPlayer?
@@ -128,6 +153,135 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let destination = base.appendingPathComponent(node.name)
         try data.write(to: destination)
         return destination
+    }
+
+    func toggleQuickLook(for nodes: [PakNode]) {
+        if PakQuickLook.shared.isVisible {
+            PakQuickLook.shared.hide()
+            return
+        }
+
+        guard !nodes.isEmpty else { return }
+
+        do {
+            let items = try prepareQuickLookItems(for: nodes)
+            PakQuickLook.shared.show(items: items)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Preview Selection"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func prepareQuickLookItems(for nodes: [PakNode]) throws -> [PakQuickLookItem] {
+        guard nodes.count <= Self.maximumQuickLookItemCount else {
+            throw QuickLookPreparationError.tooManyItems(maximum: Self.maximumQuickLookItemCount)
+        }
+
+        var totalSize = 0
+        for node in nodes where !node.isFolder {
+            guard node.fileSize <= Self.maximumPreviewFileSize else {
+                throw QuickLookPreparationError.fileTooLarge(
+                    name: node.name,
+                    maximumSize: Self.maximumPreviewFileSize
+                )
+            }
+
+            let newTotal = totalSize.addingReportingOverflow(node.fileSize)
+            guard !newTotal.overflow, newTotal.partialValue <= Self.maximumQuickLookSelectionSize else {
+                throw QuickLookPreparationError.selectionTooLarge(
+                    maximumSize: Self.maximumQuickLookSelectionSize
+                )
+            }
+            totalSize = newTotal.partialValue
+        }
+
+        var items: [PakQuickLookItem] = []
+        items.reserveCapacity(nodes.count)
+
+        do {
+            for node in nodes {
+                items.append(try prepareQuickLookItem(for: node))
+            }
+            return items
+        } catch {
+            let cleanupURLs = Set(items.map(\.cleanupURL))
+            for url in cleanupURLs {
+                try? FileManager.default.removeItem(at: url)
+            }
+            throw error
+        }
+    }
+
+    private func prepareQuickLookItem(for node: PakNode) throws -> PakQuickLookItem {
+        try PakPathValidator.validateNodeName(node.name)
+
+        let fileManager = FileManager.default
+        let base = fileManager.temporaryDirectory
+            .appendingPathComponent("PakScape-QuickLook-" + UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(
+            at: base,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        do {
+            if node.isFolder {
+                let destination = base.appendingPathComponent(node.name, isDirectory: true)
+                try fileManager.createDirectory(at: destination, withIntermediateDirectories: false)
+                return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+            }
+
+            let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let ext = (node.name as NSString).pathExtension.lowercased()
+
+            if Self.textQuickLookExtensions.contains(ext) {
+                let destination = base.appendingPathComponent("preview.txt")
+                try data.write(to: destination, options: .atomic)
+                return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+            }
+
+            if Self.renderedQuickLookExtensions.contains(ext),
+               let pngData = quickLookPNGData(fileName: node.name, data: data) {
+                let destination = base.appendingPathComponent("preview.png")
+                try pngData.write(to: destination, options: .atomic)
+                return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+            }
+
+            let destination = base.appendingPathComponent(node.name)
+            try data.write(to: destination, options: .atomic)
+            return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+        } catch {
+            try? fileManager.removeItem(at: base)
+            throw error
+        }
+    }
+
+    private func pngData(for image: NSImage) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    private func quickLookPNGData(fileName: String, data: Data) -> Data? {
+        autoreleasepool {
+            guard let image = renderPreviewImage(fileName: fileName, data: data) else { return nil }
+            return pngData(for: image)
+        }
     }
 
     func openInDefaultApp(node: PakNode) {
@@ -644,28 +798,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
         guard let data = extractData(for: node) else { return nil }
 
-        let ext = (node.name as NSString).pathExtension.lowercased()
-        let preview: NSImage?
-        if ext == "lmp" {
-            preview = LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
-        } else if ext == "pcx" {
-            preview = PcxPreviewRenderer.renderImage(data: data) ?? NativeImagePreviewRenderer.renderImage(data: data)
-        } else if ext == "tga" {
-            preview = TgaPreviewRenderer.renderImage(data: data)
-        } else if ext == "mdl" {
-            preview = MdlPreviewRenderer.renderImage(data: data)
-        } else if ext == "spr" {
-            preview = SprPreviewRenderer.renderImage(data: data)
-        } else if ext == "bsp" {
-            preview = BspPreviewRenderer.renderImage(fileName: node.name, data: data)
-                ?? BspLevelPreviewRenderer.renderImage(data: data)
-        } else if ext == "wad" {
-            preview = WadPreviewRenderer.renderImage(fileName: node.name, data: data)
-        } else if Self.previewableImageExtensions.contains(ext) {
-            preview = NativeImagePreviewRenderer.renderImage(data: data)
-        } else {
-            preview = nil
-        }
+        let preview = renderPreviewImage(fileName: node.name, data: data)
 
         if let preview {
             previewImageCache[node.id] = preview
@@ -674,6 +807,29 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
 
         return preview
+    }
+
+    private func renderPreviewImage(fileName: String, data: Data) -> NSImage? {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        if ext == "lmp" {
+            return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
+        } else if ext == "pcx" {
+            return PcxPreviewRenderer.renderImage(data: data) ?? NativeImagePreviewRenderer.renderImage(data: data)
+        } else if ext == "tga" {
+            return TgaPreviewRenderer.renderImage(data: data)
+        } else if ext == "mdl" {
+            return MdlPreviewRenderer.renderImage(data: data)
+        } else if ext == "spr" {
+            return SprPreviewRenderer.renderImage(data: data)
+        } else if ext == "bsp" {
+            return BspPreviewRenderer.renderImage(fileName: fileName, data: data)
+                ?? BspLevelPreviewRenderer.renderImage(data: data)
+        } else if ext == "wad" {
+            return WadPreviewRenderer.renderImage(fileName: fileName, data: data)
+        } else if Self.previewableImageExtensions.contains(ext) {
+            return NativeImagePreviewRenderer.renderImage(data: data)
+        }
+        return nil
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {

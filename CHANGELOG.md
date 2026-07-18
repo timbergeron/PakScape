@@ -15,6 +15,7 @@ Notable user-visible changes are documented here.
 - Ubuntu-focused Linux desktop app with PAK/PK3 editing, search, drag-and-drop import, recent files, keyboard navigation, and unsaved-change protection.
 - Self-contained x86-64/ARM64 Debian packaging with XDG desktop and MIME integration.
 - Linux-specific regression tests and Ubuntu 24.04 CI coverage.
+- Finder-style Spacebar Quick Preview on macOS, Windows, and Linux, including text, common image, and Quake asset previews.
 
 ### Changed
 
@@ -40,4 +41,5 @@ Notable user-visible changes are documented here.
 - Account for existing document contents during batch imports and clipboard paste operations.
 - Reject Windows device names, alternate data stream paths, reparse points, and unstable source files during transfer operations.
 - Bound macOS image, WAD, and BSP preview allocations before decoding untrusted assets.
+- Bound Windows and Linux preview selections, text reads, image dimensions, and Quake asset decoding.
 - Avoid mutating the macOS document model before a generated save is committed.

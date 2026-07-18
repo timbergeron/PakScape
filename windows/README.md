@@ -7,6 +7,7 @@ Current capabilities include:
 - Open, create, edit, and atomically save Quake PAK and PK3 archives.
 - Add files or folders, create folders, rename, delete, and export archive items.
 - Browse folders with large-icon, small-icon, list, and detail views.
+- Preview selected archive items without extracting them by pressing Space.
 - Open archived files in their registered Windows application.
 - Track recent archives and prompt before discarding unsaved work.
 - Create either PAK or PK3 documents, open archives passed by Windows, and filter the current folder.
@@ -25,6 +26,18 @@ Build prerequisites:
 - .NET 8 SDK
 
 Open `PakStudio.sln` in Visual Studio on Windows to build and run the app.
+
+## Quick Preview
+
+Select one or more archive items and press Space, or choose **View > Quick Preview**. Press Space or Escape to close the preview; use the arrow keys or the on-screen controls to move through a multi-item selection.
+
+Rich previews are available for:
+
+- Plain text: `.cfg`, `.txt`, `.log`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.csv`, `.qc`, `.map`, `.ent`, `.rc`, `.shader`, `.def`, `.menu`, and `.arena`.
+- Common images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.tif`, and `.tiff`.
+- Quake content: `.bsp`, `.lmp`, `.mdl`, `.pcx`, `.spr`, `.tga`, and `gfx.wad`.
+
+Folders and unsupported or malformed files receive a metadata preview rather than being extracted or launched. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection. Text is truncated after 2 MB, and decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
 
 Run the portable regression suite from the repository root with:
 

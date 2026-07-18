@@ -13,10 +13,15 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _viewModel;
     private string? _startupPath;
     private bool _closeConfirmed;
+    private PreviewWindow? _previewWindow;
 
     public MainWindow()
     {
         InitializeComponent();
+        ArchiveGrid.AddHandler(
+            InputElement.KeyDownEvent,
+            OnArchiveGridKeyDown,
+            RoutingStrategies.Tunnel);
     }
 
     public void Configure(MainWindowViewModel viewModel, string? startupPath)
@@ -105,6 +110,68 @@ public partial class MainWindow : Window
         {
             await ViewModel.OpenItemAsync(item);
             e.Handled = true;
+        }
+    }
+
+    private void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.None)
+        {
+            ToggleQuickPreview();
+            e.Handled = true;
+        }
+    }
+
+    private void OnQuickPreviewClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleQuickPreview();
+    }
+
+    private void ToggleQuickPreview()
+    {
+        if (_previewWindow is { IsVisible: true })
+        {
+            _previewWindow.Close();
+            return;
+        }
+
+        var nodes = ArchiveGrid.SelectedItems
+            .OfType<ArchiveItemViewModel>()
+            .Select(item => item.Node)
+            .ToList();
+        if (nodes.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var previewWindow = new PreviewWindow(nodes);
+            previewWindow.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_previewWindow, previewWindow))
+                {
+                    _previewWindow = null;
+                }
+            };
+            _previewWindow = previewWindow;
+            try
+            {
+                previewWindow.Show(this);
+            }
+            catch
+            {
+                _previewWindow = null;
+                throw;
+            }
+        }
+        catch (Exception exception)
+        {
+            var dialog = new MessageDialogWindow(
+                "Unable to preview selection",
+                exception.Message,
+                MessageDialogButtons.Ok);
+            _ = dialog.ShowDialog<MessageDialogResult>(this);
         }
     }
 

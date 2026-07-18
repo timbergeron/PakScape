@@ -207,6 +207,10 @@
                           IsCheckable="True"
                           IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=Details}" />
                 <Separator />
+                <MenuItem Header="_Quick Preview"
+                          InputGestureText="Space"
+                          Click="QuickPreview_OnClick" />
+                <Separator />
                 <MenuItem Header="_Refresh" Command="{Binding RefreshCommand}" InputGestureText="F5" />
             </MenuItem>
             <MenuItem Header="_Help">
@@ -338,6 +342,7 @@
                               AllowDrop="True"
                               DragOver="ItemList_OnDragOver"
                               Drop="ItemList_OnDrop"
+                              PreviewKeyDown="ItemList_OnPreviewKeyDown"
                               PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
                               ScrollViewer.CanContentScroll="True"
                               VirtualizingPanel.IsVirtualizing="True"
@@ -346,6 +351,9 @@
                             <ContextMenu>
                                 <MenuItem Header="Open"
                                           Command="{Binding Data.OpenSelectedCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Quick Preview"
+                                          InputGestureText="Space"
+                                          Click="QuickPreview_OnClick" />
                                 <Separator />
                                 <MenuItem Header="Export..."
                                           Command="{Binding Data.ExportCommand, Source={StaticResource ViewModelProxy}}" />

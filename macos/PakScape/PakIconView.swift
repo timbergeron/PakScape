@@ -406,7 +406,7 @@ struct PakIconView: NSViewRepresentable {
 
         func handleKeyDown(_ event: NSEvent) -> Bool {
             guard let collectionView = collectionView else { return false }
-            let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
             guard modifiers.isEmpty else { return false }
             guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else { return false }
 
@@ -451,20 +451,7 @@ struct PakIconView: NSViewRepresentable {
                 return parent.nodes[index]
             }
             guard !selectedNodes.isEmpty else { return }
-
-            var urls: [URL] = []
-            urls.reserveCapacity(selectedNodes.count)
-            for node in selectedNodes {
-                do {
-                    let url = try parent.viewModel.exportToTemporaryLocation(node: node)
-                    urls.append(url)
-                } catch {
-                    continue
-                }
-            }
-            guard !urls.isEmpty else { return }
-
-            PakQuickLook.shared.toggle(urls: urls)
+            parent.viewModel.toggleQuickLook(for: selectedNodes)
         }
 
         private func updateTypeSelectionBuffer(with input: String) {
