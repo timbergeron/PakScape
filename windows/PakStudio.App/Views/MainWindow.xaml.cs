@@ -55,13 +55,14 @@ public partial class MainWindow : Window
         {
             FolderPaneColumn.Width = new GridLength(
                 Math.Max(FolderPaneReopenWidth, _lastExpandedFolderPaneWidth));
+            SetFolderPaneChrome(collapsed: false);
             return;
         }
 
         _lastExpandedFolderPaneWidth = Math.Max(
             FolderPaneReopenWidth,
             FolderPaneColumn.ActualWidth);
-        FolderPaneColumn.Width = new GridLength(0);
+        CollapseFolderPane();
     }
 
     private void FolderSplitter_OnDragStarted(object sender, DragStartedEventArgs e)
@@ -78,22 +79,43 @@ public partial class MainWindow : Window
             {
                 FolderPaneColumn.Width = new GridLength(FolderPaneReopenWidth);
                 _lastExpandedFolderPaneWidth = FolderPaneReopenWidth;
+                SetFolderPaneChrome(collapsed: false);
             }
             else if (width >= FolderPaneReopenWidth)
             {
                 _lastExpandedFolderPaneWidth = width;
+                SetFolderPaneChrome(collapsed: false);
             }
         }
         else if (width < FolderPaneCollapseThreshold)
         {
-            FolderPaneColumn.Width = new GridLength(0);
+            CollapseFolderPane();
         }
         else
         {
             _lastExpandedFolderPaneWidth = width;
+            SetFolderPaneChrome(collapsed: false);
         }
 
         _folderPaneWasCollapsedAtDragStart = false;
+    }
+
+    private void CollapseFolderPane()
+    {
+        FolderPaneColumn.Width = new GridLength(0);
+        SetFolderPaneChrome(collapsed: true);
+    }
+
+    private void SetFolderPaneChrome(bool collapsed)
+    {
+        FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
+        FolderSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        ContentPaneBorder.CornerRadius = collapsed
+            ? new CornerRadius(0)
+            : new CornerRadius(12, 0, 0, 0);
+        ContentPaneBorder.BorderThickness = collapsed
+            ? new Thickness(0, 1, 0, 0)
+            : new Thickness(1, 1, 0, 0);
     }
 
     private void ItemList_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)

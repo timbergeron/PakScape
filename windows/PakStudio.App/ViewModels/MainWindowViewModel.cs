@@ -179,6 +179,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
 
+    public string SearchResultText => CurrentItems.Count == 1
+        ? "1 result"
+        : $"{CurrentItems.Count:N0} results";
+
     public string StatusText
     {
         get => _statusText;
@@ -1054,6 +1058,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (_currentFolder is null)
         {
+            OnPropertyChanged(nameof(SearchResultText));
             return;
         }
 
@@ -1071,6 +1076,8 @@ public sealed class MainWindowViewModel : ViewModelBase
                     ? () => _thumbnailService.GetThumbnail(child)
                     : null));
         }
+
+        OnPropertyChanged(nameof(SearchResultText));
 
         var selectedItem = nodeToSelect is null
             ? null
