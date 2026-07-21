@@ -54,7 +54,7 @@ struct ContentView: View {
         .onChange(of: isEditable) { _, newValue in
             model.updateEditableState(newValue)
         }
-        .onChange(of: model.documentReplacementVersion) { _, _ in
+        .onChange(of: model.selectionResetVersion) { _, _ in
             selectedFileIDs.removeAll()
             cancelRenaming()
         }

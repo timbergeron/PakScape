@@ -58,6 +58,23 @@ final class PakArchiveCoreTests: XCTestCase {
         }
     }
 
+    func testBoundedNodeDataSourceMaterializesOnlyRequestedPrefix() throws {
+        let originalData = Data((0..<32).map { UInt8($0) })
+        let node = PakNode(
+            name: "large.txt",
+            entry: PakEntry(name: "large.txt", offset: 8, length: 16)
+        )
+
+        let source = try PakNodeData.boundedSource(
+            for: node,
+            originalData: originalData,
+            maximumLength: 4
+        )
+
+        XCTAssertEqual(source.range, 8 ..< 12)
+        XCTAssertEqual(source.materialize(), Data([8, 9, 10, 11]))
+    }
+
     func testWriterDoesNotMutateDocumentUntilOutputIsCommitted() throws {
         let root = PakNode(name: "/")
         let file = PakNode(name: "readme.txt")
@@ -192,6 +209,76 @@ final class PakArchiveCoreTests: XCTestCase {
                 return XCTFail("Expected tooManyEntries, got \(error)")
             }
         }
+    }
+
+    func testTreeMutationRecordsOnlyTopLevelSelectedNodes() throws {
+        let root = PakNode(name: "/")
+        let folder = PakNode(name: "maps")
+        let child = PakNode(name: "start.bsp")
+        child.localData = Data()
+        folder.children = [child]
+        root.children = [folder]
+
+        let placements = PakTreeMutation.placements(for: [folder.id, child.id], in: root)
+
+        XCTAssertEqual(placements.count, 1)
+        XCTAssertTrue(placements.first?.node === folder)
+    }
+
+    func testTreeMutationRemovalAndInverseRestoreIdentityAndOrder() throws {
+        let root = PakNode(name: "/")
+        let first = PakNode(name: "a")
+        let second = PakNode(name: "b")
+        let third = PakNode(name: "c")
+        root.children = [first, second, third]
+
+        let placements = PakTreeMutation.placements(for: [first.id, third.id], in: root)
+        PakTreeMutation.apply(removing: placements, inserting: [])
+
+        XCTAssertEqual(root.children?.map(\.name), ["b"])
+
+        PakTreeMutation.apply(removing: [], inserting: placements)
+
+        XCTAssertEqual(root.children?.map(\.name), ["a", "b", "c"])
+        XCTAssertTrue(root.children?[0] === first)
+        XCTAssertTrue(root.children?[2] === third)
+    }
+
+    func testTreeMutationMoveInverseRestoresBothFolders() throws {
+        let root = PakNode(name: "/")
+        let sourceFolder = PakNode(name: "source")
+        let destinationFolder = PakNode(name: "destination")
+        let original = PakNode(name: "item.txt")
+        original.localData = Data([1])
+        sourceFolder.children = [original]
+        root.children = [sourceFolder, destinationFolder]
+
+        let sourcePlacement = PakTreeMutation.placements(for: [original.id], in: root)
+        PakTreeMutation.apply(removing: sourcePlacement, inserting: [])
+
+        let movedCopy = PakNode(name: original.name)
+        movedCopy.localData = original.localData
+        destinationFolder.children = [movedCopy]
+        let destinationPlacement = PakTreeMutation.placements(
+            for: [movedCopy],
+            in: destinationFolder
+        )
+
+        PakTreeMutation.apply(
+            removing: destinationPlacement,
+            inserting: sourcePlacement
+        )
+
+        XCTAssertTrue(sourceFolder.children?.first === original)
+        XCTAssertTrue(destinationFolder.children?.isEmpty == true)
+
+        PakTreeMutation.apply(
+            removing: sourcePlacement,
+            inserting: destinationPlacement
+        )
+
+        XCTAssertTrue(sourceFolder.children?.isEmpty == true)
+        XCTAssertTrue(destinationFolder.children?.first === movedCopy)
     }
 
     func testPreviewDimensionsAreBounded() {

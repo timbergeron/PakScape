@@ -34,6 +34,9 @@ Notable user-visible changes are documented here.
 - Generated Xcode `DerivedData` is no longer tracked in the repository.
 - macOS document saving, Save As, edited-window state, and close confirmation are now managed by SwiftUI's native document lifecycle.
 - macOS file drops now use SwiftUI's typed Transferable API.
+- macOS Undo stores operation-sized changes with a 50-action limit instead of retaining a full archive tree per edit.
+- Cross-document cut/paste safely copies into the destination so Undo remains scoped to one archive.
+- Native macOS thumbnails stage bounded payload ranges off the main thread, queue at most 32 requests, and limit Quick Look generation to four concurrent jobs.
 
 ### Security
 

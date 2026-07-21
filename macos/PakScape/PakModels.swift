@@ -80,6 +80,57 @@ final class PakFile {
     }
 }
 
+struct PakNodePlacement {
+    let parent: PakNode
+    let node: PakNode
+    let index: Int
+}
+
+enum PakTreeMutation {
+    static func placements(for ids: Set<PakNode.ID>, in root: PakNode) -> [PakNodePlacement] {
+        var result: [PakNodePlacement] = []
+
+        func collect(from parent: PakNode) {
+            for (index, node) in (parent.children ?? []).enumerated() {
+                if ids.contains(node.id) {
+                    result.append(PakNodePlacement(parent: parent, node: node, index: index))
+                } else if node.isFolder {
+                    collect(from: node)
+                }
+            }
+        }
+
+        collect(from: root)
+        return result
+    }
+
+    static func placements(for nodes: [PakNode], in parent: PakNode) -> [PakNodePlacement] {
+        let nodeIDs = Set(nodes.map(\.id))
+        return (parent.children ?? []).enumerated().compactMap { index, node in
+            guard nodeIDs.contains(node.id) else { return nil }
+            return PakNodePlacement(parent: parent, node: node, index: index)
+        }
+    }
+
+    static func apply(removing: [PakNodePlacement], inserting: [PakNodePlacement]) {
+        let removalsByParent = Dictionary(grouping: removing, by: \.parent)
+        for (parent, placements) in removalsByParent {
+            let ids = Set(placements.map { $0.node.id })
+            parent.children?.removeAll { ids.contains($0.id) }
+        }
+
+        let insertionsByParent = Dictionary(grouping: inserting, by: \.parent)
+        for (parent, placements) in insertionsByParent {
+            var children = parent.children ?? []
+            for placement in placements.sorted(by: { $0.index < $1.index }) {
+                guard !children.contains(where: { $0.id == placement.node.id }) else { continue }
+                children.insert(placement.node, at: min(placement.index, children.count))
+            }
+            parent.children = children
+        }
+    }
+}
+
 struct PakSearchResult {
     let node: PakNode
     let path: String
@@ -625,7 +676,44 @@ enum PakPathValidator {
     }
 }
 
+struct PakNodeDataSource: Sendable {
+    let data: Data
+    let range: Range<Int>
+
+    func materialize() -> Data {
+        data.subdata(in: range)
+    }
+}
+
 enum PakNodeData {
+    static func boundedSource(
+        for node: PakNode,
+        originalData: Data?,
+        maximumLength: Int
+    ) throws -> PakNodeDataSource {
+        let maximumLength = max(0, maximumLength)
+        if let localData = node.localData {
+            let length = min(localData.count, maximumLength)
+            return PakNodeDataSource(data: localData, range: 0 ..< length)
+        }
+
+        let path = node.entry?.name ?? node.name
+        guard let entry = node.entry,
+              let originalData,
+              entry.offset >= 0,
+              entry.length >= 0,
+              entry.offset <= originalData.count,
+              entry.length <= originalData.count - entry.offset else {
+            throw PakError.missingData(path)
+        }
+
+        let length = min(entry.length, maximumLength)
+        return PakNodeDataSource(
+            data: originalData,
+            range: entry.offset ..< entry.offset + length
+        )
+    }
+
     static func data(for node: PakNode, originalData: Data?) throws -> Data {
         if let localData = node.localData {
             return localData

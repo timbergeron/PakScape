@@ -43,8 +43,9 @@ The tests cover round trips, malformed and duplicate paths, traversal attempts, 
 - PAK, PK3, folder, and clipboard imports enforce 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total limits across the existing document and each operation.
 - Folder imports reject symbolic links and read regular files through stable, bounded file handles.
 - Document generation does not mutate the live model before SwiftUI commits the save, and exports use staged or atomic writes.
+- Undo records only affected tree nodes, retains at most 50 actions, and keeps cross-document transfers copy-based so each archive has an independent history.
 - Custom Quake image and BSP preview parsers cap dimensions, pixel counts, table sizes, and geometry counts before allocation.
-- Native image previews are dimension-checked and downsampled through Image I/O.
+- Native image previews are dimension-checked and downsampled through Image I/O; native Quick Look thumbnails stage only bounded payload ranges, queue at most 32 requests, and run at most four jobs concurrently.
 
 ## Platform integration
 
