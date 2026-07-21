@@ -643,6 +643,7 @@
                                        Grid.Row="0"
                                        Margin="0,0,16,0"
                                        VerticalAlignment="Center"
+                                       FontSize="14"
                                        FontWeight="SemiBold"
                                        Text="{Binding ArchiveDisplayName}"
                                        TextTrimming="CharacterEllipsis">
