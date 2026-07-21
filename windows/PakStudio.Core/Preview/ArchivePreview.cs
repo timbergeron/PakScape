@@ -4,6 +4,7 @@ public enum ArchivePreviewKind
 {
     Metadata,
     Text,
+    Audio,
     EncodedImage,
     Bitmap,
 }
@@ -19,6 +20,7 @@ public sealed record ArchivePreview(
     long Size,
     ArchivePreviewKind Kind,
     string? Text = null,
+    byte[]? EncodedAudio = null,
     byte[]? EncodedImage = null,
     int ImageWidth = 0,
     int ImageHeight = 0,

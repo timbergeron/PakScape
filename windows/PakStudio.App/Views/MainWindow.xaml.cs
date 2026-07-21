@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using PakStudio.App.ViewModels;
+using PakStudio.Core.Interfaces;
 
 namespace PakStudio.App.Views;
 
@@ -13,6 +14,7 @@ public partial class MainWindow : Window
     private const double FolderPaneReopenWidth = 220;
 
     private readonly MainWindowViewModel _viewModel;
+    private readonly IArchiveFileTransferService _fileTransferService;
     private PreviewWindow? _previewWindow;
     private bool _allowClose;
     private bool _isCloseConfirmationPending;
@@ -22,10 +24,13 @@ public partial class MainWindow : Window
     private bool _folderPaneWasCollapsedAtDragStart;
     private double _lastExpandedFolderPaneWidth = 280;
 
-    public MainWindow(MainWindowViewModel viewModel)
+    public MainWindow(
+        MainWindowViewModel viewModel,
+        IArchiveFileTransferService fileTransferService)
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _fileTransferService = fileTransferService;
         DataContext = _viewModel;
         Loaded += OnLoaded;
     }
@@ -171,7 +176,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var previewWindow = new PreviewWindow(nodes) { Owner = this };
+            var previewWindow = new PreviewWindow(nodes, _fileTransferService) { Owner = this };
             previewWindow.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_previewWindow, previewWindow))

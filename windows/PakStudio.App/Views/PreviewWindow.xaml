@@ -42,6 +42,68 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="AudioProgressSliderStyle" TargetType="Slider">
+            <Setter Property="Height" Value="20" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Background="Transparent">
+                            <Border Height="3"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource PanelBorderBrush}"
+                                    CornerRadius="1.5" />
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                                  Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="3"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource MutedForegroundBrush}"
+                                                        CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="12" Height="12">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{DynamicResource TextForegroundBrush}"
+                                                         Stroke="{DynamicResource PanelBorderBrush}"
+                                                         StrokeThickness="1" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                                  Focusable="False"
+                                                  Background="Transparent">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.45" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -103,6 +165,62 @@
                          TextWrapping="NoWrap"
                          HorizontalScrollBarVisibility="Auto"
                          VerticalScrollBarVisibility="Auto" />
+
+                <Grid x:Name="AudioPanel" Visibility="Collapsed" Margin="30">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border Width="96"
+                                Height="96"
+                                Background="{DynamicResource MenuHoverBrush}"
+                                BorderBrush="{DynamicResource PanelBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="48">
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="40"
+                                       Foreground="{DynamicResource MutedForegroundBrush}"
+                                       Text="&#xE8D6;" />
+                        </Border>
+                        <TextBlock x:Name="AudioStatusText"
+                                   Margin="0,18,0,0"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
+                                   Text="Loading audio..." />
+                        <Grid Width="400" Margin="0,16,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="AudioPlayPauseButton"
+                                    Width="36"
+                                    Height="36"
+                                    IsEnabled="False"
+                                    Style="{StaticResource PreviewIconButtonStyle}"
+                                    ToolTip="Play audio"
+                                    Click="AudioPlayPauseButton_OnClick">
+                                <TextBlock x:Name="AudioPlayPauseGlyph"
+                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           FontSize="15"
+                                           Text="&#xE768;" />
+                            </Button>
+                            <Slider x:Name="AudioProgressSlider"
+                                    Grid.Column="1"
+                                    Margin="12,0"
+                                    Minimum="0"
+                                    Maximum="1"
+                                    IsEnabled="False"
+                                    Style="{StaticResource AudioProgressSliderStyle}"
+                                    ValueChanged="AudioProgressSlider_OnValueChanged" />
+                            <TextBlock x:Name="AudioTimeText"
+                                       Grid.Column="2"
+                                       MinWidth="76"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedForegroundBrush}"
+                                       Text="0:00 / --:--" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
 
                 <Grid x:Name="MetadataPanel" Visibility="Collapsed" Margin="30">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">

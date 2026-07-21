@@ -22,6 +22,11 @@ public static class ArchivePreviewBuilder
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff",
     };
 
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".wav", ".mp3", ".wma", ".m4a", ".aac", ".aif", ".aiff",
+    };
+
     public static void ValidateSelection(IReadOnlyCollection<ArchiveNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -48,6 +53,9 @@ public static class ArchivePreviewBuilder
             totalSize += file.Size;
         }
     }
+
+    public static bool SupportsAudioExtension(string extension) =>
+        !string.IsNullOrWhiteSpace(extension) && AudioExtensions.Contains(extension);
 
     public static ArchivePreview Build(ArchiveNode node)
     {
@@ -89,6 +97,16 @@ public static class ArchivePreviewBuilder
                 ArchivePreviewKind.Text,
                 Text: text,
                 Message: truncated ? $"Preview truncated after {FormatSize(byteCount)}." : null);
+        }
+
+        if (SupportsAudioExtension(extension))
+        {
+            return new ArchivePreview(
+                file.Name,
+                typeDescription,
+                file.Size,
+                ArchivePreviewKind.Audio,
+                EncodedAudio: file.Data);
         }
 
         if (QuakePreviewDecoder.TryDecode(file.Name, file.Data, out var bitmap))

@@ -53,6 +53,25 @@ public sealed class ArchivePreviewBuilderTests
         Assert.Equal("echo hello\n", preview.Text);
     }
 
+    [Theory]
+    [InlineData("SOUND.WAV")]
+    [InlineData("music.mp3")]
+    [InlineData("music.wma")]
+    [InlineData("music.m4a")]
+    [InlineData("music.aac")]
+    [InlineData("music.aif")]
+    [InlineData("music.aiff")]
+    public void NativeAudioFilesRemainEncodedForPlayback(string fileName)
+    {
+        byte[] data = [1, 2, 3];
+        var file = new ArchiveFileNode(fileName, data);
+
+        var preview = ArchivePreviewBuilder.Build(file);
+
+        Assert.Equal(ArchivePreviewKind.Audio, preview.Kind);
+        Assert.Same(data, preview.EncodedAudio);
+    }
+
     [Fact]
     public void CommonImagesRemainEncodedForNativePresentation()
     {
