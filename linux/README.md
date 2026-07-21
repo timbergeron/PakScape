@@ -29,6 +29,11 @@ dotnet run --project linux/PakScape.Linux/PakScape.Linux.csproj
 
 An archive path may be supplied on the command line. The installed desktop entry uses the same path to open `.pak` and `.pk3` files from Files/Nautilus.
 
+The desktop UI follows the Linux system light/dark preference. Archive browsing includes
+inline image and Quake-format thumbnails, sortable name/type/size/modified columns,
+back/forward/up navigation, cut/copy/paste/select-all shortcuts, and file drag-and-drop
+both into and out of PakScape.
+
 ## Quick Preview
 
 Select one or more archive items and press Space, or choose **View > Quick Preview**. Press Space or Escape to close the preview; use the arrow keys or the on-screen controls to move through a multi-item selection.

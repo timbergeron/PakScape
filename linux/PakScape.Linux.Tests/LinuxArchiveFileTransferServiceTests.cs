@@ -108,6 +108,48 @@ public sealed class LinuxArchiveFileTransferServiceTests
     }
 
     [Fact]
+    public void ExportToTemporaryLocationStagesFilesAndFoldersForDesktopTransfer()
+    {
+        var archiveRoot = ArchiveFolderNode.CreateRoot();
+        var file = ArchiveTreeEditor.AddFile(archiveRoot, "readme.txt", [1, 2, 3]);
+        var folder = ArchiveTreeEditor.CreateFolder(archiveRoot, "maps");
+        _ = ArchiveTreeEditor.AddFile(folder, "start.bsp", [4, 5]);
+        using var service = new LinuxArchiveFileTransferService();
+
+        var outputs = service.ExportToTemporaryLocation([file, folder]);
+
+        Assert.Equal(2, outputs.Count);
+        Assert.Equal([1, 2, 3], File.ReadAllBytes(outputs[0]));
+        Assert.Equal([4, 5], File.ReadAllBytes(Path.Combine(outputs[1], "start.bsp")));
+    }
+
+    [Fact]
+    public void ReleaseTemporaryLocationRemovesOnlyTheOwnedOperationDirectory()
+    {
+        var unrelatedDirectory = CreateTemporaryDirectory();
+        var unrelatedFile = Path.Combine(unrelatedDirectory, "keep.txt");
+        File.WriteAllText(unrelatedFile, "keep");
+        try
+        {
+            var archiveRoot = ArchiveFolderNode.CreateRoot();
+            var file = ArchiveTreeEditor.AddFile(archiveRoot, "readme.txt", [1, 2, 3]);
+            using var service = new LinuxArchiveFileTransferService();
+            var outputs = service.ExportToTemporaryLocation([file]);
+            var operationDirectory = Path.GetDirectoryName(Assert.Single(outputs));
+            Assert.NotNull(operationDirectory);
+
+            service.ReleaseTemporaryLocation([.. outputs, unrelatedFile]);
+
+            Assert.False(Directory.Exists(operationDirectory));
+            Assert.True(File.Exists(unrelatedFile));
+        }
+        finally
+        {
+            Directory.Delete(unrelatedDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void UntitledPk3DocumentUsesTheCorrectDisplayName()
     {
         var document = new PakStudio.Core.Documents.ArchiveDocument { FormatId = "pk3" };

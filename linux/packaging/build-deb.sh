@@ -65,7 +65,12 @@ install -d \
     "${package_root}/opt/pakscape" \
     "${package_root}/usr/bin" \
     "${package_root}/usr/share/applications" \
+    "${package_root}/usr/share/icons/hicolor/16x16/apps" \
+    "${package_root}/usr/share/icons/hicolor/32x32/apps" \
+    "${package_root}/usr/share/icons/hicolor/64x64/apps" \
+    "${package_root}/usr/share/icons/hicolor/128x128/apps" \
     "${package_root}/usr/share/icons/hicolor/256x256/apps" \
+    "${package_root}/usr/share/icons/hicolor/512x512/apps" \
     "${package_root}/usr/share/mime/packages" \
     "${package_root}/usr/share/doc/pakscape"
 cp -a "${publish_directory}/." "${package_root}/opt/pakscape/"
@@ -78,9 +83,19 @@ install -m 0644 \
 install -m 0644 \
     "${script_directory}/io.github.timbergeron.PakScape.xml" \
     "${package_root}/usr/share/mime/packages/io.github.timbergeron.PakScape.xml"
-install -m 0644 \
-    "${repository_root}/macos/PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png" \
-    "${package_root}/usr/share/icons/hicolor/256x256/apps/io.github.timbergeron.PakScape.png"
+for icon_size in 16 32 64 128 256 512; do
+    case "${icon_size}" in
+        16) icon_source="AppIcon_16x16@1x.png" ;;
+        32) icon_source="AppIcon_16x16@2x.png" ;;
+        64) icon_source="AppIcon_32x32@2x.png" ;;
+        128) icon_source="AppIcon_128x128@1x.png" ;;
+        256) icon_source="AppIcon_256x256@1x.png" ;;
+        512) icon_source="AppIcon_256x256@2x.png" ;;
+    esac
+    install -m 0644 \
+        "${repository_root}/macos/PakScape/Assets.xcassets/AppIcon.appiconset/${icon_source}" \
+        "${package_root}/usr/share/icons/hicolor/${icon_size}x${icon_size}/apps/io.github.timbergeron.PakScape.png"
+done
 install -m 0644 \
     "${script_directory}/copyright" \
     "${package_root}/usr/share/doc/pakscape/copyright"

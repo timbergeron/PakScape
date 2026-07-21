@@ -24,11 +24,13 @@
     <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
     <KeyBinding Gesture="Ctrl+Q" Command="{Binding ExitCommand}" />
     <KeyBinding Gesture="Alt+Up" Command="{Binding UpCommand}" />
+    <KeyBinding Gesture="Alt+Left" Command="{Binding BackCommand}" />
+    <KeyBinding Gesture="Alt+Right" Command="{Binding ForwardCommand}" />
     <KeyBinding Gesture="F2" Command="{Binding RenameCommand}" />
     <KeyBinding Gesture="Delete" Command="{Binding DeleteCommand}" />
   </Window.KeyBindings>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
     <Menu Grid.Row="0">
       <MenuItem Header="_File">
         <MenuItem Header="_New PAK" Command="{Binding NewCommand}" InputGesture="Ctrl+N" />
@@ -43,9 +45,19 @@
         <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGesture="Ctrl+Q" />
       </MenuItem>
       <MenuItem Header="_Edit">
+        <MenuItem Header="Cu_t" InputGesture="Ctrl+X" Click="OnCutClick" />
+        <MenuItem Header="_Copy" InputGesture="Ctrl+C" Click="OnCopyClick" />
+        <MenuItem Header="_Paste" InputGesture="Ctrl+V" Click="OnPasteClick" />
+        <MenuItem Header="Select _All" InputGesture="Ctrl+A" Click="OnSelectAllClick" />
+        <Separator />
         <MenuItem Header="New _Folder…" Command="{Binding NewFolderCommand}" />
         <MenuItem Header="_Rename…" Command="{Binding RenameCommand}" InputGesture="F2" />
         <MenuItem Header="_Delete" Command="{Binding DeleteCommand}" InputGesture="Delete" />
+      </MenuItem>
+      <MenuItem Header="_Go">
+        <MenuItem Header="_Back" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" InputGesture="Alt+Left" />
+        <MenuItem Header="_Forward" Command="{Binding ForwardCommand}" IsEnabled="{Binding CanGoForward}" InputGesture="Alt+Right" />
+        <MenuItem Header="_Up" Command="{Binding UpCommand}" InputGesture="Alt+Up" />
       </MenuItem>
       <MenuItem Header="_Archive">
         <MenuItem Header="Add _Files…" Command="{Binding AddFilesCommand}" />
@@ -55,6 +67,11 @@
         <MenuItem Header="Open in Default _Application" Command="{Binding OpenSelectedCommand}" />
       </MenuItem>
       <MenuItem Header="_View">
+        <MenuItem Header="_Large Icons" Command="{Binding ShowLargeIconsCommand}" />
+        <MenuItem Header="_Small Icons" Command="{Binding ShowSmallIconsCommand}" />
+        <MenuItem Header="_List" Command="{Binding ShowListCommand}" />
+        <MenuItem Header="_Details" Command="{Binding ShowDetailsCommand}" />
+        <Separator />
         <MenuItem Header="_Quick Preview" InputGesture="Space" Click="OnQuickPreviewClick" />
       </MenuItem>
       <MenuItem Header="_Help">
@@ -63,39 +80,36 @@
     </Menu>
 
     <Border Grid.Row="1"
-            Padding="10,8"
-            BorderBrush="{DynamicResource ThemeBorderLowBrush}"
-            BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,260">
-        <Button Grid.Column="0" Classes="toolbar" Command="{Binding OpenCommand}" Content="Open…"
-                AutomationProperties.Name="Open archive" />
-        <Button Grid.Column="1" Classes="toolbar" Margin="6,0,0,0" Command="{Binding SaveCommand}" Content="Save"
-                AutomationProperties.Name="Save archive" />
-        <Button Grid.Column="2" Classes="toolbar" Margin="18,0,0,0" Command="{Binding AddFilesCommand}" Content="Add Files…" />
-        <Button Grid.Column="3" Classes="toolbar" Margin="6,0,0,0" Command="{Binding AddFolderCommand}" Content="Add Folder…" />
-        <Button Grid.Column="4" Classes="toolbar" Margin="6,0,0,0" Command="{Binding NewFolderCommand}" Content="New Folder" />
-        <Button Grid.Column="5" Classes="toolbar" Margin="6,0,0,0" Command="{Binding ExportCommand}" Content="Export…" />
-        <TextBox Grid.Column="7"
-                 Text="{Binding SearchText, Mode=TwoWay}"
-                 PlaceholderText="Search this folder"
-                 VerticalContentAlignment="Center"
-                 AutomationProperties.Name="Search archive items" />
-      </Grid>
-    </Border>
-
-    <Border Grid.Row="2"
             Padding="10,7"
             BorderBrush="{DynamicResource ThemeBorderLowBrush}"
             BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*">
         <Button Grid.Column="0"
+                Command="{Binding BackCommand}"
+                IsEnabled="{Binding CanGoBack}"
+                Content="←"
+                Width="34"
+                Height="30"
+                ToolTip.Tip="Back (Alt+Left)"
+                AutomationProperties.Name="Go back" />
+        <Button Grid.Column="1"
+                Margin="5,0,0,0"
+                Command="{Binding ForwardCommand}"
+                IsEnabled="{Binding CanGoForward}"
+                Content="→"
+                Width="34"
+                Height="30"
+                ToolTip.Tip="Forward (Alt+Right)"
+                AutomationProperties.Name="Go forward" />
+        <Button Grid.Column="2"
+                Margin="5,0,0,0"
                 Command="{Binding UpCommand}"
                 Content="↑"
                 Width="34"
                 Height="30"
                 ToolTip.Tip="Go to parent folder (Alt+Up)"
                 AutomationProperties.Name="Go to parent folder" />
-        <TextBlock Grid.Column="1"
+        <TextBlock Grid.Column="3"
                    Margin="10,0,0,0"
                    Text="{Binding CurrentFolderPath}"
                    FontFamily="monospace"
@@ -104,7 +118,7 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="3" ColumnDefinitions="260,6,*" Margin="10">
+    <Grid Grid.Row="2" ColumnDefinitions="260,6,*" Margin="10">
       <Border Grid.Column="0" Classes="panel" Padding="8">
         <Grid RowDefinitions="Auto,*">
           <TextBlock Grid.Row="0" Classes="section-title" Margin="4,2,4,8" Text="ARCHIVE" />
@@ -132,7 +146,89 @@
       <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" />
 
       <Border Grid.Column="2" Classes="panel">
-        <DataGrid x:Name="ArchiveGrid"
+        <Grid>
+          <ListBox x:Name="LargeIconsList"
+                   IsVisible="{Binding IsLargeIconsView}"
+                   ItemsSource="{Binding CurrentItems}"
+                   SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                   SelectionMode="Multiple"
+                   SelectionChanged="OnAlternateSelectionChanged"
+                   DoubleTapped="OnAlternateItemDoubleTapped"
+                   KeyDown="OnArchiveGridKeyDown"
+                   PointerPressed="OnArchiveGridPointerPressed"
+                   PointerMoved="OnArchiveGridPointerMoved"
+                   PointerReleased="OnArchiveGridPointerReleased">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ArchiveItemViewModel">
+                <StackPanel Width="112" Margin="5" Spacing="6">
+                  <Grid Width="76" Height="76" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Icon}" FontSize="42" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Image Source="{Binding Thumbnail}" Width="76" Height="76" Stretch="Uniform" />
+                  </Grid>
+                  <TextBlock Text="{Binding Name}" Height="38" TextAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <ListBox x:Name="SmallIconsList"
+                   IsVisible="{Binding IsSmallIconsView}"
+                   ItemsSource="{Binding CurrentItems}"
+                   SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                   SelectionMode="Multiple"
+                   SelectionChanged="OnAlternateSelectionChanged"
+                   DoubleTapped="OnAlternateItemDoubleTapped"
+                   KeyDown="OnArchiveGridKeyDown"
+                   PointerPressed="OnArchiveGridPointerPressed"
+                   PointerMoved="OnArchiveGridPointerMoved"
+                   PointerReleased="OnArchiveGridPointerReleased">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ArchiveItemViewModel">
+                <StackPanel Width="190" Margin="4" Orientation="Horizontal" Spacing="8">
+                  <Grid Width="36" Height="36">
+                    <TextBlock Text="{Binding Icon}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Image Source="{Binding Thumbnail}" Width="36" Height="36" Stretch="Uniform" />
+                  </Grid>
+                  <TextBlock Text="{Binding Name}" Width="138" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <ListBox x:Name="ArchiveList"
+                   IsVisible="{Binding IsListView}"
+                   ItemsSource="{Binding CurrentItems}"
+                   SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                   SelectionMode="Multiple"
+                   SelectionChanged="OnAlternateSelectionChanged"
+                   DoubleTapped="OnAlternateItemDoubleTapped"
+                   KeyDown="OnArchiveGridKeyDown"
+                   PointerPressed="OnArchiveGridPointerPressed"
+                   PointerMoved="OnArchiveGridPointerMoved"
+                   PointerReleased="OnArchiveGridPointerReleased">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ArchiveItemViewModel">
+                <Grid ColumnDefinitions="36,*,150,100" Margin="5,2">
+                  <Grid Grid.Column="0" Width="28" Height="28">
+                    <TextBlock Text="{Binding Icon}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Image Source="{Binding Thumbnail}" Width="28" Height="28" Stretch="Uniform" />
+                  </Grid>
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Column="2" Text="{Binding TypeText}" VerticalAlignment="Center" Opacity="0.7" />
+                  <TextBlock Grid.Column="3" Text="{Binding SizeText}" VerticalAlignment="Center" Opacity="0.7" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <DataGrid x:Name="ArchiveGrid"
+                  IsVisible="{Binding IsDetailsView}"
                   ItemsSource="{Binding CurrentItems}"
                   SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                   AutoGenerateColumns="False"
@@ -146,23 +242,32 @@
                   SelectionChanged="OnSelectionChanged"
                   AutomationProperties.Name="Archive contents">
           <DataGrid.Columns>
-            <DataGridTemplateColumn Header="" Width="42" CanUserSort="False">
+            <DataGridTemplateColumn Header="" Width="52" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="models:ArchiveItemViewModel">
-                  <TextBlock Text="{Binding Icon}" HorizontalAlignment="Center" />
+                  <Grid Width="32" Height="32" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Icon}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <Image Source="{Binding Thumbnail}"
+                           Width="32"
+                           Height="32"
+                           Stretch="Uniform" />
+                  </Grid>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
-            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="3*" MinWidth="180" />
-            <DataGridTextColumn Header="Type" Binding="{Binding TypeText}" Width="180" />
-            <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" Width="110" />
-            <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" Width="160" />
+            <DataGridTextColumn Header="Name" Binding="{Binding Name}" SortMemberPath="Name" Width="3*" MinWidth="180" />
+            <DataGridTextColumn Header="Type" Binding="{Binding TypeText}" SortMemberPath="TypeText" Width="180" />
+            <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="SizeBytes" Width="110" />
+            <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" SortMemberPath="ModifiedSortValue" Width="160" />
           </DataGrid.Columns>
-        </DataGrid>
+          </DataGrid>
+        </Grid>
       </Border>
     </Grid>
 
-    <Border Grid.Row="4"
+    <Border Grid.Row="3"
             Padding="10,6"
             BorderBrush="{DynamicResource ThemeBorderLowBrush}"
             BorderThickness="0,1,0,0">
@@ -172,7 +277,7 @@
       </Grid>
     </Border>
 
-    <Border Grid.RowSpan="5"
+    <Border Grid.RowSpan="4"
             IsVisible="{Binding IsBusy}"
             Background="#44000000"
             IsHitTestVisible="True">

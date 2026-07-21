@@ -1,8 +1,10 @@
 using System.Collections.Specialized;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using PakScape.Linux.Models;
 using PakScape.Linux.ViewModels;
 
@@ -10,10 +12,18 @@ namespace PakScape.Linux.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly DataFormat<byte[]> ArchiveClipboardFormat =
+        DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-clipboard-id");
     private MainWindowViewModel? _viewModel;
     private string? _startupPath;
     private bool _closeConfirmed;
+    private bool _isCloseConfirmationPending;
     private PreviewWindow? _previewWindow;
+    private PointerPressedEventArgs? _dragTriggerEvent;
+    private Point? _dragStartPoint;
+    private Control? _dragSource;
+    private bool _isStartingDrag;
+    private bool _isSynchronizingSelection;
 
     public MainWindow()
     {
@@ -21,6 +31,18 @@ public partial class MainWindow : Window
         ArchiveGrid.AddHandler(
             InputElement.KeyDownEvent,
             OnArchiveGridKeyDown,
+            RoutingStrategies.Tunnel);
+        ArchiveGrid.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnArchiveGridPointerPressed,
+            RoutingStrategies.Tunnel);
+        ArchiveGrid.AddHandler(
+            InputElement.PointerMovedEvent,
+            OnArchiveGridPointerMoved,
+            RoutingStrategies.Tunnel);
+        ArchiveGrid.AddHandler(
+            InputElement.PointerReleasedEvent,
+            OnArchiveGridPointerReleased,
             RoutingStrategies.Tunnel);
     }
 
@@ -57,10 +79,23 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        if (await ViewModel.CanCloseAsync())
+        if (_isCloseConfirmationPending)
         {
-            _closeConfirmed = true;
-            Close();
+            return;
+        }
+
+        _isCloseConfirmationPending = true;
+        try
+        {
+            if (await ViewModel.CanCloseAsync())
+            {
+                _closeConfirmed = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _isCloseConfirmationPending = false;
         }
     }
 
@@ -100,8 +135,57 @@ public partial class MainWindow : Window
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        ViewModel.SetSelectedItems(
-            ArchiveGrid.SelectedItems.OfType<ArchiveItemViewModel>());
+        if (ArchiveGrid.IsVisible)
+        {
+            UpdateSelection(ArchiveGrid.SelectedItems.OfType<ArchiveItemViewModel>());
+        }
+    }
+
+    private void OnAlternateSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ListBox { IsVisible: true } listBox)
+        {
+            UpdateSelection(
+                listBox.SelectedItems?.OfType<ArchiveItemViewModel>() ?? []);
+        }
+    }
+
+    private void UpdateSelection(IEnumerable<ArchiveItemViewModel> selectedItems)
+    {
+        if (_isSynchronizingSelection)
+        {
+            return;
+        }
+
+        var items = selectedItems.Distinct().ToList();
+        _isSynchronizingSelection = true;
+        try
+        {
+            ViewModel.SetSelectedItems(items);
+            ReplaceSelection(ArchiveGrid.SelectedItems, items);
+            ReplaceSelection(LargeIconsList.SelectedItems, items);
+            ReplaceSelection(SmallIconsList.SelectedItems, items);
+            ReplaceSelection(ArchiveList.SelectedItems, items);
+        }
+        finally
+        {
+            _isSynchronizingSelection = false;
+        }
+    }
+
+    private static void ReplaceSelection(
+        System.Collections.IList? selection,
+        IReadOnlyList<ArchiveItemViewModel> items)
+    {
+        if (selection is null)
+        {
+            return;
+        }
+        selection.Clear();
+        foreach (var item in items)
+        {
+            selection.Add(item);
+        }
     }
 
     private async void OnItemDoubleTapped(object? sender, TappedEventArgs e)
@@ -113,12 +197,269 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
+    private async void OnAlternateItemDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is ListBox { SelectedItem: ArchiveItemViewModel item })
+        {
+            await ViewModel.OpenItemAsync(item);
+            e.Handled = true;
+        }
+    }
+
+    private async void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.None)
         {
             ToggleQuickPreview();
             e.Handled = true;
+            return;
+        }
+
+        if (e.KeyModifiers != KeyModifiers.Control)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.X:
+                await CopyToClipboardAsync(isCut: true);
+                e.Handled = true;
+                break;
+            case Key.C:
+                await CopyToClipboardAsync(isCut: false);
+                e.Handled = true;
+                break;
+            case Key.V:
+                await PasteFromClipboardAsync();
+                e.Handled = true;
+                break;
+            case Key.A:
+                SelectAllVisibleItems(sender);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private async void OnCutClick(object? sender, RoutedEventArgs e) =>
+        await CopyToClipboardAsync(isCut: true);
+
+    private async void OnCopyClick(object? sender, RoutedEventArgs e) =>
+        await CopyToClipboardAsync(isCut: false);
+
+    private async void OnPasteClick(object? sender, RoutedEventArgs e) =>
+        await PasteFromClipboardAsync();
+
+    private void OnSelectAllClick(object? sender, RoutedEventArgs e)
+    {
+        SelectAllVisibleItems(null);
+    }
+
+    private async Task CopyToClipboardAsync(bool isCut)
+    {
+        var paths = ViewModel.CopySelection(isCut);
+        var clipboardId = ViewModel.PendingClipboardId;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null || clipboardId is null)
+        {
+            ViewModel.CancelPendingClipboardTransfer();
+            return;
+        }
+
+        DataTransfer? transfer = null;
+        try
+        {
+            transfer = await CreateFileTransferAsync(paths);
+            transfer.Add(DataTransferItem.Create(ArchiveClipboardFormat, clipboardId));
+            await clipboard.SetDataAsync(transfer);
+            transfer = null;
+            ViewModel.CommitClipboardTransfer();
+        }
+        catch (Exception exception)
+        {
+            if (transfer is not null)
+            {
+                ((IDataTransfer)transfer).Dispose();
+            }
+            ViewModel.CancelPendingClipboardTransfer();
+            await ShowTransferErrorAsync(isCut ? "Unable to cut selection" : "Unable to copy selection", exception);
+        }
+    }
+
+    private async Task PasteFromClipboardAsync()
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var transfer = await clipboard.TryGetDataAsync();
+            if (transfer is null)
+            {
+                return;
+            }
+
+            var clipboardId = await transfer.TryGetValueAsync(ArchiveClipboardFormat);
+            if (ViewModel.HasInternalClipboard &&
+                clipboardId is not null &&
+                ViewModel.InternalClipboardId is { } ownedId &&
+                clipboardId.SequenceEqual(ownedId))
+            {
+                if (await ViewModel.PasteInternalClipboardAsync())
+                {
+                    await clipboard.ClearAsync();
+                }
+                return;
+            }
+
+            ViewModel.ClearInternalClipboard();
+            var paths = ((await transfer.TryGetFilesAsync()) ?? [])
+                .Select(item => item.TryGetLocalPath())
+                .Where(path => path is not null)
+                .Cast<string>()
+                .ToList();
+            await ViewModel.AddDroppedPathsAsync(paths);
+        }
+        catch (Exception exception)
+        {
+            await ShowTransferErrorAsync("Unable to paste", exception);
+        }
+    }
+
+    private void OnArchiveGridPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Control source &&
+            e.Source is Visual visual &&
+            (visual is DataGridRow or ListBoxItem ||
+             visual.FindAncestorOfType<DataGridRow>() is not null ||
+             visual.FindAncestorOfType<ListBoxItem>() is not null) &&
+            e.GetCurrentPoint(source).Properties.IsLeftButtonPressed)
+        {
+            _dragTriggerEvent = e;
+            _dragStartPoint = e.GetPosition(source);
+            _dragSource = source;
+        }
+    }
+
+    private async void OnArchiveGridPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_isStartingDrag || _dragTriggerEvent is null || _dragStartPoint is not { } start || _dragSource is not { } source)
+        {
+            return;
+        }
+        if (!e.GetCurrentPoint(source).Properties.IsLeftButtonPressed)
+        {
+            ClearDragStart();
+            return;
+        }
+
+        var current = e.GetPosition(source);
+        if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4)
+        {
+            return;
+        }
+
+        var triggerEvent = _dragTriggerEvent;
+        ClearDragStart();
+        _isStartingDrag = true;
+        IReadOnlyList<string> paths = [];
+        try
+        {
+            paths = ViewModel.PrepareSelectedItemsForTransfer();
+            if (paths.Count == 0)
+            {
+                return;
+            }
+            var transfer = await CreateFileTransferAsync(paths);
+            if (transfer.Items.Count == 0)
+            {
+                ((IDataTransfer)transfer).Dispose();
+                return;
+            }
+            await DragDrop.DoDragDropAsync(triggerEvent, transfer, DragDropEffects.Copy);
+            e.Handled = true;
+        }
+        catch (Exception exception)
+        {
+            await ShowTransferErrorAsync("Unable to drag selection", exception);
+        }
+        finally
+        {
+            ViewModel.ReleaseTemporaryTransfer(paths);
+            _isStartingDrag = false;
+        }
+    }
+
+    private void OnArchiveGridPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        ClearDragStart();
+
+    private void ClearDragStart()
+    {
+        _dragTriggerEvent = null;
+        _dragStartPoint = null;
+        _dragSource = null;
+    }
+
+    private async Task<DataTransfer> CreateFileTransferAsync(IReadOnlyList<string> paths)
+    {
+        var transfer = new DataTransfer();
+        try
+        {
+            foreach (var path in paths)
+            {
+                IStorageItem? item = Directory.Exists(path)
+                    ? await StorageProvider.TryGetFolderFromPathAsync(path)
+                    : await StorageProvider.TryGetFileFromPathAsync(path);
+                if (item is not null)
+                {
+                    transfer.Add(DataTransferItem.CreateFile(item));
+                }
+            }
+            return transfer;
+        }
+        catch
+        {
+            ((IDataTransfer)transfer).Dispose();
+            throw;
+        }
+    }
+
+    private async Task ShowTransferErrorAsync(string title, Exception exception)
+    {
+        var dialog = new MessageDialogWindow(title, exception.Message, MessageDialogButtons.Ok);
+        await dialog.ShowDialog<MessageDialogResult>(this);
+    }
+
+    private void SelectAllVisibleItems(object? sender)
+    {
+        if (sender is ListBox sourceList)
+        {
+            sourceList.SelectAll();
+            sourceList.Focus();
+            return;
+        }
+        if (LargeIconsList.IsVisible)
+        {
+            LargeIconsList.SelectAll();
+            LargeIconsList.Focus();
+        }
+        else if (SmallIconsList.IsVisible)
+        {
+            SmallIconsList.SelectAll();
+            SmallIconsList.Focus();
+        }
+        else if (ArchiveList.IsVisible)
+        {
+            ArchiveList.SelectAll();
+            ArchiveList.Focus();
+        }
+        else
+        {
+            ArchiveGrid.SelectAll();
+            ArchiveGrid.Focus();
         }
     }
 
@@ -135,10 +476,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nodes = ArchiveGrid.SelectedItems
-            .OfType<ArchiveItemViewModel>()
-            .Select(item => item.Node)
-            .ToList();
+        var nodes = ViewModel.SelectedNodes;
         if (nodes.Count == 0)
         {
             return;

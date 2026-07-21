@@ -16,7 +16,10 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IArchiveFileTransferService _fileTransferService;
     private readonly IUserInteractionService _interactionService;
     private readonly IRecentFilesService _recentFilesService;
+    private readonly ArchiveThumbnailService _thumbnailService;
     private readonly Dictionary<ArchiveFolderNode, FolderNodeViewModel> _folderLookup = [];
+    private readonly Stack<ArchiveFolderNode> _backHistory = [];
+    private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
     private ArchiveDocument? _document;
     private FolderNodeViewModel? _selectedFolder;
     private ArchiveItemViewModel? _selectedItem;
@@ -26,17 +29,24 @@ public partial class MainWindowViewModel : ObservableObject
     private string _statusText = "Ready";
     private string _selectionStatus = "0 selected";
     private bool _isBusy;
+    private ArchiveClipboardPayload? _clipboardPayload;
+    private ArchiveClipboardPayload? _pendingClipboardPayload;
+    private IReadOnlyList<string> _clipboardExportedPaths = [];
+    private IReadOnlyList<string> _pendingClipboardExportedPaths = [];
+    private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
 
     public MainWindowViewModel(
         IArchiveService archiveService,
         IArchiveFileTransferService fileTransferService,
         IUserInteractionService interactionService,
-        IRecentFilesService recentFilesService)
+        IRecentFilesService recentFilesService,
+        ArchiveThumbnailService thumbnailService)
     {
         _archiveService = archiveService;
         _fileTransferService = fileTransferService;
         _interactionService = interactionService;
         _recentFilesService = recentFilesService;
+        _thumbnailService = thumbnailService;
     }
 
     public event EventHandler? CloseRequested;
@@ -65,9 +75,13 @@ public partial class MainWindowViewModel : ObservableObject
         get => _selectedFolder;
         set
         {
-            if (SetProperty(ref _selectedFolder, value) && value is not null && !IsBusy)
+            if (value is null)
             {
-                SelectFolderCore(value);
+                SetProperty(ref _selectedFolder, null);
+            }
+            else if (!IsBusy)
+            {
+                NavigateToFolder(value.Folder);
             }
         }
     }
@@ -105,8 +119,41 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsBusy
     {
         get => _isBusy;
-        private set => SetProperty(ref _isBusy, value);
+        private set
+        {
+            if (SetProperty(ref _isBusy, value))
+            {
+                NotifyNavigationStateChanged();
+            }
+        }
     }
+
+    public bool CanGoBack => _backHistory.Count > 0 && !IsBusy;
+
+    public bool CanGoForward => _forwardHistory.Count > 0 && !IsBusy;
+
+    public ArchiveViewMode ActiveViewMode
+    {
+        get => _activeViewMode;
+        private set
+        {
+            if (SetProperty(ref _activeViewMode, value))
+            {
+                OnPropertyChanged(nameof(IsLargeIconsView));
+                OnPropertyChanged(nameof(IsSmallIconsView));
+                OnPropertyChanged(nameof(IsListView));
+                OnPropertyChanged(nameof(IsDetailsView));
+            }
+        }
+    }
+
+    public bool IsLargeIconsView => ActiveViewMode == ArchiveViewMode.LargeIcons;
+
+    public bool IsSmallIconsView => ActiveViewMode == ArchiveViewMode.SmallIcons;
+
+    public bool IsListView => ActiveViewMode == ArchiveViewMode.List;
+
+    public bool IsDetailsView => ActiveViewMode == ArchiveViewMode.Details;
 
     public string WindowTitle
     {
@@ -151,12 +198,145 @@ public partial class MainWindowViewModel : ObservableObject
         };
     }
 
+    public IReadOnlyList<ArchiveNode> SelectedNodes =>
+        _selectedItems.Select(item => item.Node).ToList();
+
     public async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
     {
         if (paths.Count > 0 && CanModifyCurrentFolder())
         {
             await ImportPathsAsync(paths);
         }
+    }
+
+    public IReadOnlyList<string> CopySelection(bool isCut)
+    {
+        var nodes = _selectedItems.Select(item => item.Node).ToList();
+        if (nodes.Count == 0 || IsBusy)
+        {
+            return [];
+        }
+
+        try
+        {
+            CancelPendingClipboardTransfer();
+            _pendingClipboardPayload = new ArchiveClipboardPayload(
+                Guid.NewGuid(),
+                ArchiveTreeEditor.CreateSnapshot(nodes),
+                nodes,
+                isCut);
+        }
+        catch (Exception exception)
+        {
+            _pendingClipboardPayload = null;
+            StatusText = $"{(isCut ? "Cut" : "Copy")} failed: {exception.Message}";
+            return [];
+        }
+
+        try
+        {
+            _pendingClipboardExportedPaths =
+                _fileTransferService.ExportToTemporaryLocation(nodes);
+            return _pendingClipboardExportedPaths;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The in-process archive snapshot still supports paste when a temporary
+            // file cannot represent an archive item on the host file system.
+            StatusText += $" External clipboard export unavailable: {exception.Message}";
+            return [];
+        }
+    }
+
+    public IReadOnlyList<string> PrepareSelectedItemsForTransfer()
+    {
+        if (_selectedItems.Count == 0 || IsBusy)
+        {
+            return [];
+        }
+        return _fileTransferService.ExportToTemporaryLocation(
+            _selectedItems.Select(item => item.Node).ToList());
+    }
+
+    public void ReleaseTemporaryTransfer(IReadOnlyList<string> paths) =>
+        _fileTransferService.ReleaseTemporaryLocation(paths);
+
+    public bool HasInternalClipboard => _clipboardPayload is not null;
+
+    public byte[]? InternalClipboardId => _clipboardPayload?.Id.ToByteArray();
+
+    public byte[]? PendingClipboardId => _pendingClipboardPayload?.Id.ToByteArray();
+
+    public void CommitClipboardTransfer()
+    {
+        if (_pendingClipboardPayload is not { } payload)
+        {
+            return;
+        }
+
+        _fileTransferService.ReleaseTemporaryLocation(_clipboardExportedPaths);
+        _clipboardPayload = payload;
+        _clipboardExportedPaths = _pendingClipboardExportedPaths;
+        _pendingClipboardPayload = null;
+        _pendingClipboardExportedPaths = [];
+        StatusText = payload.IsCut
+            ? $"Cut {payload.Originals.Count} item(s)."
+            : $"Copied {payload.Originals.Count} item(s).";
+    }
+
+    public void CancelPendingClipboardTransfer()
+    {
+        _fileTransferService.ReleaseTemporaryLocation(_pendingClipboardExportedPaths);
+        _pendingClipboardExportedPaths = [];
+        _pendingClipboardPayload = null;
+    }
+
+    public async Task<bool> PasteInternalClipboardAsync()
+    {
+        if (_clipboardPayload is not { } payload || _currentFolder is null || IsBusy)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (payload.IsCut && payload.Originals.All(node => ReferenceEquals(node.Parent, _currentFolder)))
+            {
+                ClearInternalClipboard();
+                StatusText = "The cut items are already in this folder.";
+                return true;
+            }
+
+            var inserted = payload.IsCut
+                ? ArchiveTreeEditor.MoveTo(payload.Originals, _currentFolder)
+                : ArchiveTreeEditor.CopyTo(payload.Templates, _currentFolder);
+            if (inserted.Count == 0)
+            {
+                return false;
+            }
+
+            if (payload.IsCut)
+            {
+                ClearInternalClipboard();
+            }
+            MarkDirty(payload.IsCut
+                ? $"Moved {inserted.Count} item(s)."
+                : $"Pasted {inserted.Count} item(s).");
+            RefreshAfterMutation(inserted[0]);
+            return payload.IsCut;
+        }
+        catch (Exception exception)
+        {
+            await _interactionService.ShowErrorAsync("Paste failed", exception.Message);
+            return false;
+        }
+    }
+
+    public void ClearInternalClipboard()
+    {
+        _fileTransferService.ReleaseTemporaryLocation(_clipboardExportedPaths);
+        _clipboardExportedPaths = [];
+        _clipboardPayload = null;
     }
 
     public async Task OpenItemAsync(ArchiveItemViewModel? item)
@@ -466,6 +646,44 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void Back()
+    {
+        while (_backHistory.TryPop(out var folder))
+        {
+            if (!_folderLookup.TryGetValue(folder, out var folderViewModel))
+            {
+                continue;
+            }
+            if (_currentFolder is { } current)
+            {
+                _forwardHistory.Push(current);
+            }
+            SelectFolderCore(folderViewModel);
+            NotifyNavigationStateChanged();
+            return;
+        }
+    }
+
+    [RelayCommand]
+    private void Forward()
+    {
+        while (_forwardHistory.TryPop(out var folder))
+        {
+            if (!_folderLookup.TryGetValue(folder, out var folderViewModel))
+            {
+                continue;
+            }
+            if (_currentFolder is { } current)
+            {
+                _backHistory.Push(current);
+            }
+            SelectFolderCore(folderViewModel);
+            NotifyNavigationStateChanged();
+            return;
+        }
+    }
+
+    [RelayCommand]
     private void Refresh()
     {
         if (!IsBusy)
@@ -476,11 +694,21 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ShowLargeIcons() => SetViewMode(ArchiveViewMode.LargeIcons);
+
+    [RelayCommand]
+    private void ShowSmallIcons() => SetViewMode(ArchiveViewMode.SmallIcons);
+
+    [RelayCommand]
+    private void ShowList() => SetViewMode(ArchiveViewMode.List);
+
+    [RelayCommand]
+    private void ShowDetails() => SetViewMode(ArchiveViewMode.Details);
+
+    [RelayCommand]
     private async Task AboutAsync()
     {
-        await _interactionService.ShowInfoAsync(
-            "About PakScape",
-            "PakScape for Linux\n\nA desktop browser and editor for Quake PAK and PK3 archives.\nBuilt for Ubuntu with .NET and Avalonia.");
+        await _interactionService.ShowAboutAsync();
     }
 
     private async Task CreateNewArchiveAsync(string formatId)
@@ -588,6 +816,14 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void LoadDocument(ArchiveDocument document)
     {
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        _currentFolder = null;
+        _selectedFolder = null;
+        CurrentItems.Clear();
+        SetSelectedItems([]);
+        _thumbnailService.Reset();
+        NotifyNavigationStateChanged();
         Document = document;
         SearchText = string.Empty;
         RebuildFolderTree(document.Root);
@@ -613,7 +849,6 @@ public partial class MainWindowViewModel : ObservableObject
         var selected = folderToSelect is not null && _folderLookup.TryGetValue(folderToSelect, out var match)
             ? match
             : rootViewModel;
-        SelectedFolder = selected;
         SelectFolderCore(selected);
     }
 
@@ -652,7 +887,11 @@ public partial class MainWindowViewModel : ObservableObject
 
         var items = _currentFolder.Folders.Cast<ArchiveNode>()
             .Concat(_currentFolder.Files)
-            .Select(node => new ArchiveItemViewModel(node))
+            .Select(node => new ArchiveItemViewModel(
+                node,
+                ArchiveThumbnailService.CanCreateThumbnail(node)
+                    ? () => _thumbnailService.GetThumbnail(node)
+                    : null))
             .Where(item => string.IsNullOrWhiteSpace(SearchText) ||
                            item.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
                            item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
@@ -676,6 +915,9 @@ public partial class MainWindowViewModel : ObservableObject
     {
         var status = StatusText;
         var currentFolder = _currentFolder;
+        CurrentItems.Clear();
+        SetSelectedItems([]);
+        _thumbnailService.Reset();
         RebuildFolderTree(currentFolder);
         RebuildCurrentItems(nodeToSelect);
         StatusText = status;
@@ -695,15 +937,35 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void NavigateToFolder(ArchiveFolderNode folder)
     {
-        if (_folderLookup.TryGetValue(folder, out var folderViewModel))
+        if (ReferenceEquals(folder, _currentFolder) ||
+            !_folderLookup.TryGetValue(folder, out var folderViewModel))
         {
-            SelectedFolder = folderViewModel;
+            return;
         }
+        if (_currentFolder is { } current)
+        {
+            _backHistory.Push(current);
+            _forwardHistory.Clear();
+        }
+        SelectFolderCore(folderViewModel);
+        NotifyNavigationStateChanged();
     }
 
     private bool CanModifyCurrentFolder()
     {
         return Document is not null && _currentFolder is not null && !IsBusy;
+    }
+
+    private void NotifyNavigationStateChanged()
+    {
+        OnPropertyChanged(nameof(CanGoBack));
+        OnPropertyChanged(nameof(CanGoForward));
+    }
+
+    private void SetViewMode(ArchiveViewMode mode)
+    {
+        ActiveViewMode = mode;
+        StatusText = $"View mode: {mode}";
     }
 
     private void RecordRecentFile(string path)
@@ -786,4 +1048,10 @@ public partial class MainWindowViewModel : ObservableObject
     {
         return new ArchiveDocument { FormatId = formatId };
     }
+
+    private sealed record ArchiveClipboardPayload(
+        Guid Id,
+        IReadOnlyList<ArchiveNode> Templates,
+        IReadOnlyList<ArchiveNode> Originals,
+        bool IsCut);
 }

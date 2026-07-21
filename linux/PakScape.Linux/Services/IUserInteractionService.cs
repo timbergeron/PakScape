@@ -4,6 +4,8 @@ namespace PakScape.Linux.Services;
 
 public interface IUserInteractionService
 {
+    Task ShowAboutAsync();
+
     Task<string?> PickArchiveToOpenAsync();
 
     Task<string?> PickArchiveSavePathAsync(string suggestedFileName, string formatId);

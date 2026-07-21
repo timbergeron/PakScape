@@ -13,6 +13,7 @@ namespace PakScape.Linux;
 public partial class App : Application, IDisposable
 {
     private LinuxArchiveFileTransferService? _fileTransferService;
+    private ArchiveThumbnailService? _thumbnailService;
 
     public override void Initialize()
     {
@@ -30,6 +31,7 @@ public partial class App : Application, IDisposable
             };
             var archiveService = new ArchiveService(new ArchiveFormatRegistry(handlers));
             _fileTransferService = new LinuxArchiveFileTransferService();
+            _thumbnailService = new ArchiveThumbnailService();
             var recentFilesService = new XdgRecentFilesService();
 
             var window = new MainWindow();
@@ -38,7 +40,8 @@ public partial class App : Application, IDisposable
                 archiveService,
                 _fileTransferService,
                 interactionService,
-                recentFilesService);
+                recentFilesService,
+                _thumbnailService);
             var startupPath = desktop.Args?
                 .FirstOrDefault(argument => argument.Length == 0 || argument[0] != '-');
 
@@ -54,6 +57,8 @@ public partial class App : Application, IDisposable
     {
         _fileTransferService?.Dispose();
         _fileTransferService = null;
+        _thumbnailService?.Dispose();
+        _thumbnailService = null;
         GC.SuppressFinalize(this);
     }
 }

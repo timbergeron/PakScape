@@ -66,6 +66,7 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+        ObjectDisposedException.ThrowIf(_disposed, this);
         Directory.CreateDirectory(destinationDirectory);
 
         var outputPath = GetAvailableFileSystemPath(
@@ -90,10 +91,38 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
         }
         finally
         {
-            if (Directory.Exists(stagingPath))
-            {
-                Directory.Delete(stagingPath, recursive: true);
-            }
+            TryDeleteDirectory(stagingPath);
+        }
+    }
+
+    public IReadOnlyList<string> ExportToTemporaryLocation(IReadOnlyList<ArchiveNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (nodes.Count == 0)
+        {
+            return [];
+        }
+
+        var operationDirectory = Path.Combine(_previewDirectory, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(operationDirectory);
+        try
+        {
+            return nodes.Select(node => Export(node, operationDirectory)).ToList();
+        }
+        catch
+        {
+            TryDeleteDirectory(operationDirectory);
+            throw;
+        }
+    }
+
+    public void ReleaseTemporaryLocation(IReadOnlyList<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        foreach (var operationDirectory in GetOwnedOperationDirectories(paths))
+        {
+            TryDeleteDirectory(operationDirectory);
         }
     }
 
@@ -124,20 +153,57 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
         }
 
         _disposed = true;
+        TryDeleteDirectory(_previewDirectory);
+        GC.SuppressFinalize(this);
+    }
+
+    private IEnumerable<string> GetOwnedOperationDirectories(IReadOnlyList<string> paths)
+    {
+        var previewRoot = Path.GetFullPath(_previewDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (var path in paths)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            string? operationDirectory;
+            try
+            {
+                operationDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+            if (operationDirectory is not null &&
+                string.Equals(
+                    Path.GetDirectoryName(operationDirectory),
+                    previewRoot,
+                    StringComparison.Ordinal))
+            {
+                yield return operationDirectory;
+            }
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
         try
         {
-            if (Directory.Exists(_previewDirectory))
+            if (Directory.Exists(path))
             {
-                Directory.Delete(_previewDirectory, recursive: true);
+                Directory.Delete(path, recursive: true);
             }
         }
         catch (IOException)
         {
-            // Preview cleanup is best effort; the directory name is unguessable and private.
+            // Temporary export cleanup is best effort.
         }
         catch (UnauthorizedAccessException)
         {
-            // Preview cleanup is best effort.
+            // Temporary export cleanup is best effort.
         }
     }
 

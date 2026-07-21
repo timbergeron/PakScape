@@ -8,6 +8,12 @@ namespace PakScape.Linux.Services;
 public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
     : IUserInteractionService
 {
+    public async Task ShowAboutAsync()
+    {
+        var dialog = new AboutWindow();
+        await dialog.ShowDialog(Owner);
+    }
+
     private static readonly FilePickerFileType PakArchiveType = new("Quake PAK archive")
     {
         Patterns = ["*.pak"],
