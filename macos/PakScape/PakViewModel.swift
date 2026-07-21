@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import AVFoundation
 import ImageIO
+import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
 private enum QuickLookPreparationError: LocalizedError {
@@ -47,7 +48,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private static let previewableAudioExtensions: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "au", "snd"]
     private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
     private static let textQuickLookExtensions: Set<String> = ["cfg"]
+    private static let textThumbnailExtensions: Set<String> = ["txt"]
     private static let maximumPreviewFileSize = 128 * 1_024 * 1_024
+    private static let maximumTextThumbnailBytes = 2 * 1_024 * 1_024
     private static let maximumQuickLookSelectionSize = 256 * 1_024 * 1_024
     private static let maximumQuickLookItemCount = 1_000
     var documentURL: URL?
@@ -59,6 +62,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var previewImageCacheVersion: UUID?
     private var previewImageCache: [PakNode.ID: NSImage] = [:]
     private var previewImageMisses: Set<PakNode.ID> = []
+    private var previewImageRequests: [PakNode.ID: Task<Void, Never>] = [:]
 
     var canSave: Bool {
         pakFile != nil && hasUnsavedChanges
@@ -100,6 +104,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     deinit {
+        previewImageRequests.values.forEach { $0.cancel() }
         stopAudioPreview()
     }
 
@@ -791,12 +796,21 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if previewImageMisses.contains(node.id) {
             return nil
         }
+        if previewImageRequests[node.id] != nil {
+            return nil
+        }
 
         guard !node.isFolder, node.fileSize <= Self.maximumPreviewFileSize else {
             previewImageMisses.insert(node.id)
             return nil
         }
         guard let data = extractData(for: node) else { return nil }
+
+        let ext = (node.name as NSString).pathExtension.lowercased()
+        if Self.textThumbnailExtensions.contains(ext) {
+            requestTextThumbnail(for: node, data: data)
+            return nil
+        }
 
         let preview = renderPreviewImage(fileName: node.name, data: data)
 
@@ -807,6 +821,54 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
 
         return preview
+    }
+
+    private func requestTextThumbnail(for node: PakNode, data: Data) {
+        let nodeID = node.id
+        let version = pakFile?.version
+        let thumbnailData = Data(data.prefix(Self.maximumTextThumbnailBytes))
+
+        previewImageRequests[nodeID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let fileManager = FileManager.default
+            let base = fileManager.temporaryDirectory
+                .appendingPathComponent("PakScape-Thumbnail-" + UUID().uuidString, isDirectory: true)
+
+            do {
+                try fileManager.createDirectory(
+                    at: base,
+                    withIntermediateDirectories: false,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                defer { try? fileManager.removeItem(at: base) }
+
+                let sourceURL = base.appendingPathComponent("preview.txt")
+                try thumbnailData.write(to: sourceURL, options: .atomic)
+
+                let request = QLThumbnailGenerator.Request(
+                    fileAt: sourceURL,
+                    size: CGSize(width: 128, height: 128),
+                    scale: NSScreen.main?.backingScaleFactor ?? 2,
+                    representationTypes: .thumbnail
+                )
+                request.contentType = .plainText
+                request.iconMode = true
+
+                let representation = try await QLThumbnailGenerator.shared
+                    .generateBestRepresentation(for: request)
+
+                guard !Task.isCancelled, self.pakFile?.version == version else { return }
+                self.previewImageCache[nodeID] = representation.nsImage
+                self.previewImageRequests[nodeID] = nil
+                self.objectWillChange.send()
+            } catch {
+                guard !Task.isCancelled, self.pakFile?.version == version else { return }
+                self.previewImageRequests[nodeID] = nil
+                self.previewImageMisses.insert(nodeID)
+                self.objectWillChange.send()
+            }
+        }
     }
 
     private func renderPreviewImage(fileName: String, data: Data) -> NSImage? {
@@ -978,6 +1040,8 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let currentVersion = pakFile?.version
         guard previewImageCacheVersion != currentVersion else { return }
 
+        previewImageRequests.values.forEach { $0.cancel() }
+        previewImageRequests.removeAll(keepingCapacity: true)
         previewImageCacheVersion = currentVersion
         previewImageCache.removeAll(keepingCapacity: true)
         previewImageMisses.removeAll(keepingCapacity: true)

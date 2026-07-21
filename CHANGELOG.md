@@ -16,6 +16,7 @@ Notable user-visible changes are documented here.
 - Self-contained x86-64/ARM64 Debian packaging with XDG desktop and MIME integration.
 - Linux-specific regression tests and Ubuntu 24.04 CI coverage.
 - Finder-style Spacebar Quick Preview on macOS, Windows, and Linux, including text, common image, and Quake asset previews.
+- Native Finder-style inline `.txt` icon previews on macOS.
 
 ### Changed
 
