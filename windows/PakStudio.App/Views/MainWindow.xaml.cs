@@ -49,6 +49,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ClearSearch_OnClick(object sender, RoutedEventArgs e)
+    {
+        _viewModel.SearchText = string.Empty;
+        ArchiveSearchBox.Focus();
+    }
+
     private void FolderPaneToggle_OnClick(object sender, RoutedEventArgs e)
     {
         if (FolderPaneColumn.ActualWidth < 1)

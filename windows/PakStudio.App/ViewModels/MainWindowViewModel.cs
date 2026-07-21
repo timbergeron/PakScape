@@ -156,6 +156,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _searchText, value))
             {
+                OnPropertyChanged(nameof(IsSearchActive));
                 RebuildCurrentItems();
             }
         }
@@ -178,6 +179,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string ArchiveDisplayName => Document?.DisplayName ?? "PakScape";
 
     public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
+
+    public bool IsSearchActive => !string.IsNullOrWhiteSpace(SearchText);
 
     public string SearchResultText => CurrentItems.Count == 1
         ? "1 result"

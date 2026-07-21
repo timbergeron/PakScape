@@ -613,7 +613,44 @@
                                                FontSize="14"
                                                Foreground="{DynamicResource MutedForegroundBrush}"
                                                IsHitTestVisible="False"
-                                               Text="&#xE721;" />
+                                               Text="&#xE721;">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSearchActive}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <Button HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            Click="ClearSearch_OnClick"
+                                            ToolTip="Clear search">
+                                        <Button.Style>
+                                            <Style TargetType="Button"
+                                                   BasedOn="{StaticResource {x:Type Button}}">
+                                                <Setter Property="Width" Value="28" />
+                                                <Setter Property="Height" Value="28" />
+                                                <Setter Property="Margin" Value="0,0,2,0" />
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSearchActive}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   FontSize="10"
+                                                   Text="&#xE8BB;" />
+                                    </Button>
                                 </Grid>
                             </Border>
 
@@ -623,7 +660,18 @@
                                        HorizontalAlignment="Left"
                                        FontSize="11"
                                        Foreground="{DynamicResource MutedForegroundBrush}"
-                                       Text="{Binding SearchResultText}" />
+                                       Text="{Binding SearchResultText}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSearchActive}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Grid>
                     </Border>
 
