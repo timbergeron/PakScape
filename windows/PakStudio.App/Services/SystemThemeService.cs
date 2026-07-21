@@ -13,6 +13,8 @@ internal sealed class SystemThemeService : IDisposable
     private const string AppsUseLightTheme = "AppsUseLightTheme";
     private const int DwmUseImmersiveDarkModeBefore20H1 = 19;
     private const int DwmUseImmersiveDarkMode = 20;
+    private const int DwmWindowCornerPreference = 33;
+    private const int DwmWindowCornerRound = 2;
 
     private static readonly Uri LightColors = new("Themes/Colors.xaml", UriKind.Relative);
     private static readonly Uri DarkColors = new("Themes/DarkColors.xaml", UriKind.Relative);
@@ -125,6 +127,13 @@ internal sealed class SystemThemeService : IDisposable
         {
             DwmSetWindowAttribute(handle, DwmUseImmersiveDarkModeBefore20H1, ref enabled, sizeof(int));
         }
+
+        var cornerPreference = DwmWindowCornerRound;
+        _ = DwmSetWindowAttribute(
+            handle,
+            DwmWindowCornerPreference,
+            ref cornerPreference,
+            sizeof(int));
     }
 
     private static bool ShouldUseDarkMode()

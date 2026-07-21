@@ -14,7 +14,7 @@
         Background="{DynamicResource WindowBackgroundBrush}">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="44"
-                            CornerRadius="0"
+                            CornerRadius="8"
                             GlassFrameThickness="0"
                             ResizeBorderThickness="6"
                             UseAeroCaptionButtons="False" />
@@ -375,7 +375,20 @@
 
     <Border Background="{DynamicResource WindowBackgroundBrush}"
             BorderBrush="{DynamicResource PanelBorderBrush}"
-            BorderThickness="1">
+            ClipToBounds="True">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="Maximized">
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="CornerRadius" Value="0" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
     <DockPanel>
         <Grid DockPanel.Dock="Top"
               Height="44"
