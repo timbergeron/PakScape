@@ -11,6 +11,39 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource TextForegroundBrush}"
         PreviewKeyDown="Window_OnKeyDown">
+    <Window.Resources>
+        <Style x:Key="PreviewIconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.35" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -36,9 +69,13 @@
                     Width="34"
                     Height="30"
                     Margin="12,0,0,0"
-                    Content="✕"
+                    Style="{StaticResource PreviewIconButtonStyle}"
                     ToolTip="Close preview (Space or Escape)"
-                    Click="CloseButton_OnClick" />
+                    Click="CloseButton_OnClick">
+                <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           FontSize="10"
+                           Text="&#xE8BB;" />
+            </Button>
         </Grid>
 
         <Border Grid.Row="1"
@@ -97,8 +134,23 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal">
-                <Button x:Name="PreviousButton" Width="34" Content="←" Click="PreviousButton_OnClick" />
-                <Button x:Name="NextButton" Width="34" Margin="6,0,0,0" Content="→" Click="NextButton_OnClick" />
+                <Button x:Name="PreviousButton"
+                        Style="{StaticResource PreviewIconButtonStyle}"
+                        ToolTip="Previous item"
+                        Click="PreviousButton_OnClick">
+                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="11"
+                               Text="&#xE72B;" />
+                </Button>
+                <Button x:Name="NextButton"
+                        Margin="4,0,0,0"
+                        Style="{StaticResource PreviewIconButtonStyle}"
+                        ToolTip="Next item"
+                        Click="NextButton_OnClick">
+                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="11"
+                               Text="&#xE72A;" />
+                </Button>
             </StackPanel>
             <TextBlock x:Name="PositionText"
                        Grid.Column="1"
