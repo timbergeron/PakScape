@@ -43,6 +43,7 @@
             <TextBlock Margin="0,12,0,0"
                        HorizontalAlignment="Center">
                 <Hyperlink NavigateUri="https://github.com/timbergeron/PakScape"
+                           Foreground="{DynamicResource BrandGreenBrush}"
                            RequestNavigate="ProjectLink_OnRequestNavigate">
                     github.com/timbergeron/PakScape
                 </Hyperlink>
