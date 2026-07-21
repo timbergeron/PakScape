@@ -836,7 +836,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         _ = pasteFileURLs(urls, into: folder)
     }
     func deleteSelectedFile() {
-        guard let folder = currentFolder else { return }
+        guard currentFolder != nil, let root = pakFile?.root else { return }
 
         let idsToDelete: Set<PakNode.ID>
         if !selectedNodes.isEmpty {
@@ -860,7 +860,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             stopAudioPreview()
         }
 
-        folder.children?.removeAll { idsToDelete.contains($0.id) }
+        removeNodes(withIDs: idsToDelete, from: root)
         selectedNodes = []
         selectedFile = nil
         markDirty()

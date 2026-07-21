@@ -79,6 +79,381 @@ final class PakFile {
     }
 }
 
+struct PakSearchResult {
+    let node: PakNode
+    let path: String
+    let score: Int
+}
+
+/// Archive-wide, relevance-ranked search used by the macOS browser.
+///
+/// Matching is deliberately forgiving: it understands full paths, file names,
+/// stems, extensions, separated words (for example `vshot` → `v_shot.mdl`),
+/// subsequences, and small typing mistakes. Every query term must match, which
+/// keeps multi-word searches useful even in large archives.
+enum PakArchiveSearch {
+    static func search(root: PakNode, query: String) -> [PakSearchResult] {
+        let rawQuery = normalize(query).trimmingCharacters(in: .whitespacesAndNewlines)
+        let isPathQuery = rawQuery.contains("/")
+        let normalizedQuery = rawQuery
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        let terms = normalizedQuery
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .compactMap(searchableTerm)
+        guard !terms.isEmpty else { return [] }
+
+        var results: [PakSearchResult] = []
+        collectMatches(
+            in: root,
+            parentPath: "",
+            normalizedQuery: normalizedQuery,
+            terms: terms,
+            isPathQuery: isPathQuery,
+            allowsFuzzyMatching: false,
+            results: &results
+        )
+
+        // Keep live filtering predictable. Fuzzy matches are useful for a typo,
+        // but they should never keep unrelated rows visible alongside genuine
+        // substring, extension, glob, or path matches.
+        if results.isEmpty {
+            collectMatches(
+                in: root,
+                parentPath: "",
+                normalizedQuery: normalizedQuery,
+                terms: terms,
+                isPathQuery: isPathQuery,
+                allowsFuzzyMatching: true,
+                results: &results
+            )
+        }
+
+        return results.sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+        }
+    }
+
+    private struct Candidate {
+        let name: String
+        let stem: String
+        let fileExtension: String
+        let path: String
+        let pathComponents: [String]
+        let type: String
+        let compactName: String
+        let compactPath: String
+    }
+
+    private static func collectMatches(
+        in parent: PakNode,
+        parentPath: String,
+        normalizedQuery: String,
+        terms: [String],
+        isPathQuery: Bool,
+        allowsFuzzyMatching: Bool,
+        results: inout [PakSearchResult]
+    ) {
+        for node in parent.children ?? [] {
+            let path = parentPath.isEmpty ? node.name : parentPath + "/" + node.name
+            if let score = matchScore(
+                node: node,
+                path: path,
+                normalizedQuery: normalizedQuery,
+                terms: terms,
+                isPathQuery: isPathQuery,
+                allowsFuzzyMatching: allowsFuzzyMatching
+            ) {
+                results.append(PakSearchResult(node: node, path: "/" + path, score: score))
+            }
+            if node.isFolder {
+                collectMatches(
+                    in: node,
+                    parentPath: path,
+                    normalizedQuery: normalizedQuery,
+                    terms: terms,
+                    isPathQuery: isPathQuery,
+                    allowsFuzzyMatching: allowsFuzzyMatching,
+                    results: &results
+                )
+            }
+        }
+    }
+
+    private static func matchScore(
+        node: PakNode,
+        path: String,
+        normalizedQuery: String,
+        terms: [String],
+        isPathQuery: Bool,
+        allowsFuzzyMatching: Bool
+    ) -> Int? {
+        let name = normalize(node.name)
+        let stem = normalize((node.name as NSString).deletingPathExtension)
+        let fileExtension = normalize((node.name as NSString).pathExtension)
+        let normalizedPath = normalize(path)
+        let candidate = Candidate(
+            name: name,
+            stem: stem,
+            fileExtension: fileExtension,
+            path: normalizedPath,
+            pathComponents: normalizedPath.split(separator: "/").map(String.init),
+            type: normalize(node.fileType),
+            compactName: compact(name),
+            compactPath: compact(normalizedPath)
+        )
+
+        var total = 0
+        var hasLeafMatch = false
+        let allowsParentPathTerms = terms.count > 1
+        for term in terms {
+            let match = strictMatch(
+                term: term,
+                candidate: candidate,
+                isPathQuery: isPathQuery,
+                allowsParentPathTerms: allowsParentPathTerms
+            ) ?? (allowsFuzzyMatching
+                ? fuzzyMatch(term: term, candidate: candidate, allowsParentPathTerms: allowsParentPathTerms)
+                : nil)
+            guard let match else { return nil }
+            total += match.score
+            hasLeafMatch = hasLeafMatch || match.matchesLeaf
+        }
+        guard hasLeafMatch || isPathQuery else { return nil }
+
+        // Prefer an uninterrupted phrase/path match over the same words spread
+        // across unrelated path components.
+        if !normalizedQuery.contains("*") && !normalizedQuery.contains("?") {
+            if candidate.name == normalizedQuery { total += 1_200 }
+            else if candidate.stem == normalizedQuery { total += 1_100 }
+            else if isPathQuery, candidate.path == normalizedQuery { total += 1_050 }
+            else if candidate.name.hasPrefix(normalizedQuery) { total += 700 }
+            else if isPathQuery, candidate.path.contains(normalizedQuery) { total += 500 }
+            else if candidate.compactName.contains(compact(normalizedQuery)) { total += 350 }
+        }
+
+        // For otherwise-equal results, shorter names and paths are usually the
+        // result the user intended.
+        total -= min(candidate.name.count, 80)
+        total -= min(candidate.path.count / 4, 80)
+        return total
+    }
+
+    private struct TermMatch {
+        let score: Int
+        let matchesLeaf: Bool
+    }
+
+    private static func strictMatch(
+        term: String,
+        candidate: Candidate,
+        isPathQuery: Bool,
+        allowsParentPathTerms: Bool
+    ) -> TermMatch? {
+        let extensionTerm = term.hasPrefix(".") ? String(term.dropFirst()) : term
+        let compactTerm = compact(extensionTerm)
+        let hasWildcard = term.contains("*") || term.contains("?")
+
+        if hasWildcard {
+            if globMatches(pattern: term, value: candidate.name) {
+                return TermMatch(score: 900, matchesLeaf: true)
+            }
+            if isPathQuery, globMatches(pattern: term, value: candidate.path) {
+                return TermMatch(score: 875, matchesLeaf: true)
+            }
+            return nil
+        }
+
+        if candidate.name == term { return TermMatch(score: 1_000, matchesLeaf: true) }
+        if candidate.stem == term { return TermMatch(score: 970, matchesLeaf: true) }
+        if !candidate.fileExtension.isEmpty, candidate.fileExtension == extensionTerm {
+            return TermMatch(score: 925, matchesLeaf: true)
+        }
+        if candidate.name.hasPrefix(term) {
+            return TermMatch(score: 850 - min(candidate.name.count - term.count, 60), matchesLeaf: true)
+        }
+        if candidate.stem.hasPrefix(term) {
+            return TermMatch(score: 830 - min(candidate.stem.count - term.count, 60), matchesLeaf: true)
+        }
+        if !candidate.fileExtension.isEmpty, candidate.fileExtension.hasPrefix(extensionTerm) {
+            return TermMatch(
+                score: 810 - min(candidate.fileExtension.count - extensionTerm.count, 40),
+                matchesLeaf: true
+            )
+        }
+        if let range = candidate.name.range(of: term) {
+            return TermMatch(
+                score: 730 - min(candidate.name.distance(from: candidate.name.startIndex, to: range.lowerBound), 80),
+                matchesLeaf: true
+            )
+        }
+        if candidate.type.contains(term) { return TermMatch(score: 600, matchesLeaf: true) }
+        if compactTerm.count >= 2, candidate.compactName.contains(compactTerm) {
+            return TermMatch(score: candidate.compactName.hasPrefix(compactTerm) ? 620 : 590, matchesLeaf: true)
+        }
+
+        if isPathQuery {
+            if candidate.path == term || "/" + candidate.path == term {
+                return TermMatch(score: 950, matchesLeaf: true)
+            }
+            if let range = candidate.path.range(of: term) {
+                return TermMatch(
+                    score: 680 - min(candidate.path.distance(from: candidate.path.startIndex, to: range.lowerBound), 100),
+                    matchesLeaf: true
+                )
+            }
+            if compactTerm.count >= 2, candidate.compactPath.contains(compactTerm) {
+                return TermMatch(score: 540, matchesLeaf: true)
+            }
+        }
+
+        if allowsParentPathTerms,
+           candidate.pathComponents.dropLast().contains(where: { $0.contains(term) }) {
+            return TermMatch(score: 500, matchesLeaf: false)
+        }
+
+        return nil
+    }
+
+    private static func fuzzyMatch(
+        term: String,
+        candidate: Candidate,
+        allowsParentPathTerms: Bool
+    ) -> TermMatch? {
+        let compactTerm = compact(term)
+        guard compactTerm.count >= 3 else { return nil }
+
+        if allowsParentPathTerms,
+           candidate.pathComponents.dropLast().contains(where: { component in
+               let compactComponent = compact(component)
+               return compactTerm.count * 2 >= compactComponent.count
+                   && subsequenceScore(needle: compactTerm, haystack: compactComponent) != nil
+           }) {
+            return TermMatch(score: 300, matchesLeaf: false)
+        }
+
+        if compactTerm.count * 2 >= candidate.compactName.count,
+           let subsequenceScore = subsequenceScore(needle: compactTerm, haystack: candidate.compactName) {
+            return TermMatch(score: 420 + subsequenceScore, matchesLeaf: true)
+        }
+
+        if compactTerm.count >= 4 {
+            let allowedDistance = compactTerm.count >= 7 ? 2 : 1
+            let typoCandidates = [candidate.stem, candidate.name]
+            let closestDistance = typoCandidates
+                .map { compact($0) }
+                .map { editDistance(compactTerm, $0, limit: allowedDistance) }
+                .min() ?? (allowedDistance + 1)
+            if closestDistance <= allowedDistance {
+                return TermMatch(score: 350 - (closestDistance * 50), matchesLeaf: true)
+            }
+        }
+
+        return nil
+    }
+
+    private static func searchableTerm(_ rawTerm: String) -> String? {
+        rawTerm.isEmpty ? nil : rawTerm
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "/")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    private static func compact(_ value: String) -> String {
+        let scalars = value.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    /// Matches Cyberduck-style `*` and `?` globs without interpreting any other
+    /// characters as regular-expression syntax.
+    private static func globMatches(pattern: String, value: String) -> Bool {
+        let patternCharacters = Array(pattern)
+        let valueCharacters = Array(value)
+        var previous = [Bool](repeating: false, count: valueCharacters.count + 1)
+        previous[0] = true
+
+        for patternCharacter in patternCharacters {
+            var current = [Bool](repeating: false, count: valueCharacters.count + 1)
+            if patternCharacter == "*" {
+                current[0] = previous[0]
+            }
+
+            if !valueCharacters.isEmpty {
+                for valueOffset in 1 ... valueCharacters.count {
+                    if patternCharacter == "*" {
+                        current[valueOffset] = previous[valueOffset] || current[valueOffset - 1]
+                    } else if patternCharacter == "?" || patternCharacter == valueCharacters[valueOffset - 1] {
+                        current[valueOffset] = previous[valueOffset - 1]
+                    }
+                }
+            }
+            previous = current
+        }
+
+        return previous[valueCharacters.count]
+    }
+
+    /// Rewards ordered characters that are close together, while still allowing
+    /// abbreviated searches such as `vshmdl` for `v_shot.mdl`.
+    private static func subsequenceScore(needle: String, haystack: String) -> Int? {
+        var needleIndex = needle.startIndex
+        var lastMatch: String.Index?
+        var gaps = 0
+
+        for index in haystack.indices {
+            guard needleIndex < needle.endIndex else { break }
+            if haystack[index] == needle[needleIndex] {
+                if let lastMatch {
+                    gaps += max(0, haystack.distance(from: lastMatch, to: index) - 1)
+                }
+                lastMatch = index
+                needle.formIndex(after: &needleIndex)
+            }
+        }
+
+        guard needleIndex == needle.endIndex else { return nil }
+        return max(0, 100 - (gaps * 5) - max(0, haystack.count - needle.count))
+    }
+
+    /// Bounded Levenshtein distance. Rows that can no longer reach `limit` stop
+    /// early, keeping typo matching cheap for archives near the entry limit.
+    private static func editDistance(_ lhs: String, _ rhs: String, limit: Int) -> Int {
+        let left = Array(lhs)
+        let right = Array(rhs)
+        guard abs(left.count - right.count) <= limit else { return limit + 1 }
+        if left == right { return 0 }
+        if left.isEmpty { return right.count }
+        if right.isEmpty { return left.count }
+
+        var previous = Array(0 ... right.count)
+        for (leftOffset, leftCharacter) in left.enumerated() {
+            var current = [leftOffset + 1]
+            current.reserveCapacity(right.count + 1)
+            var rowMinimum = current[0]
+
+            for (rightOffset, rightCharacter) in right.enumerated() {
+                let insertion = current[rightOffset] + 1
+                let deletion = previous[rightOffset + 1] + 1
+                let substitution = previous[rightOffset] + (leftCharacter == rightCharacter ? 0 : 1)
+                let value = min(insertion, min(deletion, substitution))
+                current.append(value)
+                rowMinimum = min(rowMinimum, value)
+            }
+
+            if rowMinimum > limit { return limit + 1 }
+            previous = current
+        }
+        return previous[right.count]
+    }
+}
+
 enum PakError: Error, LocalizedError {
     case invalidHeader
     case badDirectory

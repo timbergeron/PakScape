@@ -40,6 +40,8 @@ struct ContentView: View {
     @State private var windowDelegate = PakWindowDelegate()
     @State private var iconZoomLevel: Int = 1
     @State private var searchText = ""
+    @State private var isSearchExpanded = false
+    @FocusState private var isSearchFieldFocused: Bool
 
     init(document: Binding<PakDocument>, fileURL: URL?) {
         self._document = document
@@ -92,8 +94,16 @@ struct ContentView: View {
                 .controlSize(.regular)
                 .buttonStyle(.borderless)
             }
+
+            ToolbarItem(placement: .primaryAction) {
+                searchToolbarItem
+            }
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search")
+        .onKeyPress(keys: ["f"]) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            expandSearch()
+            return .handled
+        }
         .background(
             WindowAccessor { newWindow in
                 guard let newWindow else { return }
@@ -107,6 +117,63 @@ struct ContentView: View {
                 newWindow.representedURL = model.documentURL
             }
         )
+    }
+
+    @ViewBuilder
+    private var searchToolbarItem: some View {
+        if isSearchExpanded {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+
+                TextField("Search all paths", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .focused($isSearchFieldFocused)
+                    .frame(minWidth: 190)
+
+                Button {
+                    closeSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close Search")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .frame(width: 250)
+            .onExitCommand {
+                closeSearch()
+            }
+            .transition(.opacity.combined(with: .move(edge: .trailing)))
+        } else {
+            Button {
+                expandSearch()
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .help("Search All Paths (⌘F)")
+            .transition(.opacity)
+        }
+    }
+
+    private func expandSearch() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            isSearchExpanded = true
+        }
+        DispatchQueue.main.async {
+            isSearchFieldFocused = true
+        }
+    }
+
+    private func closeSearch() {
+        searchText = ""
+        isSearchFieldFocused = false
+        withAnimation(.easeOut(duration: 0.16)) {
+            isSearchExpanded = false
+        }
     }
 
     private var sidebar: some View {
@@ -134,6 +201,13 @@ struct ContentView: View {
     private var detailView: some View {
         VStack(spacing: 0) {
             if let folder = model.currentFolder {
+                let searchResults = archiveSearchResults
+                let displayedChildren = searchResults?.map(\.node)
+                    ?? (folder.children ?? []).sorted(using: sortOrder)
+                let searchPaths = Dictionary(
+                    uniqueKeysWithValues: (searchResults ?? []).map { ($0.node.id, $0.path) }
+                )
+
                 VStack(spacing: 0) {
                     HStack {
                         Picker("Detail View", selection: $detailViewStyle) {
@@ -144,6 +218,10 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         Spacer()
+                        if let searchResults {
+                            Text("\(searchResults.count) \(searchResults.count == 1 ? "result" : "results")")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.top)
@@ -151,16 +229,28 @@ struct ContentView: View {
 
                     Divider()
 
-                    let sortedChildren = filteredChildren(in: folder).sorted(using: sortOrder)
                     Group {
                         switch detailViewStyle {
                         case .list:
-                            listView(for: folder)
+                            listView(nodes: displayedChildren, searchPaths: searchPaths)
                         case .icons:
-                            iconsView(sortedChildren)
+                            iconsView(displayedChildren, searchPaths: searchPaths)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay {
+                        if searchResults != nil, displayedChildren.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.title)
+                                    .foregroundStyle(.secondary)
+                                Text("No Results")
+                                    .font(.headline)
+                                Text("Try a partial name, path, or extension.")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
                 .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
                     guard let folder = model.currentFolder else { return false }
@@ -233,7 +323,7 @@ struct ContentView: View {
         }
         .onChange(of: searchText) { _, _ in
             guard let folder = model.currentFolder else { return }
-            let visibleIDs = Set(filteredChildren(in: folder).map(\.id))
+            let visibleIDs = Set(displayedNodes(in: folder).map(\.id))
             let visibleSelection = selectedFileIDs.intersection(visibleIDs)
             updateSelection(ids: visibleSelection, in: folder)
             if let renamingID = renamingNodeID, !visibleIDs.contains(renamingID) {
@@ -300,18 +390,20 @@ struct ContentView: View {
 
     private func selectionNodes(for ids: Set<PakNode.ID>, in folder: PakNode?) -> [PakNode] {
         guard let folder, !ids.isEmpty else { return [] }
+        if let searchResults = archiveSearchResults {
+            return searchResults.map(\.node).filter { ids.contains($0.id) }
+        }
         return (folder.children ?? []).filter { ids.contains($0.id) }
     }
 
-    private func filteredChildren(in folder: PakNode) -> [PakNode] {
-        let children = folder.children ?? []
+    private var archiveSearchResults: [PakSearchResult]? {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return children }
+        guard !query.isEmpty, let root = model.pakFile?.root else { return nil }
+        return PakArchiveSearch.search(root: root, query: query)
+    }
 
-        return children.filter { node in
-            node.name.localizedCaseInsensitiveContains(query)
-                || node.fileType.localizedCaseInsensitiveContains(query)
-        }
+    private func displayedNodes(in folder: PakNode) -> [PakNode] {
+        archiveSearchResults?.map(\.node) ?? (folder.children ?? []).sorted(using: sortOrder)
     }
 
     private func handleIconSelection(for node: PakNode) {
@@ -404,14 +496,15 @@ struct ContentView: View {
         }
     }
     @ViewBuilder
-    private func listView(for folder: PakNode) -> some View {
+    private func listView(nodes: [PakNode], searchPaths: [PakNode.ID: String]) -> some View {
         PakListView(
-            nodes: filteredChildren(in: folder).sorted(using: sortOrder),
+            nodes: nodes,
+            searchPaths: searchPaths,
             selection: $selectedFileIDs,
             sortOrder: $sortOrder,
             viewModel: model,
             onOpenFolder: { folder in
-                model.navigate(to: folder)
+                openFolder(folder)
             },
             onNewFolder: {
                 createFolder(at: model.currentFolder)
@@ -432,14 +525,15 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func iconsView(_ children: [PakNode]) -> some View {
+    private func iconsView(_ children: [PakNode], searchPaths: [PakNode.ID: String]) -> some View {
         PakIconView(
             nodes: children,
+            searchPaths: searchPaths,
             selection: $selectedFileIDs,
             zoomLevel: iconZoomLevel,
             viewModel: model,
             onOpenFolder: { folder in
-                model.navigate(to: folder)
+                openFolder(folder)
             },
             onNewFolder: {
                 createFolder(at: model.currentFolder)
@@ -457,6 +551,13 @@ struct ContentView: View {
                 model.pasteIntoCurrentFolder()
             }
         )
+    }
+
+    private func openFolder(_ folder: PakNode) {
+        if archiveSearchResults != nil {
+            closeSearch()
+        }
+        model.navigate(to: folder)
     }
 
     private func dragItem(for node: PakNode) -> NSItemProvider {
@@ -665,13 +766,13 @@ private extension ContentView {
 
     func selectAllInCurrentFolder() {
         guard let folder = model.currentFolder else { return }
-        let ids = Set((folder.children ?? []).map { $0.id })
+        let ids = Set(displayedNodes(in: folder).map { $0.id })
         updateSelection(ids: ids, in: folder)
     }
 
     var canSelectAllInCurrentFolder: Bool {
         guard let folder = model.currentFolder else { return false }
-        return !(folder.children ?? []).isEmpty
+        return !displayedNodes(in: folder).isEmpty
     }
 
     var canRenameSelectedNode: Bool {

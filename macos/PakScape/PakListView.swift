@@ -95,6 +95,7 @@ private final class PakListTableView: NSTableView {
 
 struct PakListView: NSViewRepresentable {
     var nodes: [PakNode]
+    var searchPaths: [PakNode.ID: String]
     @Binding var selection: Set<PakNode.ID>
     @Binding var sortOrder: [KeyPathComparator<PakNode>]
     var viewModel: PakViewModel
@@ -142,8 +143,13 @@ struct PakListView: NSViewRepresentable {
             ascending: true,
             selector: #selector(NSString.localizedStandardCompare(_:))
         )
+        let pathColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("path"))
+        pathColumn.title = "Path"
+        pathColumn.minWidth = 220
+        pathColumn.isHidden = searchPaths.isEmpty
 
         tableView.addTableColumn(nameColumn)
+        tableView.addTableColumn(pathColumn)
         tableView.addTableColumn(sizeColumn)
         tableView.addTableColumn(typeColumn)
         tableView.headerView = NSTableHeaderView()
@@ -168,7 +174,12 @@ struct PakListView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let tableView = context.coordinator.tableView else { return }
-        let isEditing = tableView.currentEditor() != nil || (tableView.window?.firstResponder is NSTextView)
+        tableView.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier("path"))?.isHidden = searchPaths.isEmpty
+        // Only suppress reloads for an inline table rename. The window's first
+        // responder is also an NSTextView while the toolbar search field is
+        // active, and treating that as a rename leaves stale, unfiltered rows
+        // on screen while the user types.
+        let isEditing = tableView.currentEditor() != nil || tableView.editedRow != -1
         if isEditing || context.coordinator.isRenamePending {
             return
         }
@@ -269,6 +280,9 @@ struct PakListView: NSViewRepresentable {
                 cell.textField?.stringValue = node.formattedFileSize
             } else if identifier == "type" {
                 cell.textField?.stringValue = node.fileType
+            } else if identifier == "path" {
+                cell.textField?.stringValue = parent.searchPaths[node.id] ?? ""
+                cell.textField?.lineBreakMode = .byTruncatingMiddle
             }
 
             return cell

@@ -207,6 +207,85 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertThrowsError(try PakPathValidator.validateArchivePath(path))
     }
 
+    func testArchiveSearchFindsFilesAcrossNestedPaths() throws {
+        let fixture = makeSearchFixture()
+
+        let results = PakArchiveSearch.search(root: fixture.root, query: "episode1 start")
+
+        XCTAssertEqual(results.map(\.path), ["/maps/episode1/start.bsp"])
+    }
+
+    func testArchiveSearchMatchesExtensionsAndFullPathsCaseInsensitively() throws {
+        let fixture = makeSearchFixture()
+
+        XCTAssertTrue(
+            PakArchiveSearch.search(root: fixture.root, query: "*.MDL")
+                .contains { $0.node === fixture.viewModel }
+        )
+        XCTAssertEqual(
+            PakArchiveSearch.search(root: fixture.root, query: "PROGS/V_SHOT.MDL").first?.node,
+            fixture.viewModel
+        )
+    }
+
+    func testArchiveSearchIgnoresNameSeparatorsForPartialQueries() throws {
+        let fixture = makeSearchFixture()
+
+        let results = PakArchiveSearch.search(root: fixture.root, query: "vshot")
+
+        XCTAssertEqual(results.first?.node, fixture.viewModel)
+    }
+
+    func testArchiveSearchDoesNotIncludeEveryDescendantOfMatchingFolder() throws {
+        let fixture = makeSearchFixture()
+
+        let results = PakArchiveSearch.search(root: fixture.root, query: "maps")
+
+        XCTAssertEqual(results.map(\.path), ["/maps"])
+    }
+
+    func testArchiveSearchToleratesSmallTyposAndRanksExactStemFirst() throws {
+        let fixture = makeSearchFixture()
+        let shotgun = PakNode(name: "shotgun.mdl")
+        shotgun.localData = Data()
+        let restart = PakNode(name: "restart.cfg")
+        restart.localData = Data()
+        fixture.root.children?.append(contentsOf: [shotgun, restart])
+
+        XCTAssertEqual(PakArchiveSearch.search(root: fixture.root, query: "shotgn").first?.node, shotgun)
+        XCTAssertEqual(PakArchiveSearch.search(root: fixture.root, query: "start").first?.node, fixture.start)
+    }
+
+    func testArchiveSearchUsesFuzzyMatchingOnlyWhenStrictSearchIsEmpty() throws {
+        let fixture = makeSearchFixture()
+        let strict = PakNode(name: "shotgn-notes.txt")
+        strict.localData = Data()
+        let fuzzy = PakNode(name: "shotgun.mdl")
+        fuzzy.localData = Data()
+        fixture.root.children?.append(contentsOf: [strict, fuzzy])
+
+        let results = PakArchiveSearch.search(root: fixture.root, query: "shotgn")
+
+        XCTAssertEqual(results.map(\.node), [strict])
+    }
+
+    private func makeSearchFixture() -> (root: PakNode, start: PakNode, viewModel: PakNode) {
+        let root = PakNode(name: "/")
+        let maps = PakNode(name: "maps")
+        let episode = PakNode(name: "episode1")
+        let start = PakNode(name: "start.bsp")
+        start.localData = Data()
+        episode.children?.append(start)
+        maps.children?.append(episode)
+
+        let progs = PakNode(name: "progs")
+        let viewModel = PakNode(name: "v_shot.mdl")
+        viewModel.localData = Data()
+        progs.children?.append(viewModel)
+        root.children?.append(contentsOf: [maps, progs])
+        return (root, start, viewModel)
+    }
+
     private func makePak(path: String, payload: Data) -> Data {
         let directoryOffset = 12 + payload.count
         var data = Data("PACK".utf8)

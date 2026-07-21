@@ -164,6 +164,7 @@ fileprivate enum IconZoomLevel: Int {
 
 struct PakIconView: NSViewRepresentable {
     var nodes: [PakNode]
+    var searchPaths: [PakNode.ID: String]
     @Binding var selection: Set<PakNode.ID>
     var zoomLevel: Int
     var viewModel: PakViewModel
@@ -231,8 +232,13 @@ struct PakIconView: NSViewRepresentable {
             layout.itemSize = zoom.itemSize
         }
 
-        let firstResponder = collectionView.window?.firstResponder
-        let isEditing = (firstResponder is NSTextView) || (firstResponder is NSTextField)
+        // A toolbar search field also installs an NSTextView as the window's
+        // first responder. Check the collection's own name fields so searching
+        // can reload and actually remove non-matching icons.
+        let isEditing = collectionView.indexPathsForVisibleItems().contains { indexPath in
+            guard let item = collectionView.item(at: indexPath) as? PakIconItem else { return false }
+            return item.nameField.currentEditor() != nil
+        }
         if !isEditing {
             collectionView.reloadData()
 
@@ -292,6 +298,7 @@ struct PakIconView: NSViewRepresentable {
             iconItem.onAudioPreviewToggle = { [weak self] in
                 self?.parent.viewModel.toggleAudioPreview(for: node)
             }
+            iconItem.view.toolTip = parent.searchPaths[node.id]
             iconItem.nameField.tag = indexPath.item
             return iconItem
         }
