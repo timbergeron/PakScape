@@ -8,8 +8,8 @@
         MinHeight="360"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource TextForegroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextForegroundBrush}"
         PreviewKeyDown="Window_OnKeyDown">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -30,7 +30,7 @@
                            TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="SubtitleText"
                            Margin="0,3,0,0"
-                           Foreground="{StaticResource MutedForegroundBrush}" />
+                           Foreground="{DynamicResource MutedForegroundBrush}" />
             </StackPanel>
             <Button Grid.Column="1"
                     Width="34"
@@ -42,8 +42,8 @@
         </Grid>
 
         <Border Grid.Row="1"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource PanelBorderBrush}"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource PanelBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="10"
                 ClipToBounds="True">
@@ -77,14 +77,14 @@
                                    HorizontalAlignment="Center" />
                         <TextBlock x:Name="MetadataSizeText"
                                    Margin="0,6,0,0"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock x:Name="MetadataMessageText"
                                    Margin="0,18,0,0"
                                    MaxWidth="520"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
-                                   Foreground="{StaticResource MutedForegroundBrush}" />
+                                   Foreground="{DynamicResource MutedForegroundBrush}" />
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -104,10 +104,10 @@
                        Grid.Column="1"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
-                       Foreground="{StaticResource MutedForegroundBrush}" />
+                       Foreground="{DynamicResource MutedForegroundBrush}" />
             <TextBlock Grid.Column="2"
                        VerticalAlignment="Center"
-                       Foreground="{StaticResource MutedForegroundBrush}"
+                       Foreground="{DynamicResource MutedForegroundBrush}"
                        Text="Space or Esc to close" />
         </Grid>
     </Grid>

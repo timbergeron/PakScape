@@ -9,11 +9,17 @@
     <Description>A native Windows browser and editor for Quake PAK and PK3 archives.</Description>
     <Version>1.0.1</Version>
     <Authors>Tim Bergeron</Authors>
+    <ApplicationIcon>Assets\PakScape.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\PakStudio.Core\PakStudio.Core.csproj" />
     <ProjectReference Include="..\PakStudio.Formats\PakStudio.Formats.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PakScape.ico" />
+    <Resource Include="Assets\PakScape.png" />
   </ItemGroup>
 
   <ItemGroup>

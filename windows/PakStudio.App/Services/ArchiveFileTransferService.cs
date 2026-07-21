@@ -95,6 +95,37 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
         }
     }
 
+    public IReadOnlyList<string> ExportToTemporaryLocation(IReadOnlyList<ArchiveNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (nodes.Count == 0)
+        {
+            return [];
+        }
+
+        var operationDirectory = Path.Combine(_previewDirectory, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(operationDirectory);
+        try
+        {
+            return nodes.Select(node => Export(node, operationDirectory)).ToList();
+        }
+        catch
+        {
+            TryDeleteDirectory(operationDirectory);
+            throw;
+        }
+    }
+
+    public void ReleaseTemporaryLocation(IReadOnlyList<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        foreach (var operationDirectory in GetOwnedOperationDirectories(paths))
+        {
+            TryDeleteDirectory(operationDirectory);
+        }
+    }
+
     public void OpenWithDefaultApplication(ArchiveFileNode file)
     {
         ArgumentNullException.ThrowIfNull(file);
@@ -120,6 +151,37 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
         _disposed = true;
         TryDeleteDirectory(_previewDirectory);
         GC.SuppressFinalize(this);
+    }
+
+    private IEnumerable<string> GetOwnedOperationDirectories(IReadOnlyList<string> paths)
+    {
+        var previewRoot = Path.GetFullPath(_previewDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (var path in paths)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            string? operationDirectory;
+            try
+            {
+                operationDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+            if (operationDirectory is not null &&
+                string.Equals(
+                    Path.GetDirectoryName(operationDirectory),
+                    previewRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                yield return operationDirectory;
+            }
+        }
     }
 
     private static void PreflightDirectory(string sourcePath, ImportBudget budget)

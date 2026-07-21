@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using PakStudio.App.Commands;
+using PakStudio.App.Services;
 using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
@@ -12,6 +13,8 @@ namespace PakStudio.App.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModelBase
 {
+    private const string ClipboardFormat = "PakScape.ArchiveClipboardId";
+
     private readonly IArchiveService _archiveService;
     private readonly IArchiveFileTransferService _fileTransferService;
     private readonly IFileDialogService _fileDialogService;
@@ -19,7 +22,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly ITextInputService _textInputService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly IIconService _iconService;
+    private readonly ArchiveThumbnailService _thumbnailService;
     private readonly Dictionary<ArchiveFolderNode, FolderTreeNodeViewModel> _folderLookup = [];
+    private readonly Stack<ArchiveFolderNode> _backHistory = [];
+    private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
 
     private ArchiveDocument? _document;
     private FolderTreeNodeViewModel? _selectedFolder;
@@ -27,6 +33,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<ArchiveItemViewModel> _selectedItems = [];
     private ArchiveFolderNode? _currentFolder;
     private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
+    private ArchiveSortColumn _sortColumn = ArchiveSortColumn.Name;
+    private bool _sortDescending;
+    private ArchiveClipboardPayload? _clipboardPayload;
+    private IReadOnlyList<string> _clipboardExportedPaths = [];
     private string _searchText = string.Empty;
     private string _statusText = "Ready";
     private string _selectionStatus = "0 selected";
@@ -40,7 +50,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         IMessageBoxService messageBoxService,
         ITextInputService textInputService,
         IRecentFilesService recentFilesService,
-        IIconService iconService)
+        IIconService iconService,
+        ArchiveThumbnailService thumbnailService)
     {
         _archiveService = archiveService;
         _fileTransferService = fileTransferService;
@@ -49,6 +60,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         _textInputService = textInputService;
         _recentFilesService = recentFilesService;
         _iconService = iconService;
+        _thumbnailService = thumbnailService;
 
         NewCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("pak"), () => !IsBusy);
         NewPk3Command = new AsyncRelayCommand(() => CreateNewArchiveAsync("pk3"), () => !IsBusy);
@@ -69,6 +81,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         ExportCommand = new AsyncRelayCommand(ExportSelectedItemsAsync, CanModifySelectedItems);
         OpenSelectedCommand = new RelayCommand(OpenSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
         UpCommand = new RelayCommand(NavigateUp, () => _currentFolder?.Parent is not null && !IsBusy);
+        BackCommand = new RelayCommand(NavigateBack, CanNavigateBack);
+        ForwardCommand = new RelayCommand(NavigateForward, CanNavigateForward);
+        CutCommand = new RelayCommand(() => CopySelection(isCut: true), CanModifySelectedItems);
+        CopyCommand = new RelayCommand(() => CopySelection(isCut: false), CanModifySelectedItems);
+        PasteCommand = new AsyncRelayCommand(PasteAsync, CanPaste);
 
         ShowLargeIconsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.LargeIcons));
         ShowSmallIconsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.SmallIcons));
@@ -172,6 +189,14 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public IReadOnlyList<string> RecentFiles => _recentFilesService.GetRecentFiles();
 
+    public string NameSortHeader => SortHeader("Name", ArchiveSortColumn.Name);
+
+    public string TypeSortHeader => SortHeader("Type", ArchiveSortColumn.Type);
+
+    public string SizeSortHeader => SortHeader("Size", ArchiveSortColumn.Size);
+
+    public string ModifiedSortHeader => SortHeader("Modified", ArchiveSortColumn.Modified);
+
     public AsyncRelayCommand NewCommand { get; }
 
     public AsyncRelayCommand NewPk3Command { get; }
@@ -206,6 +231,16 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public RelayCommand UpCommand { get; }
 
+    public RelayCommand BackCommand { get; }
+
+    public RelayCommand ForwardCommand { get; }
+
+    public RelayCommand CutCommand { get; }
+
+    public RelayCommand CopyCommand { get; }
+
+    public AsyncRelayCommand PasteCommand { get; }
+
     public RelayCommand ShowLargeIconsCommand { get; }
 
     public RelayCommand ShowSmallIconsCommand { get; }
@@ -237,7 +272,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        SelectFolderCore(folder);
+        NavigateToFolder(folder.Folder);
     }
 
     private void SelectFolderCore(FolderTreeNodeViewModel folder)
@@ -299,6 +334,44 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         await ImportPathsAsync(paths).ConfigureAwait(true);
+    }
+
+    public IReadOnlyList<string> PrepareSelectedItemsForDrag()
+    {
+        if (_selectedItems.Count == 0 || IsBusy)
+        {
+            return [];
+        }
+
+        return _fileTransferService.ExportToTemporaryLocation(
+            _selectedItems.Select(item => item.Node).ToList());
+    }
+
+    public void ReleaseTemporaryTransfer(IReadOnlyList<string> paths) =>
+        _fileTransferService.ReleaseTemporaryLocation(paths);
+
+    public void SortBy(string? columnName)
+    {
+        if (!Enum.TryParse<ArchiveSortColumn>(columnName, ignoreCase: true, out var column))
+        {
+            return;
+        }
+
+        if (_sortColumn == column)
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortDescending = false;
+        }
+
+        OnPropertyChanged(nameof(NameSortHeader));
+        OnPropertyChanged(nameof(TypeSortHeader));
+        OnPropertyChanged(nameof(SizeSortHeader));
+        OnPropertyChanged(nameof(ModifiedSortHeader));
+        RebuildCurrentItems(_selectedItems.FirstOrDefault()?.Node);
     }
 
     public async Task<bool> CanCloseAsync()
@@ -625,6 +698,117 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenItem(SelectedItem);
     }
 
+    private void CopySelection(bool isCut)
+    {
+        var nodes = _selectedItems.Select(item => item.Node).ToList();
+        if (nodes.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> exportedPaths = [];
+        try
+        {
+            var payload = new ArchiveClipboardPayload(
+                Guid.NewGuid(),
+                ArchiveTreeEditor.CreateSnapshot(nodes),
+                nodes,
+                isCut);
+            var data = new DataObject();
+            data.SetData(ClipboardFormat, payload.Id.ToString("D"));
+            try
+            {
+                exportedPaths = _fileTransferService.ExportToTemporaryLocation(nodes);
+                data.SetData(DataFormats.FileDrop, exportedPaths.ToArray());
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // Internal archive clipboard operations remain available even when an
+                // archive name cannot be represented on the Windows file system.
+            }
+
+            try
+            {
+                Clipboard.SetDataObject(data, copy: true);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                _fileTransferService.ReleaseTemporaryLocation(exportedPaths);
+                _messageBoxService.ShowError(
+                    isCut ? "Cut Failed" : "Copy Failed",
+                    $"The Windows clipboard is unavailable. {exception.Message}");
+                return;
+            }
+
+            _fileTransferService.ReleaseTemporaryLocation(_clipboardExportedPaths);
+            _clipboardPayload = payload;
+            _clipboardExportedPaths = exportedPaths;
+
+            StatusText = isCut
+                ? $"Cut {nodes.Count} item(s)."
+                : $"Copied {nodes.Count} item(s).";
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception exception)
+        {
+            _fileTransferService.ReleaseTemporaryLocation(exportedPaths);
+            _messageBoxService.ShowError(
+                isCut ? "Cut Failed" : "Copy Failed",
+                exception.Message);
+        }
+    }
+
+    private async Task PasteAsync()
+    {
+        if (_currentFolder is null)
+        {
+            return;
+        }
+
+        var payload = GetOwnedClipboardPayload();
+        if (payload is not null)
+        {
+            try
+            {
+                if (payload.IsCut && payload.Originals.All(node => ReferenceEquals(node.Parent, _currentFolder)))
+                {
+                    ClearClipboardPayload(payload);
+                    StatusText = "The cut items are already in this folder.";
+                    return;
+                }
+
+                var inserted = payload.IsCut
+                    ? ArchiveTreeEditor.MoveTo(payload.Originals, _currentFolder)
+                    : ArchiveTreeEditor.CopyTo(payload.Templates, _currentFolder);
+                if (inserted.Count == 0)
+                {
+                    return;
+                }
+
+                if (payload.IsCut)
+                {
+                    ClearClipboardPayload(payload);
+                }
+
+                MarkDirty(payload.IsCut
+                    ? $"Moved {inserted.Count} item(s)."
+                    : $"Pasted {inserted.Count} item(s).");
+                RefreshAfterMutation(inserted[0]);
+            }
+            catch (Exception exception)
+            {
+                _messageBoxService.ShowError("Paste Failed", exception.Message);
+            }
+            return;
+        }
+
+        var paths = GetClipboardFileDropPaths();
+        if (paths.Count > 0)
+        {
+            await ImportPathsAsync(paths).ConfigureAwait(true);
+        }
+    }
+
     private void NavigateUp()
     {
         if (_currentFolder?.Parent is { } parent)
@@ -635,11 +819,145 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void NavigateToFolder(ArchiveFolderNode folder)
     {
+        if (ReferenceEquals(folder, _currentFolder) ||
+            !_folderLookup.TryGetValue(folder, out var folderViewModel))
+        {
+            return;
+        }
+
+        if (_currentFolder is { } current)
+        {
+            _backHistory.Push(current);
+            _forwardHistory.Clear();
+        }
+        SelectFolderCore(folderViewModel);
+        folderViewModel.IsExpanded = true;
+        folderViewModel.IsSelected = true;
+    }
+
+    private void NavigateBack()
+    {
+        if (TryPopHistory(_backHistory, out var folder))
+        {
+            if (_currentFolder is { } current)
+            {
+                _forwardHistory.Push(current);
+            }
+            SelectFolderFromHistory(folder);
+        }
+    }
+
+    private void NavigateForward()
+    {
+        if (TryPopHistory(_forwardHistory, out var folder))
+        {
+            if (_currentFolder is { } current)
+            {
+                _backHistory.Push(current);
+            }
+            SelectFolderFromHistory(folder);
+        }
+    }
+
+    private void SelectFolderFromHistory(ArchiveFolderNode folder)
+    {
         if (_folderLookup.TryGetValue(folder, out var folderViewModel))
         {
-            SelectFolder(folderViewModel);
+            SelectFolderCore(folderViewModel);
             folderViewModel.IsExpanded = true;
             folderViewModel.IsSelected = true;
+        }
+    }
+
+    private bool TryPopHistory(Stack<ArchiveFolderNode> history, out ArchiveFolderNode folder)
+    {
+        while (history.TryPop(out var candidate))
+        {
+            if (!ReferenceEquals(candidate, _currentFolder) && _folderLookup.ContainsKey(candidate))
+            {
+                folder = candidate;
+                return true;
+            }
+        }
+
+        folder = null!;
+        return false;
+    }
+
+    private bool CanNavigateBack() =>
+        !IsBusy && _backHistory.Any(folder =>
+            !ReferenceEquals(folder, _currentFolder) && _folderLookup.ContainsKey(folder));
+
+    private bool CanNavigateForward() =>
+        !IsBusy && _forwardHistory.Any(folder =>
+            !ReferenceEquals(folder, _currentFolder) && _folderLookup.ContainsKey(folder));
+
+    private bool CanPaste()
+    {
+        if (!CanModifyCurrentFolder())
+        {
+            return false;
+        }
+
+        return GetOwnedClipboardPayload() is not null || GetClipboardFileDropPaths().Count > 0;
+    }
+
+    private ArchiveClipboardPayload? GetOwnedClipboardPayload()
+    {
+        if (_clipboardPayload is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var marker = Clipboard.GetData(ClipboardFormat) as string;
+            if (!string.Equals(marker, _clipboardPayload.Id.ToString("D"), StringComparison.Ordinal))
+            {
+                _fileTransferService.ReleaseTemporaryLocation(_clipboardExportedPaths);
+                _clipboardExportedPaths = [];
+                _clipboardPayload = null;
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // If the OS clipboard is temporarily locked, retain the in-process clipboard.
+        }
+
+        return _clipboardPayload;
+    }
+
+    private void ClearClipboardPayload(ArchiveClipboardPayload payload)
+    {
+        _fileTransferService.ReleaseTemporaryLocation(_clipboardExportedPaths);
+        _clipboardExportedPaths = [];
+        _clipboardPayload = null;
+        try
+        {
+            if (string.Equals(
+                    Clipboard.GetData(ClipboardFormat) as string,
+                    payload.Id.ToString("D"),
+                    StringComparison.Ordinal))
+            {
+                Clipboard.Clear();
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Clipboard cleanup is best effort after completing a move.
+        }
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private static IReadOnlyList<string> GetClipboardFileDropPaths()
+    {
+        try
+        {
+            return Clipboard.GetData(DataFormats.FileDrop) is string[] paths ? paths : [];
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return [];
         }
     }
 
@@ -666,9 +984,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void ShowAbout()
     {
-        _messageBoxService.ShowInfo(
-            "About PakScape",
-            "PakScape for Windows is a browser and editor for Quake PAK and PK3 archives.");
+        _messageBoxService.ShowAbout();
     }
 
     private void SetViewMode(ArchiveViewMode mode)
@@ -679,6 +995,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void LoadDocument(ArchiveDocument document)
     {
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        _currentFolder = null;
+        SelectedFolder = null;
         Document = document;
         SearchText = string.Empty;
         RebuildFolderTree(document.Root);
@@ -703,8 +1023,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         var selectedFolder = folderToSelect is not null && _folderLookup.TryGetValue(folderToSelect, out var selected)
             ? selected
             : rootViewModel;
-        selectedFolder.IsSelected = true;
         SelectFolderCore(selectedFolder);
+        selectedFolder.IsSelected = true;
     }
 
     private FolderTreeNodeViewModel BuildFolderTree(ArchiveFolderNode folder, string displayName)
@@ -733,10 +1053,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             .Where(child => string.IsNullOrWhiteSpace(SearchText)
                 || child.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(child => child is ArchiveFolderNode)
-            .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase);
+            .ThenBy(child => child, Comparer<ArchiveNode>.Create(CompareNodes));
         foreach (var child in children)
         {
-            CurrentItems.Add(new ArchiveItemViewModel(child, _iconService.GetGlyphForNode(child)));
+            CurrentItems.Add(new ArchiveItemViewModel(
+                child,
+                _iconService.GetGlyphForNode(child),
+                ArchiveThumbnailService.CanCreateThumbnail(child)
+                    ? () => _thumbnailService.GetThumbnail(child)
+                    : null));
         }
 
         var selectedItem = nodeToSelect is null
@@ -745,6 +1070,53 @@ public sealed class MainWindowViewModel : ViewModelBase
         SetSelectedItems(selectedItem is null ? [] : [selectedItem]);
         StatusText = $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
     }
+
+    private int CompareNodes(ArchiveNode left, ArchiveNode right)
+    {
+        var comparison = _sortColumn switch
+        {
+            ArchiveSortColumn.Type => CompareText(GetTypeText(left), GetTypeText(right)),
+            ArchiveSortColumn.Size => CompareValues(GetSize(left), GetSize(right)),
+            ArchiveSortColumn.Modified => CompareValues(GetModified(left), GetModified(right)),
+            _ => CompareText(left.Name, right.Name),
+        };
+
+        if (comparison == 0 && _sortColumn != ArchiveSortColumn.Name)
+        {
+            comparison = CompareText(left.Name, right.Name);
+        }
+        return comparison;
+    }
+
+    private int CompareText(string left, string right) => _sortDescending
+        ? StringComparer.OrdinalIgnoreCase.Compare(right, left)
+        : StringComparer.OrdinalIgnoreCase.Compare(left, right);
+
+    private int CompareValues<T>(T left, T right) where T : IComparable<T> => _sortDescending
+        ? right.CompareTo(left)
+        : left.CompareTo(right);
+
+    private string SortHeader(string title, ArchiveSortColumn column)
+    {
+        if (_sortColumn != column)
+        {
+            return title;
+        }
+        return $"{title} {(_sortDescending ? '▼' : '▲')}";
+    }
+
+    private static string GetTypeText(ArchiveNode node) => node switch
+    {
+        ArchiveFolderNode => "Folder",
+        ArchiveFileNode file when string.IsNullOrWhiteSpace(file.Extension) => "File",
+        ArchiveFileNode file => $"{file.Extension.TrimStart('.').ToUpperInvariant()} File",
+        _ => "Item",
+    };
+
+    private static long GetSize(ArchiveNode node) => node is ArchiveFileNode file ? file.Size : 0;
+
+    private static DateTime GetModified(ArchiveNode node) =>
+        node is ArchiveFileNode file ? file.ModifiedUtc ?? DateTime.MinValue : DateTime.MinValue;
 
     private void RefreshAfterMutation(ArchiveNode? nodeToSelect = null)
     {
@@ -842,4 +1214,18 @@ public sealed class MainWindowViewModel : ViewModelBase
             FormatId = formatId,
         };
     }
+
+    private enum ArchiveSortColumn
+    {
+        Name,
+        Type,
+        Size,
+        Modified,
+    }
+
+    private sealed record ArchiveClipboardPayload(
+        Guid Id,
+        IReadOnlyList<ArchiveNode> Templates,
+        IReadOnlyList<ArchiveNode> Originals,
+        bool IsCut);
 }

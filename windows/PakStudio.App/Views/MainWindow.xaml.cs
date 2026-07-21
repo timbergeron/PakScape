@@ -11,7 +11,10 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private PreviewWindow? _previewWindow;
     private bool _allowClose;
+    private bool _isCloseConfirmationPending;
     private string? _startupArchivePath;
+    private Point? _dragStartPoint;
+    private bool _isStartingDrag;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -108,12 +111,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                "Unable to Preview Selection",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            ShowWarning("Unable to Preview Selection", exception.Message);
         }
     }
 
@@ -128,6 +126,112 @@ public partial class MainWindow : Window
             item.IsSelected = true;
             item.Focus();
         }
+    }
+
+    private void ItemList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStartPoint = ItemsControl.ContainerFromElement(
+                ItemList,
+                e.OriginalSource as DependencyObject) is ListViewItem
+            ? e.GetPosition(ItemList)
+            : null;
+    }
+
+    private void ItemList_OnMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isStartingDrag || e.LeftButton != MouseButtonState.Pressed || _dragStartPoint is not { } start)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                _dragStartPoint = null;
+            }
+            return;
+        }
+
+        var current = e.GetPosition(ItemList);
+        if (Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _dragStartPoint = null;
+        _isStartingDrag = true;
+        IReadOnlyList<string> paths = [];
+        try
+        {
+            paths = _viewModel.PrepareSelectedItemsForDrag();
+            if (paths.Count == 0)
+            {
+                return;
+            }
+
+            var data = new DataObject(DataFormats.FileDrop, paths.ToArray());
+            DragDrop.DoDragDrop(ItemList, data, DragDropEffects.Copy);
+            e.Handled = true;
+        }
+        catch (Exception exception)
+        {
+            ShowWarning("Unable to Drag Selection", exception.Message);
+        }
+        finally
+        {
+            _viewModel.ReleaseTemporaryTransfer(paths);
+            _isStartingDrag = false;
+        }
+    }
+
+    private void SortHeader_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string columnName })
+        {
+            _viewModel.SortBy(columnName);
+        }
+    }
+
+    private void Cut_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = _viewModel.CutCommand.CanExecute(null);
+    }
+
+    private void Cut_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        _viewModel.CutCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void Copy_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = _viewModel.CopyCommand.CanExecute(null);
+    }
+
+    private void Copy_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        _viewModel.CopyCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void Paste_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = _viewModel.PasteCommand.CanExecute(null);
+    }
+
+    private void Paste_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        _viewModel.PasteCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void SelectAll_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = ItemList.Items.Count > 0 && !_viewModel.IsBusy;
+    }
+
+    private void SelectAll_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        ItemList.SelectAll();
+        ItemList.Focus();
+        e.Handled = true;
     }
 
     private void ItemList_OnDragOver(object sender, DragEventArgs e)
@@ -155,10 +259,32 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        if (await _viewModel.CanCloseAsync().ConfigureAwait(true))
+        if (_isCloseConfirmationPending)
         {
-            _allowClose = true;
-            Close();
+            return;
         }
+
+        _isCloseConfirmationPending = true;
+        try
+        {
+            if (await _viewModel.CanCloseAsync().ConfigureAwait(true))
+            {
+                _allowClose = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _isCloseConfirmationPending = false;
+        }
+    }
+
+    private void ShowWarning(string title, string message)
+    {
+        var dialog = new MessageDialogWindow(title, message, MessageDialogButtons.Ok)
+        {
+            Owner = this,
+        };
+        _ = dialog.ShowDialogResult();
     }
 }

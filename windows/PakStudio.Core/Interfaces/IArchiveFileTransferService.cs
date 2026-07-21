@@ -10,5 +10,9 @@ public interface IArchiveFileTransferService
 
     string Export(ArchiveNode node, string destinationDirectory);
 
+    IReadOnlyList<string> ExportToTemporaryLocation(IReadOnlyList<ArchiveNode> nodes);
+
+    void ReleaseTemporaryLocation(IReadOnlyList<string> paths);
+
     void OpenWithDefaultApplication(ArchiveFileNode file);
 }

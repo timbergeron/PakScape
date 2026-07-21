@@ -1,8 +1,6 @@
-using System.IO;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using PakStudio.App.Services;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 
@@ -63,31 +61,19 @@ public partial class PreviewWindow : Window
                 }
                 break;
             case ArchivePreviewKind.EncodedImage:
-                if (TryLoadEncodedImage(
-                        preview.EncodedImage,
-                        preview.ImageWidth,
-                        preview.ImageHeight,
-                        out var encodedImage))
+            case ArchivePreviewKind.Bitmap:
+                if (PreviewImageFactory.TryCreate(
+                        preview,
+                        EncodedImageInspector.MaximumRenderedDimension,
+                        out var previewImage))
                 {
-                    ImagePreview.Source = encodedImage;
+                    ImagePreview.Source = previewImage;
                     ImagePanel.Visibility = Visibility.Visible;
                 }
                 else
                 {
                     ShowMetadata(preview with { Message = "The native image decoder could not read this file." });
                 }
-                break;
-            case ArchivePreviewKind.Bitmap when preview.Bitmap is { } bitmap:
-                ImagePreview.Source = BitmapSource.Create(
-                    bitmap.Width,
-                    bitmap.Height,
-                    96,
-                    96,
-                    PixelFormats.Bgra32,
-                    null,
-                    bitmap.BgraPixels,
-                    bitmap.Stride);
-                ImagePanel.Visibility = Visibility.Visible;
                 break;
             default:
                 ShowMetadata(preview);
@@ -110,44 +96,6 @@ public partial class PreviewWindow : Window
         ImagePanel.Visibility = Visibility.Collapsed;
         TextPreview.Visibility = Visibility.Collapsed;
         MetadataPanel.Visibility = Visibility.Collapsed;
-    }
-
-    private static bool TryLoadEncodedImage(
-        byte[]? data,
-        int width,
-        int height,
-        out ImageSource image)
-    {
-        image = null!;
-        if (data is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            using var stream = new MemoryStream(data, writable: false);
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            if (width >= height)
-            {
-                bitmap.DecodePixelWidth = Math.Min(width, EncodedImageInspector.MaximumRenderedDimension);
-            }
-            else
-            {
-                bitmap.DecodePixelHeight = Math.Min(height, EncodedImageInspector.MaximumRenderedDimension);
-            }
-            bitmap.StreamSource = stream;
-            bitmap.EndInit();
-            bitmap.Freeze();
-            image = bitmap;
-            return true;
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            return false;
-        }
     }
 
     private void Move(int delta)

@@ -64,4 +64,49 @@ public sealed class ArchiveTreeEditorTests
         Assert.Throws<ArchiveValidationException>(() =>
             ArchiveTreeEditor.Rename(root, "renamed"));
     }
+
+    [Fact]
+    public void CopyTo_DeepCopiesFoldersAndGeneratesUniqueNames()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var source = ArchiveTreeEditor.CreateFolder(root, "maps");
+        ArchiveTreeEditor.AddFile(source, "start.bsp", [1, 2, 3]);
+
+        var copy = Assert.IsType<ArchiveFolderNode>(Assert.Single(ArchiveTreeEditor.CopyTo([source], root)));
+
+        Assert.Equal("maps (2)", copy.Name);
+        var copiedFile = Assert.Single(copy.Files);
+        Assert.Equal(new byte[] { 1, 2, 3 }, copiedFile.Data);
+        Assert.NotSame(source.Files[0].Data, copiedFile.Data);
+        Assert.Same(copy, copiedFile.Parent);
+    }
+
+    [Fact]
+    public void MoveTo_RejectsMovingFolderIntoItsDescendant()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var parent = ArchiveTreeEditor.CreateFolder(root, "parent");
+        var child = ArchiveTreeEditor.CreateFolder(parent, "child");
+
+        Assert.Throws<ArchiveValidationException>(() =>
+            ArchiveTreeEditor.MoveTo([parent], child));
+        Assert.Same(root, parent.Parent);
+        Assert.Same(parent, child.Parent);
+    }
+
+    [Fact]
+    public void MoveTo_ReparentsItemsAndResolvesConflicts()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var source = ArchiveTreeEditor.CreateFolder(root, "source");
+        var destination = ArchiveTreeEditor.CreateFolder(root, "destination");
+        var moved = ArchiveTreeEditor.AddFile(source, "readme.txt", [1]);
+        ArchiveTreeEditor.AddFile(destination, "readme.txt", [2]);
+
+        ArchiveTreeEditor.MoveTo([moved], destination);
+
+        Assert.Empty(source.Files);
+        Assert.Equal("readme (2).txt", moved.Name);
+        Assert.Same(destination, moved.Parent);
+    }
 }

@@ -10,7 +10,21 @@
         MinHeight="600"
         MinWidth="960"
         Closing="Window_OnClosing"
-        Background="{StaticResource WindowBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.CommandBindings>
+        <CommandBinding Command="{x:Static ApplicationCommands.Cut}"
+                        CanExecute="Cut_CanExecute"
+                        Executed="Cut_Executed" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Copy}"
+                        CanExecute="Copy_CanExecute"
+                        Executed="Copy_Executed" />
+        <CommandBinding Command="{x:Static ApplicationCommands.Paste}"
+                        CanExecute="Paste_CanExecute"
+                        Executed="Paste_Executed" />
+        <CommandBinding Command="{x:Static ApplicationCommands.SelectAll}"
+                        CanExecute="SelectAll_CanExecute"
+                        Executed="SelectAll_Executed" />
+    </Window.CommandBindings>
     <Window.InputBindings>
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewCommand}" />
         <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding NewPk3Command}" />
@@ -22,6 +36,8 @@
         <KeyBinding Key="Enter" Command="{Binding OpenSelectedCommand}" />
         <KeyBinding Key="Back" Command="{Binding UpCommand}" />
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
+        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackCommand}" />
+        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -42,7 +58,7 @@
                                   ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal">
                 <TextBlock FontFamily="Segoe MDL2 Assets"
-                           Foreground="{StaticResource AccentBrush}"
+                           Foreground="{DynamicResource AccentBrush}"
                            Margin="0,0,8,0"
                            Text="&#xE8B7;" />
                 <TextBlock Text="{Binding DisplayName}" />
@@ -53,16 +69,25 @@
             <Border Width="128"
                     Margin="0,0,12,12"
                     Padding="12"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="10">
                 <StackPanel>
-                    <TextBlock FontFamily="Segoe MDL2 Assets"
-                               FontSize="30"
-                               HorizontalAlignment="Center"
-                               Foreground="{StaticResource AccentBrush}"
-                               Text="{Binding IconGlyph}" />
+                    <Grid Width="88" Height="72" HorizontalAlignment="Center">
+                        <Image Source="{Binding Thumbnail}"
+                               MaxWidth="88"
+                               MaxHeight="72"
+                               Stretch="Uniform" />
+                        <TextBlock x:Name="LargeIconGlyph"
+                                   Visibility="Collapsed"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="42"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Text="{Binding IconGlyph}" />
+                    </Grid>
                     <TextBlock Margin="0,10,0,0"
                                HorizontalAlignment="Center"
                                TextAlignment="Center"
@@ -70,34 +95,53 @@
                                Text="{Binding Name}" />
                     <TextBlock Margin="0,4,0,0"
                                HorizontalAlignment="Center"
-                               Foreground="{StaticResource MutedForegroundBrush}"
+                               Foreground="{DynamicResource MutedForegroundBrush}"
                                FontSize="11"
                                Text="{Binding TypeText}" />
                 </StackPanel>
             </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
+                    <Setter TargetName="LargeIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <DataTemplate x:Key="SmallIconTemplate">
             <Border Margin="0,0,8,8"
                     Padding="8"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="8">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock FontFamily="Segoe MDL2 Assets"
-                               FontSize="18"
-                               VerticalAlignment="Center"
-                               Foreground="{StaticResource AccentBrush}"
-                               Text="{Binding IconGlyph}" />
+                    <Grid Width="30" Height="30" VerticalAlignment="Center">
+                        <Image Source="{Binding Thumbnail}"
+                               MaxWidth="30"
+                               MaxHeight="30"
+                               Stretch="Uniform" />
+                        <TextBlock x:Name="SmallIconGlyph"
+                                   Visibility="Collapsed"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="18"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Text="{Binding IconGlyph}" />
+                    </Grid>
                     <StackPanel Margin="8,0,0,0">
                         <TextBlock Text="{Binding Name}" />
                         <TextBlock FontSize="11"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
                                    Text="{Binding TypeText}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
+                    <Setter TargetName="SmallIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <DataTemplate x:Key="ListTemplate">
@@ -108,19 +152,29 @@
                     <ColumnDefinition Width="160" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
-                           FontFamily="Segoe MDL2 Assets"
-                           VerticalAlignment="Center"
-                           Foreground="{StaticResource AccentBrush}"
-                           Text="{Binding IconGlyph}" />
+                <Grid Grid.Column="0" Width="20" Height="20">
+                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                    <TextBlock x:Name="ListIconGlyph"
+                               Visibility="Collapsed"
+                               FontFamily="Segoe MDL2 Assets"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource AccentBrush}"
+                               Text="{Binding IconGlyph}" />
+                </Grid>
                 <TextBlock Grid.Column="1"
                            VerticalAlignment="Center"
                            Text="{Binding Name}" />
                 <TextBlock Grid.Column="2"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource MutedForegroundBrush}"
+                           Foreground="{DynamicResource MutedForegroundBrush}"
                            Text="{Binding TypeText}" />
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
+                    <Setter TargetName="ListIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <DataTemplate x:Key="DetailsTemplate">
@@ -133,14 +187,20 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock FontFamily="Segoe MDL2 Assets"
-                               Margin="0,0,8,0"
-                               Foreground="{StaticResource AccentBrush}"
-                               Text="{Binding IconGlyph}" />
+                    <Grid Width="20" Height="20" Margin="0,0,8,0">
+                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                        <TextBlock x:Name="DetailsIconGlyph"
+                                   Visibility="Collapsed"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Text="{Binding IconGlyph}" />
+                    </Grid>
                     <TextBlock Text="{Binding Name}" />
                 </StackPanel>
                 <TextBlock Grid.Column="1"
-                           Foreground="{StaticResource MutedForegroundBrush}"
+                           Foreground="{DynamicResource MutedForegroundBrush}"
                            Text="{Binding TypeText}" />
                 <TextBlock Grid.Column="2"
                            HorizontalAlignment="Right"
@@ -149,6 +209,11 @@
                            HorizontalAlignment="Right"
                            Text="{Binding ModifiedText}" />
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
+                    <Setter TargetName="DetailsIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
 
@@ -180,12 +245,22 @@
                 <MenuItem Header="E_xit" Command="{Binding ExitCommand}" />
             </MenuItem>
             <MenuItem Header="_Edit">
+                <MenuItem Header="Cu_t" Command="{x:Static ApplicationCommands.Cut}" InputGestureText="Ctrl+X" />
+                <MenuItem Header="_Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
+                <MenuItem Header="_Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
+                <MenuItem Header="Select _All"
+                          Command="{x:Static ApplicationCommands.SelectAll}"
+                          InputGestureText="Ctrl+A" />
+                <Separator />
                 <MenuItem Header="New _Folder..." Command="{Binding NewFolderCommand}" />
                 <Separator />
                 <MenuItem Header="_Rename..." Command="{Binding RenameCommand}" InputGestureText="F2" />
                 <MenuItem Header="_Delete" Command="{Binding DeleteCommand}" InputGestureText="Delete" />
             </MenuItem>
             <MenuItem Header="_Go">
+                <MenuItem Header="_Back" Command="{Binding BackCommand}" InputGestureText="Alt+Left" />
+                <MenuItem Header="_Forward" Command="{Binding ForwardCommand}" InputGestureText="Alt+Right" />
+                <Separator />
                 <MenuItem Header="_Up One Level" Command="{Binding UpCommand}" InputGestureText="Backspace" />
                 <MenuItem Header="_Open Selection" Command="{Binding OpenSelectedCommand}" InputGestureText="Enter" />
             </MenuItem>
@@ -218,25 +293,6 @@
             </MenuItem>
         </Menu>
 
-        <ToolBarTray DockPanel.Dock="Top">
-            <ToolBar>
-                <Button Command="{Binding NewCommand}" Content="New" />
-                <Button Command="{Binding OpenCommand}" Content="Open" />
-                <Button Command="{Binding SaveCommand}" Content="Save" />
-                <Separator />
-                <Button Command="{Binding UpCommand}" Content="Up" ToolTip="Up one level (Backspace)" />
-                <Button Command="{Binding NewFolderCommand}" Content="New Folder" />
-                <Button Command="{Binding AddFilesCommand}" Content="Add Files" />
-                <Button Command="{Binding ExportCommand}" Content="Export" />
-                <Button Command="{Binding DeleteCommand}" Content="Delete" />
-                <Separator />
-                <Button Command="{Binding ShowLargeIconsCommand}" Content="Large" />
-                <Button Command="{Binding ShowSmallIconsCommand}" Content="Small" />
-                <Button Command="{Binding ShowListCommand}" Content="List" />
-                <Button Command="{Binding ShowDetailsCommand}" Content="Details" />
-            </ToolBar>
-        </ToolBarTray>
-
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem Content="{Binding StatusText}" />
             <Separator />
@@ -258,8 +314,8 @@
 
             <Border Grid.Column="0"
                     Padding="8"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12">
                 <TreeView x:Name="FolderTree"
@@ -271,19 +327,19 @@
                           Width="6"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="{StaticResource SplitterBrush}" />
+                          Background="{DynamicResource SplitterBrush}" />
 
             <Border Grid.Column="2"
                     Padding="12"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12">
                 <DockPanel>
                     <Border DockPanel.Dock="Top"
                             Margin="0,0,0,10"
                             Padding="8,6"
-                            Background="{StaticResource AccentSoftBrush}"
+                            Background="{DynamicResource AccentSoftBrush}"
                             CornerRadius="7">
                         <DockPanel>
                             <Button DockPanel.Dock="Left"
@@ -313,24 +369,50 @@
                             <ColumnDefinition Width="1.5*" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Grid.Column="0"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
-                                   Text="Name" />
-                        <TextBlock Grid.Column="1"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
-                                   Text="Type" />
-                        <TextBlock Grid.Column="2"
-                                   HorizontalAlignment="Right"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
-                                   Text="Size" />
-                        <TextBlock Grid.Column="3"
-                                   HorizontalAlignment="Right"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource MutedForegroundBrush}"
-                                   Text="Modified" />
+                        <Button Grid.Column="0"
+                                Tag="Name"
+                                Click="SortHeader_OnClick"
+                                Margin="0"
+                                Padding="0"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                HorizontalContentAlignment="Left"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundBrush}"
+                                Content="{Binding NameSortHeader}" />
+                        <Button Grid.Column="1"
+                                Tag="Type"
+                                Click="SortHeader_OnClick"
+                                Margin="0"
+                                Padding="0"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                HorizontalContentAlignment="Left"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundBrush}"
+                                Content="{Binding TypeSortHeader}" />
+                        <Button Grid.Column="2"
+                                Tag="Size"
+                                Click="SortHeader_OnClick"
+                                Margin="0"
+                                Padding="0"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                HorizontalContentAlignment="Right"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundBrush}"
+                                Content="{Binding SizeSortHeader}" />
+                        <Button Grid.Column="3"
+                                Tag="Modified"
+                                Click="SortHeader_OnClick"
+                                Margin="0"
+                                Padding="0"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                HorizontalContentAlignment="Right"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundBrush}"
+                                Content="{Binding ModifiedSortHeader}" />
                     </Grid>
 
                     <ListView x:Name="ItemList"
@@ -342,6 +424,8 @@
                               AllowDrop="True"
                               DragOver="ItemList_OnDragOver"
                               Drop="ItemList_OnDrop"
+                              PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
+                              MouseMove="ItemList_OnMouseMove"
                               PreviewKeyDown="ItemList_OnPreviewKeyDown"
                               PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
                               ScrollViewer.CanContentScroll="True"
@@ -354,6 +438,13 @@
                                 <MenuItem Header="Quick Preview"
                                           InputGestureText="Space"
                                           Click="QuickPreview_OnClick" />
+                                <Separator />
+                                <MenuItem Header="Cut"
+                                          Command="{Binding Data.CutCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Copy"
+                                          Command="{Binding Data.CopyCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Paste"
+                                          Command="{Binding Data.PasteCommand, Source={StaticResource ViewModelProxy}}" />
                                 <Separator />
                                 <MenuItem Header="Export..."
                                           Command="{Binding Data.ExportCommand, Source={StaticResource ViewModelProxy}}" />

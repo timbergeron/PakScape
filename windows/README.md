@@ -6,10 +6,13 @@ Current capabilities include:
 
 - Open, create, edit, and atomically save Quake PAK and PK3 archives.
 - Add files or folders, create folders, rename, delete, and export archive items.
-- Browse folders with large-icon, small-icon, list, and detail views.
+- Cut, copy, paste, select all, and drag archive items to or from Windows Explorer.
+- Browse with Back/Forward history and large-icon, small-icon, list, and detail views.
+- Sort by name, type, size, or modified date and show image/Quake thumbnails in every view.
 - Preview selected archive items without extracting them by pressing Space.
 - Open archived files in their registered Windows application.
 - Track recent archives and prompt before discarding unsaved work.
+- Follow the Windows light/dark app-mode setting, including live theme changes.
 - Create either PAK or PK3 documents, open archives passed by Windows, and filter the current folder.
 
 Projects:

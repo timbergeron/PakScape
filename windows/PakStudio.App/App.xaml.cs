@@ -12,10 +12,13 @@ namespace PakStudio.App;
 public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
+    private SystemThemeService? _systemThemeService;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _systemThemeService = new SystemThemeService(this);
 
         var services = new ServiceCollection();
         ConfigureServices(services);
@@ -32,6 +35,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _systemThemeService?.Dispose();
         _serviceProvider?.Dispose();
         base.OnExit(e);
     }
@@ -50,6 +54,7 @@ public partial class App : Application
         services.AddSingleton<IRecentFilesService, JsonRecentFilesService>();
         services.AddSingleton<IIconService, GlyphIconService>();
         services.AddSingleton<IArchiveFileTransferService, ArchiveFileTransferService>();
+        services.AddSingleton<ArchiveThumbnailService>();
 
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
