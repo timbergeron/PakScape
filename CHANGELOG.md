@@ -16,7 +16,9 @@ Notable user-visible changes are documented here.
 - Self-contained x86-64/ARM64 Debian packaging with XDG desktop and MIME integration.
 - Linux-specific regression tests and Ubuntu 24.04 CI coverage.
 - Finder-style Spacebar Quick Preview on macOS, Windows, and Linux, including text, common image, and Quake asset previews.
-- Native Finder-style inline `.txt` icon previews on macOS.
+- Native Finder-style inline thumbnails for common files and content-aware fallback icons on macOS.
+- A system-provided macOS toolbar search field backed by PakScape's archive-wide matching.
+- Standard Undo and Redo support for macOS archive edits.
 
 ### Changed
 
@@ -30,6 +32,8 @@ Notable user-visible changes are documented here.
 - Linux builds use .NET 10 LTS and Avalonia 12 with warnings-as-errors and recommended analyzer rules.
 - macOS sources, tests, project metadata, and documentation now live under `macos/`.
 - Generated Xcode `DerivedData` is no longer tracked in the repository.
+- macOS document saving, Save As, edited-window state, and close confirmation are now managed by SwiftUI's native document lifecycle.
+- macOS file drops now use SwiftUI's typed Transferable API.
 
 ### Security
 

@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import AppKit
 
 fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
@@ -9,26 +8,10 @@ fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-private final class LockedURLCollection: @unchecked Sendable {
-    private let lock = NSLock()
-    private var urls: [URL] = []
-
-    func append(_ url: URL) {
-        lock.lock()
-        defer { lock.unlock() }
-        urls.append(url)
-    }
-
-    func snapshot() -> [URL] {
-        lock.lock()
-        defer { lock.unlock() }
-        return urls
-    }
-}
-
 struct ContentView: View {
-    @Binding var document: PakDocument
-    let fileURL: URL?
+    let document: PakDocument
+    let isEditable: Bool
+    @Environment(\.undoManager) private var undoManager
     @StateObject private var model: PakViewModel
     @State private var selectedFileIDs: Set<PakNode.ID> = [] // Selection in the detail table (supports multi-select)
     @State private var detailViewStyle: DetailViewStyle = .list
@@ -37,16 +20,14 @@ struct ContentView: View {
     @State private var renamingNode: PakNode?
     @FocusState private var renamingFocus: PakNode.ID?
     @State private var window: NSWindow?
-    @State private var windowDelegate = PakWindowDelegate()
     @State private var iconZoomLevel: Int = 1
     @State private var searchText = ""
     @State private var isSearchExpanded = false
-    @FocusState private var isSearchFieldFocused: Bool
 
-    init(document: Binding<PakDocument>, fileURL: URL?) {
-        self._document = document
-        self.fileURL = fileURL
-        self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.wrappedValue.pakFile, documentURL: fileURL))
+    init(document: PakDocument, isEditable: Bool) {
+        self.document = document
+        self.isEditable = isEditable
+        self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.pakFile, isEditable: isEditable))
     }
 
     @State private var sortOrder = [KeyPathComparator(\PakNode.name)]
@@ -57,16 +38,25 @@ struct ContentView: View {
         } detail: {
             detailView
         }
+        .searchable(
+            text: $searchText,
+            isPresented: $isSearchExpanded,
+            placement: .toolbar,
+            prompt: "Search all paths"
+        )
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
-            model.updateDocumentURL(fileURL)
-            window?.isDocumentEdited = model.hasUnsavedChanges
+            model.connectDocument(undoManager: undoManager) { pakFile in
+                document.pakFile = pakFile
+            }
+            model.updateEditableState(isEditable)
         }
-        .onChange(of: fileURL) { _, newValue in
-            model.updateDocumentURL(newValue)
+        .onChange(of: isEditable) { _, newValue in
+            model.updateEditableState(newValue)
         }
-        .onChange(of: model.hasUnsavedChanges) { _, newValue in
-            window?.isDocumentEdited = newValue
+        .onChange(of: model.documentReplacementVersion) { _, _ in
+            selectedFileIDs.removeAll()
+            cancelRenaming()
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -94,86 +84,22 @@ struct ContentView: View {
                 .controlSize(.regular)
                 .buttonStyle(.borderless)
             }
-
-            ToolbarItem(placement: .primaryAction) {
-                searchToolbarItem
-            }
-        }
-        .onKeyPress(keys: ["f"]) { press in
-            guard press.modifiers.contains(.command) else { return .ignored }
-            expandSearch()
-            return .handled
         }
         .background(
             WindowAccessor { newWindow in
-                guard let newWindow else { return }
-                windowDelegate.viewModel = model
-                if window !== newWindow {
-                    window = newWindow
-                    windowDelegate.forwardingDelegate = newWindow.delegate
-                    newWindow.delegate = windowDelegate
-                }
-                newWindow.isDocumentEdited = model.hasUnsavedChanges
-                newWindow.representedURL = model.documentURL
+                window = newWindow
             }
         )
-    }
-
-    @ViewBuilder
-    private var searchToolbarItem: some View {
-        if isSearchExpanded {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-
-                TextField("Search all paths", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFieldFocused)
-                    .frame(minWidth: 190)
-
-                Button {
-                    closeSearch()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close Search")
+        .onChange(of: isSearchExpanded) { _, isPresented in
+            if !isPresented {
+                searchText = ""
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .frame(width: 250)
-            .onExitCommand {
-                closeSearch()
-            }
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
-        } else {
-            Button {
-                expandSearch()
-            } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .help("Search All Paths (⌘F)")
-            .transition(.opacity)
-        }
-    }
-
-    private func expandSearch() {
-        withAnimation(.easeOut(duration: 0.16)) {
-            isSearchExpanded = true
-        }
-        DispatchQueue.main.async {
-            isSearchFieldFocused = true
         }
     }
 
     private func closeSearch() {
         searchText = ""
-        isSearchFieldFocused = false
-        withAnimation(.easeOut(duration: 0.16)) {
-            isSearchExpanded = false
-        }
+        isSearchExpanded = false
     }
 
     private var sidebar: some View {
@@ -252,34 +178,12 @@ struct ContentView: View {
                         }
                     }
                 }
-                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
-                    guard let folder = model.currentFolder else { return false }
-                    let dispatchGroup = DispatchGroup()
-                    let collectedURLs = LockedURLCollection()
-                    
-                    for provider in providers {
-                        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                            dispatchGroup.enter()
-                            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { (item, _) in
-                                let loadedURL: URL?
-                                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
-                                    loadedURL = url
-                                } else if let url = item as? URL {
-                                    loadedURL = url
-                                } else {
-                                    loadedURL = nil
-                                }
-                                if let loadedURL {
-                                    collectedURLs.append(loadedURL)
-                                }
-                                dispatchGroup.leave()
-                            }
-                        }
-                    }
-                    
-                    dispatchGroup.notify(queue: .main) {
-                        model.importFiles(urls: collectedURLs.snapshot(), to: folder)
-                    }
+                .dropDestination(for: URL.self) { urls, _ in
+                    let fileURLs = urls.filter(\.isFileURL)
+                    guard model.isEditable,
+                          let folder = model.currentFolder,
+                          !fileURLs.isEmpty else { return false }
+                    model.importFiles(urls: fileURLs, to: folder)
                     return true
                 }
                 .contextMenu {
@@ -356,6 +260,7 @@ struct ContentView: View {
     }
 
     private func beginRenaming(_ node: PakNode) {
+        guard model.isEditable else { return }
         select(node)
         renamingNode = node
         renamingNodeID = node.id
@@ -471,6 +376,7 @@ struct ContentView: View {
         Button("Rename…") {
             beginRenaming(node)
         }
+        .disabled(!model.isEditable)
         if node.isFolder {
             Button("Open Folder") {
                 model.navigate(to: node)
@@ -560,23 +466,9 @@ struct ContentView: View {
         model.navigate(to: folder)
     }
 
-    private func dragItem(for node: PakNode) -> NSItemProvider {
-        // Kept only for compatibility if used elsewhere; list/icons now use AppKit views.
-        do {
-            let url = try model.exportToTemporaryLocation(node: node)
-            let provider = NSItemProvider(object: url as NSURL)
-            provider.suggestedName = node.name
-            return provider
-        } catch {
-            return NSItemProvider()
-        }
-    }
 }
 
 struct PakCommands {
-    let save: () -> Void
-    let saveAs: () -> Void
-    let canSave: Bool
     let deleteFile: () -> Void
     let canDeleteFile: Bool
     let rename: () -> Void
@@ -592,7 +484,8 @@ struct PakCommands {
     let cut: () -> Void
     let copy: () -> Void
     let paste: () -> Void
-    let canCutCopy: Bool
+    let canCut: Bool
+    let canCopy: Bool
     let canPaste: Bool
     let selectAll: () -> Void
     let canSelectAll: Bool
@@ -633,61 +526,9 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-private final class PakWindowDelegate: NSObject, NSWindowDelegate {
-    weak var viewModel: PakViewModel?
-    weak var forwardingDelegate: NSWindowDelegate?
-
-    override func responds(to selector: Selector!) -> Bool {
-        if super.responds(to: selector) { return true }
-        return forwardingDelegate?.responds(to: selector) ?? false
-    }
-
-    override func forwardingTarget(for selector: Selector!) -> Any? {
-        if let delegate = forwardingDelegate, delegate.responds(to: selector) {
-            return delegate
-        }
-        return super.forwardingTarget(for: selector)
-    }
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard let model = viewModel, model.hasUnsavedChanges else {
-            return forwardingDelegate?.windowShouldClose?(sender) ?? true
-        }
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Do you want to save changes to this archive?"
-        alert.informativeText = "Your changes will be lost if you don’t save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Don't Save")
-
-        let response = alert.runModal()
-        switch response {
-        case .alertFirstButtonReturn:
-            if model.saveCurrentPak(promptForLocationIfNeeded: true) {
-                return forwardingDelegate?.windowShouldClose?(sender) ?? true
-            }
-            return false
-        case .alertSecondButtonReturn:
-            return false
-        default:
-            return forwardingDelegate?.windowShouldClose?(sender) ?? true
-        }
-    }
-
-}
-
 private extension ContentView {
     var currentPakCommands: PakCommands {
         PakCommands(
-            save: {
-                _ = model.saveCurrentPak(promptForLocationIfNeeded: true)
-            },
-            saveAs: {
-                _ = model.saveCurrentPakAs()
-            },
-            canSave: model.canSave,
             deleteFile: {
                 model.deleteSelectedFile()
             },
@@ -703,7 +544,7 @@ private extension ContentView {
             addFiles: {
                 presentAddFilesPanel(target: model.currentFolder)
             },
-            canAddFiles: model.pakFile != nil,
+            canAddFiles: model.canAddFiles,
             zoomInIcons: {
                 if iconZoomLevel < 2 {
                     iconZoomLevel += 1
@@ -730,7 +571,8 @@ private extension ContentView {
                     selectedFileIDs = Set(inserted.map { $0.id })
                 }
             },
-            canCutCopy: model.canCutCopy,
+            canCut: model.canCut,
+            canCopy: model.canCopy,
             canPaste: model.canPaste,
             selectAll: {
                 selectAllInCurrentFolder()
@@ -776,7 +618,7 @@ private extension ContentView {
     }
 
     var canRenameSelectedNode: Bool {
-        renamingNodeID == nil && model.selectedFile != nil
+        model.isEditable && renamingNodeID == nil && model.selectedFile != nil
     }
 
     func renameSelectedNode() {

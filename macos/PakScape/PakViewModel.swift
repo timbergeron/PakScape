@@ -36,24 +36,28 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
     @Published var selectedFile: PakNode?  // File selected in right pane (first of selection for backward compatibility)
     @Published var selectedNodes: [PakNode] = [] // Multi-selection support
-    @Published private(set) var hasUnsavedChanges = false
+    @Published private(set) var documentReplacementVersion = UUID()
     @Published private var backStack: [PakNode] = []
     @Published private var forwardStack: [PakNode] = []
+    private(set) var isEditable: Bool
     private static var sharedClipboard: ClipboardPayload?
     private var clipboard: ClipboardPayload? {
         get { Self.sharedClipboard }
         set { Self.sharedClipboard = newValue }
     }
-    private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif", "tga"]
     private static let previewableAudioExtensions: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "au", "snd"]
     private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
-    private static let textQuickLookExtensions: Set<String> = ["cfg"]
-    private static let textThumbnailExtensions: Set<String> = ["txt"]
+    private static let textQuickLookExtensions: Set<String> = [
+        "arena", "cfg", "csv", "def", "ent", "ini", "json", "log", "map", "md",
+        "menu", "qc", "rc", "shader", "txt", "xml", "yaml", "yml",
+    ]
     private static let maximumPreviewFileSize = 128 * 1_024 * 1_024
+    private static let maximumNativeThumbnailFileSize = 32 * 1_024 * 1_024
     private static let maximumTextThumbnailBytes = 2 * 1_024 * 1_024
     private static let maximumQuickLookSelectionSize = 256 * 1_024 * 1_024
     private static let maximumQuickLookItemCount = 1_000
-    var documentURL: URL?
+    private weak var undoManager: UndoManager?
+    private var documentDidChange: ((PakFile) -> Void)?
     private var isNavigatingHistory = false
     private var audioPreviewPlayer: AVAudioPlayer?
     private var audioPreviewTimer: Timer?
@@ -63,10 +67,6 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var previewImageCache: [PakNode.ID: NSImage] = [:]
     private var previewImageMisses: Set<PakNode.ID> = []
     private var previewImageRequests: [PakNode.ID: Task<Void, Never>] = [:]
-
-    var canSave: Bool {
-        pakFile != nil && hasUnsavedChanges
-    }
 
     var canNavigateBack: Bool {
         !backStack.isEmpty
@@ -86,19 +86,23 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return selected.isFolder
     }
 
-    var canCutCopy: Bool {
+    var canCut: Bool {
+        isEditable && !selectedNodes.isEmpty
+    }
+
+    var canCopy: Bool {
         !selectedNodes.isEmpty
     }
 
     var canPaste: Bool {
-        guard currentFolder != nil else { return false }
+        guard isEditable, currentFolder != nil else { return false }
         if clipboard != nil { return true }
         return !pasteboardFileURLs().isEmpty
     }
 
-    init(pakFile: PakFile?, documentURL: URL? = nil) {
+    init(pakFile: PakFile?, isEditable: Bool = true) {
         self.pakFile = pakFile
-        self.documentURL = documentURL
+        self.isEditable = isEditable
         super.init()
         resetNavigation(to: pakFile?.root)
     }
@@ -108,8 +112,17 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         stopAudioPreview()
     }
 
-    func updateDocumentURL(_ url: URL?) {
-        documentURL = url
+    func connectDocument(
+        undoManager: UndoManager?,
+        onChange: @escaping (PakFile) -> Void
+    ) {
+        self.undoManager = undoManager
+        documentDidChange = onChange
+    }
+
+    func updateEditableState(_ isEditable: Bool) {
+        self.isEditable = isEditable
+        objectWillChange.send()
     }
 
     struct AudioPreviewVisualState {
@@ -379,6 +392,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     @discardableResult
     func rename(node: PakNode, to newName: String) -> Bool {
+        guard isEditable else { return false }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             presentWarning(title: "Invalid Name", message: "Names cannot be empty.")
@@ -407,8 +421,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return false
         }
 
+        let undoSnapshot = pakFile?.documentSnapshot()
         node.name = trimmed
-        markDirty()
+        markDirty(undoing: undoSnapshot, actionName: "Rename")
         return true
     }
 
@@ -454,12 +469,13 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func cutSelection() {
+        guard isEditable else { return }
         createClipboard(isCut: true)
     }
 
     @discardableResult
     func pasteIntoCurrentFolder() -> [PakNode] {
-        guard let destination = currentFolder else { return [] }
+        guard isEditable, let destination = currentFolder else { return [] }
 
         if let payload = clipboard {
             if !payload.isCut || payload.sourceModel !== self {
@@ -476,6 +492,13 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
             if payload.isCut,
                let source = payload.sourceModel {
+                guard source.isEditable else {
+                    presentWarning(
+                        title: "Couldn’t Move Items",
+                        message: "The source archive is read-only."
+                    )
+                    return []
+                }
                 for id in payload.originalIDs {
                     if let original = findNode(with: id, in: source.pakFile?.root),
                        isDescendant(destination, of: original) {
@@ -487,8 +510,22 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                         return []
                     }
                 }
+            }
+
+            let destinationUndoSnapshot = pakFile?.documentSnapshot()
+            var sourceUndoSnapshot: PakFile?
+            if payload.isCut,
+               let source = payload.sourceModel,
+               source !== self {
+                sourceUndoSnapshot = source.pakFile?.documentSnapshot()
+            }
+
+            if payload.isCut,
+               let source = payload.sourceModel {
                 source.removeNodes(withIDs: Set(payload.originalIDs), from: source.pakFile?.root)
-                source.markDirty()
+                if source !== self {
+                    source.markDirty(undoing: sourceUndoSnapshot, actionName: "Move")
+                }
             }
 
             var inserted: [PakNode] = []
@@ -500,7 +537,10 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
 
             sortFolder(destination)
-            markDirty()
+            markDirty(
+                undoing: destinationUndoSnapshot,
+                actionName: payload.isCut ? "Move" : "Paste"
+            )
 
             if payload.isCut {
                 clipboard = nil
@@ -655,6 +695,8 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
+        guard isEditable else { return [] }
+        let undoSnapshot = pakFile?.documentSnapshot()
         var inserted: [PakNode] = []
         var failures: [String] = []
         var budget: PakImportBudget
@@ -677,7 +719,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
         if !inserted.isEmpty {
             sortFolder(folder)
-            markDirty()
+            markDirty(undoing: undoSnapshot, actionName: "Import")
         }
 
         if !failures.isEmpty {
@@ -804,55 +846,124 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             previewImageMisses.insert(node.id)
             return nil
         }
-        guard let data = extractData(for: node) else { return nil }
 
         let ext = (node.name as NSString).pathExtension.lowercased()
-        if Self.textThumbnailExtensions.contains(ext) {
-            requestTextThumbnail(for: node, data: data)
+        let hasCustomRenderer = Self.renderedQuickLookExtensions.contains(ext)
+        let nativeContentType = nativeThumbnailContentType(forExtension: ext)
+        guard hasCustomRenderer || nativeContentType != nil else {
+            previewImageMisses.insert(node.id)
+            return nil
+        }
+        if !hasCustomRenderer,
+           let nativeContentType,
+           !nativeContentType.conforms(to: .text),
+           node.fileSize > Self.maximumNativeThumbnailFileSize {
+            previewImageMisses.insert(node.id)
+            return nil
+        }
+        guard let data = extractData(for: node) else { return nil }
+
+        if hasCustomRenderer,
+           let preview = renderPreviewImage(fileName: node.name, data: data) {
+            previewImageCache[node.id] = preview
+            return preview
+        }
+
+        if let nativeContentType {
+            requestNativeThumbnail(
+                for: node,
+                data: data,
+                contentType: nativeContentType,
+                fileExtension: ext
+            )
             return nil
         }
 
-        let preview = renderPreviewImage(fileName: node.name, data: data)
-
-        if let preview {
-            previewImageCache[node.id] = preview
-        } else {
-            previewImageMisses.insert(node.id)
-        }
-
-        return preview
+        previewImageMisses.insert(node.id)
+        return nil
     }
 
-    private func requestTextThumbnail(for node: PakNode, data: Data) {
+    func systemIcon(for node: PakNode) -> NSImage {
+        if node.isFolder {
+            return NSWorkspace.shared.icon(for: .folder)
+        }
+
+        let ext = (node.name as NSString).pathExtension.lowercased()
+        let contentType = nativeThumbnailContentType(forExtension: ext)
+            ?? UTType(filenameExtension: ext)
+            ?? .data
+        return NSWorkspace.shared.icon(for: contentType)
+    }
+
+    private func nativeThumbnailContentType(forExtension ext: String) -> UTType? {
+        guard !ext.isEmpty else { return nil }
+        if let contentType = UTType(filenameExtension: ext) {
+            if contentType.conforms(to: .image) ||
+                contentType.conforms(to: .text) ||
+                contentType.conforms(to: .pdf) ||
+                contentType.conforms(to: .audiovisualContent) ||
+                contentType.conforms(to: .compositeContent) ||
+                contentType.conforms(to: .spreadsheet) ||
+                contentType.conforms(to: .presentation) ||
+                contentType.conforms(to: .threeDContent) {
+                return contentType
+            }
+        }
+        return Self.textQuickLookExtensions.contains(ext) ? .plainText : nil
+    }
+
+    private func requestNativeThumbnail(
+        for node: PakNode,
+        data: Data,
+        contentType: UTType,
+        fileExtension: String
+    ) {
+        let isText = contentType.conforms(to: .text)
+        guard isText || data.count <= Self.maximumNativeThumbnailFileSize else {
+            previewImageMisses.insert(node.id)
+            return
+        }
+
         let nodeID = node.id
         let version = pakFile?.version
-        let thumbnailData = Data(data.prefix(Self.maximumTextThumbnailBytes))
+        let thumbnailData = isText
+            ? Data(data.prefix(Self.maximumTextThumbnailBytes))
+            : data
 
         previewImageRequests[nodeID] = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            let fileManager = FileManager.default
-            let base = fileManager.temporaryDirectory
-                .appendingPathComponent("PakScape-Thumbnail-" + UUID().uuidString, isDirectory: true)
-
             do {
-                try fileManager.createDirectory(
-                    at: base,
-                    withIntermediateDirectories: false,
-                    attributes: [.posixPermissions: 0o700]
-                )
-                defer { try? fileManager.removeItem(at: base) }
+                let stagedURLs = try await Task.detached(priority: .utility) {
+                    let fileManager = FileManager.default
+                    let base = fileManager.temporaryDirectory
+                        .appendingPathComponent("PakScape-Thumbnail-" + UUID().uuidString, isDirectory: true)
+                    try fileManager.createDirectory(
+                        at: base,
+                        withIntermediateDirectories: false,
+                        attributes: [.posixPermissions: 0o700]
+                    )
 
-                let sourceURL = base.appendingPathComponent("preview.txt")
-                try thumbnailData.write(to: sourceURL, options: .atomic)
+                    do {
+                        let sourceURL = base.appendingPathComponent("preview.\(fileExtension)")
+                        try thumbnailData.write(to: sourceURL, options: .atomic)
+                        return (base: base, source: sourceURL)
+                    } catch {
+                        try? fileManager.removeItem(at: base)
+                        throw error
+                    }
+                }.value
+                defer { try? FileManager.default.removeItem(at: stagedURLs.base) }
+
+                try Task.checkCancellation()
 
                 let request = QLThumbnailGenerator.Request(
-                    fileAt: sourceURL,
+                    fileAt: stagedURLs.source,
                     size: CGSize(width: 128, height: 128),
                     scale: NSScreen.main?.backingScaleFactor ?? 2,
                     representationTypes: .thumbnail
                 )
-                request.contentType = .plainText
+                request.contentType = contentType
                 request.iconMode = true
 
                 let representation = try await QLThumbnailGenerator.shared
@@ -888,17 +999,16 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 ?? BspLevelPreviewRenderer.renderImage(data: data)
         } else if ext == "wad" {
             return WadPreviewRenderer.renderImage(fileName: fileName, data: data)
-        } else if Self.previewableImageExtensions.contains(ext) {
-            return NativeImagePreviewRenderer.renderImage(data: data)
         }
         return nil
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {
+        guard isEditable else { return }
         _ = pasteFileURLs(urls, into: folder)
     }
     func deleteSelectedFile() {
-        guard currentFolder != nil, let root = pakFile?.root else { return }
+        guard isEditable, currentFolder != nil, let root = pakFile?.root else { return }
 
         let idsToDelete: Set<PakNode.ID>
         if !selectedNodes.isEmpty {
@@ -913,11 +1023,12 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = selectedCount == 1 ? "Delete This Item?" : "Delete \(selectedCount) Items?"
-        alert.informativeText = "This removes the selection from the archive. This operation cannot be undone."
+        alert.informativeText = "This removes the selection from the archive. You can undo this operation."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        let undoSnapshot = pakFile?.documentSnapshot()
         if let audioPreviewNodeID, idsToDelete.contains(audioPreviewNodeID) {
             stopAudioPreview()
         }
@@ -925,24 +1036,26 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         removeNodes(withIDs: idsToDelete, from: root)
         selectedNodes = []
         selectedFile = nil
-        markDirty()
+        markDirty(undoing: undoSnapshot, actionName: "Delete")
     }
     
     var canCreateFolder: Bool {
-        pakFile != nil
+        isEditable && pakFile != nil
     }
     
     var canAddFiles: Bool {
-        pakFile != nil
+        isEditable && pakFile != nil
     }
 
     var canDeleteFile: Bool {
-        !selectedNodes.isEmpty || selectedFile != nil
+        isEditable && (!selectedNodes.isEmpty || selectedFile != nil)
     }
 
     @discardableResult
     func addFolder(in folder: PakNode?) -> PakNode? {
-        guard let target = folder ?? currentFolder ?? pakFile?.root else { return nil }
+        guard isEditable,
+              let target = folder ?? currentFolder ?? pakFile?.root else { return nil }
+        let undoSnapshot = pakFile?.documentSnapshot()
         target.children = target.children ?? []
 
         let baseName = "New Folder"
@@ -958,73 +1071,47 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let newNode = PakNode(name: candidate)
         target.children?.append(newNode)
         sortFolder(target)
-        markDirty()
+        markDirty(undoing: undoSnapshot, actionName: "New Folder")
         return newNode
     }
 
-    @discardableResult
-    func saveCurrentPakAs() -> Bool {
-        guard let pakFile = pakFile else { return false }
-
-        let save = NSSavePanel()
-        save.allowedContentTypes = PakDocument.writableContentTypes
-        save.nameFieldStringValue = pakFile.name
-        save.canCreateDirectories = true
-        save.isExtensionHidden = false
-
-        guard save.runModal() == .OK, let url = save.url else {
-            return false
-        }
-
-        guard write(pakFile: pakFile, to: url) else {
-            return false
-        }
-
-        documentURL = url
-        pakFile.name = url.lastPathComponent
-        return true
-    }
-
-    @discardableResult
-    func saveCurrentPak(promptForLocationIfNeeded: Bool = true) -> Bool {
-        guard let pakFile = pakFile else { return false }
-
-        if let url = documentURL {
-            return write(pakFile: pakFile, to: url)
-        }
-
-        guard promptForLocationIfNeeded else { return false }
-
-        return saveCurrentPakAs()
-    }
-
-    private func write(pakFile: PakFile, to url: URL) -> Bool {
-        do {
-            if url.pathExtension.lowercased() == "pk3" {
-                let data = try PakZipWriter.write(root: pakFile.root, originalData: pakFile.data)
-                try data.write(to: url, options: .atomic)
-            } else {
-                let result = try PakWriter.write(root: pakFile.root, originalData: pakFile.data)
-                try result.data.write(to: url, options: .atomic)
-                result.applyToNodes()
-                pakFile.data = result.data
-                pakFile.entries = result.entries
-            }
-            pakFile.name = url.lastPathComponent
-            pakFile.version = UUID()
-            hasUnsavedChanges = false
-            return true
-        } catch {
-            let alert = NSAlert(error: error)
-            alert.runModal()
-            return false
-        }
-    }
-    
-    func markDirty() {
+    private func markDirty(undoing snapshot: PakFile?, actionName: String) {
         pakFile?.version = UUID()
         objectWillChange.send()
-        hasUnsavedChanges = true
+
+        if let snapshot {
+            registerUndo(snapshot: snapshot, actionName: actionName)
+        }
+        if let pakFile {
+            documentDidChange?(pakFile)
+        }
+    }
+
+    private func registerUndo(snapshot: PakFile, actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            target.restoreDocument(from: snapshot, actionName: actionName)
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreDocument(from snapshot: PakFile, actionName: String) {
+        guard let redoSnapshot = pakFile?.documentSnapshot() else { return }
+        let currentFolderID = currentFolder?.id
+        let restoredPakFile = snapshot.documentSnapshot()
+        restoredPakFile.version = UUID()
+
+        stopAudioPreview()
+        pakFile = restoredPakFile
+        selectedNodes = []
+        selectedFile = nil
+        let restoredFolder = currentFolderID.flatMap {
+            findNode(with: $0, in: restoredPakFile.root)
+        }
+        resetNavigation(to: restoredFolder?.isFolder == true ? restoredFolder : restoredPakFile.root)
+        documentReplacementVersion = UUID()
+        registerUndo(snapshot: redoSnapshot, actionName: actionName)
+        documentDidChange?(restoredPakFile)
     }
     
     private func sortFolder(_ folder: PakNode) {

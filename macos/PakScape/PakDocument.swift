@@ -6,8 +6,12 @@ extension UTType {
     static let pk3Archive = UTType(importedAs: "com.timbergeron.PakScape.pk3")
 }
 
-struct PakDocument: FileDocument {
-    var pakFile: PakFile
+final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
+    struct Snapshot: @unchecked Sendable {
+        let pakFile: PakFile
+    }
+
+    @Published var pakFile: PakFile
 
     static var readableContentTypes: [UTType] {
         [UTType.pakArchive, UTType.pk3Archive]
@@ -38,7 +42,12 @@ struct PakDocument: FileDocument {
         }
     }
 
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    func snapshot(contentType: UTType) throws -> Snapshot {
+        Snapshot(pakFile: pakFile.documentSnapshot())
+    }
+
+    func fileWrapper(snapshot: Snapshot, configuration: WriteConfiguration) throws -> FileWrapper {
+        let pakFile = snapshot.pakFile
         let root = pakFile.root
         let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
         let ext = preferredExt ?? "pak"
@@ -49,5 +58,29 @@ struct PakDocument: FileDocument {
 
         let packResult = try PakWriter.write(root: root, originalData: pakFile.data)
         return FileWrapper(regularFileWithContents: packResult.data)
+    }
+}
+
+extension PakFile {
+    func documentSnapshot() -> PakFile {
+        func copyNode(_ node: PakNode) -> PakNode {
+            let copy = PakNode(name: node.name, entry: node.entry, id: node.id)
+            copy.localData = node.localData
+            if let children = node.children {
+                copy.children = children.map(copyNode)
+            } else {
+                copy.children = nil
+            }
+            return copy
+        }
+
+        let copy = PakFile(
+            name: name,
+            data: data,
+            entries: entries,
+            root: copyNode(root)
+        )
+        copy.version = version
+        return copy
     }
 }

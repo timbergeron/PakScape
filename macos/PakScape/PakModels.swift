@@ -17,13 +17,14 @@ final class PakNode: Identifiable, Hashable {
         hasher.combine(id)
     }
 
-    let id = UUID()
+    let id: UUID
     var name: String
     var children: [PakNode]? = []   // NOTE: optional array for OutlineGroup
     var entry: PakEntry?            // nil for folders
     var localData: Data?            // For newly added files or modified content
 
-    init(name: String, entry: PakEntry? = nil) {
+    init(name: String, entry: PakEntry? = nil, id: UUID = UUID()) {
+        self.id = id
         self.name = name
         self.entry = entry
     }

@@ -36,14 +36,14 @@ struct PakScapeApp: App {
     }
     
     var body: some Scene {
-        DocumentGroup(newDocument: PakDocument()) { file in
-            ContentView(document: file.$document, fileURL: file.fileURL)
+        DocumentGroup(newDocument: { PakDocument() }) { file in
+            ContentView(document: file.document, isEditable: file.isEditable)
+                .id(ObjectIdentifier(file.document))
         }
         .commands {
             PakAboutCommands()
             PakOpenCommands()
             PakNewCommands()
-            PakSaveCommands()
             PakEditCommands()
             PakGoCommands()
             PakViewCommands()
@@ -51,47 +51,6 @@ struct PakScapeApp: App {
 
         Settings {
             PreferencesView()
-        }
-    }
-}
-
-struct PakSaveCommands: Commands {
-    @FocusedValue(\.pakCommands) private var pakCommands
-    
-    var body: some Commands {
-        CommandGroup(replacing: .saveItem) {
-            Button {
-                pakCommands?.save()
-            } label: {
-                Label("Save", systemImage: "square.and.arrow.down")
-            }
-            .keyboardShortcut("S")
-            .disabled(!(pakCommands?.canSave ?? false))
-        }
-        CommandGroup(after: .saveItem) {
-            Button {
-                pakCommands?.saveAs()
-            } label: {
-                Label("Save As…", systemImage: "square.and.arrow.down.on.square")
-            }
-            .keyboardShortcut("S", modifiers: [.command, .shift])
-            .disabled(pakCommands == nil)
-
-            Divider()
-
-            Button {
-                NSApp.sendAction(#selector(NSWindow.performClose(_:)), to: nil, from: nil)
-            } label: {
-                Label("Close", systemImage: "xmark.circle")
-            }
-            .keyboardShortcut("W")
-
-            Button {
-                NSApp.windows.forEach { $0.performClose(nil) }
-            } label: {
-                Label("Close All", systemImage: "xmark.circle.fill")
-            }
-            .keyboardShortcut("W", modifiers: [.command, .option])
         }
     }
 }
@@ -105,13 +64,13 @@ struct PakEditCommands: Commands {
                 pakCommands?.cut()
             }
             .keyboardShortcut("X")
-            .disabled(!(pakCommands?.canCutCopy ?? false))
+            .disabled(!(pakCommands?.canCut ?? false))
 
             Button("Copy") {
                 pakCommands?.copy()
             }
             .keyboardShortcut("C")
-            .disabled(!(pakCommands?.canCutCopy ?? false))
+            .disabled(!(pakCommands?.canCopy ?? false))
 
             Button("Paste") {
                 _ = pakCommands?.paste()

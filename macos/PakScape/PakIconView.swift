@@ -128,17 +128,6 @@ fileprivate enum IconZoomLevel: Int {
         }
     }
 
-    var symbolPointSize: CGFloat {
-        switch self {
-        case .small:
-            return 32
-        case .medium:
-            return 48
-        case .large:
-            return 64
-        }
-    }
-
     var audioOverlayDimension: CGFloat {
         switch self {
         case .small:
@@ -292,6 +281,7 @@ struct PakIconView: NSViewRepresentable {
                 with: node,
                 zoomLevel: parent.zoomLevel,
                 previewImage: preview,
+                fallbackImage: parent.viewModel.systemIcon(for: node),
                 canPreviewAudio: parent.viewModel.canPreviewAudio(node),
                 audioPreviewState: parent.viewModel.audioPreviewState(for: node)
             )
@@ -373,6 +363,7 @@ struct PakIconView: NSViewRepresentable {
         }
 
         func renameFromSecondClick(at indexPath: IndexPath) {
+            guard parent.viewModel.isEditable else { return }
             cancelPendingRename()
             guard let collectionView = collectionView else { return }
 
@@ -399,6 +390,7 @@ struct PakIconView: NSViewRepresentable {
         }
 
         func renameFromEditCommand() {
+            guard parent.viewModel.isEditable else { return }
             cancelPendingRename()
             guard let collectionView = collectionView else { return }
 
@@ -532,12 +524,12 @@ struct PakIconView: NSViewRepresentable {
 
             let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
             cutItem.target = self
-            cutItem.isEnabled = parent.viewModel.canCutCopy
+            cutItem.isEnabled = parent.viewModel.canCut
             menu.addItem(cutItem)
 
             let copyItem = NSMenuItem(title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "")
             copyItem.target = self
-            copyItem.isEnabled = parent.viewModel.canCutCopy
+            copyItem.isEnabled = parent.viewModel.canCopy
             menu.addItem(copyItem)
 
             let pasteItem = NSMenuItem(title: "Paste", action: #selector(pasteIntoCurrentFolder(_:)), keyEquivalent: "")
@@ -562,6 +554,7 @@ struct PakIconView: NSViewRepresentable {
             let renameItem = NSMenuItem(title: "Rename", action: #selector(renameItem(_:)), keyEquivalent: "")
             renameItem.target = self
             renameItem.representedObject = indexPath
+            renameItem.isEnabled = parent.viewModel.isEditable
             menu.addItem(renameItem)
 
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteSelection(_:)), keyEquivalent: "")
@@ -601,6 +594,7 @@ struct PakIconView: NSViewRepresentable {
         }
 
         @objc private func renameItem(_ sender: NSMenuItem) {
+            guard parent.viewModel.isEditable else { return }
             guard let indexPath = sender.representedObject as? IndexPath,
                   let collectionView = collectionView,
                   let item = collectionView.item(at: indexPath) as? PakIconItem else { return }
@@ -875,6 +869,7 @@ final class PakIconItem: NSCollectionViewItem {
         with node: PakNode,
         zoomLevel: Int,
         previewImage: NSImage?,
+        fallbackImage: NSImage,
         canPreviewAudio: Bool,
         audioPreviewState: PakViewModel.AudioPreviewVisualState
     ) {
@@ -889,13 +884,7 @@ final class PakIconItem: NSCollectionViewItem {
         if let previewImage {
             iconView.image = previewImage
         } else {
-            let symbolName = node.isFolder ? "folder.fill" : "doc"
-            if let baseImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-                let config = NSImage.SymbolConfiguration(pointSize: level.symbolPointSize, weight: .regular)
-                iconView.image = baseImage.withSymbolConfiguration(config)
-            } else {
-                iconView.image = nil
-            }
+            iconView.image = fallbackImage
         }
         nameField.stringValue = node.name
         nameField.toolTip = node.name

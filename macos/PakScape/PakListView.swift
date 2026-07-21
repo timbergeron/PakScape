@@ -289,13 +289,10 @@ struct PakListView: NSViewRepresentable {
         }
 
         private func iconImage(for node: PakNode) -> NSImage? {
-            if node.isFolder {
-                return NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-            }
             if let preview = parent.viewModel.previewImage(for: node) {
                 return preview
             }
-            return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
+            return parent.viewModel.systemIcon(for: node)
         }
 
         private func commitRename(row: Int, newNameRaw: String, textField: NSTextField) {
@@ -377,6 +374,7 @@ struct PakListView: NSViewRepresentable {
         }
 
         private func beginRenaming(row: Int) {
+            guard parent.viewModel.isEditable else { return }
             guard let tableView else { return }
             let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
             guard nameColumn != -1 else { return }
@@ -407,7 +405,7 @@ struct PakListView: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
-            tableColumn?.identifier == nameColumnIdentifier
+            parent.viewModel.isEditable && tableColumn?.identifier == nameColumnIdentifier
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
@@ -439,6 +437,7 @@ struct PakListView: NSViewRepresentable {
         }
 
         func renameFromEditCommand() {
+            guard parent.viewModel.isEditable else { return }
             cancelPendingRename()
             guard let tableView = tableView else { return }
 
@@ -621,12 +620,12 @@ struct PakListView: NSViewRepresentable {
 
             let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
             cutItem.target = self
-            cutItem.isEnabled = parent.viewModel.canCutCopy
+            cutItem.isEnabled = parent.viewModel.canCut
             menu.addItem(cutItem)
 
             let copyItem = NSMenuItem(title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "")
             copyItem.target = self
-            copyItem.isEnabled = parent.viewModel.canCutCopy
+            copyItem.isEnabled = parent.viewModel.canCopy
             menu.addItem(copyItem)
 
             let pasteItem = NSMenuItem(title: "Paste", action: #selector(pasteIntoCurrentFolder(_:)), keyEquivalent: "")
@@ -651,6 +650,7 @@ struct PakListView: NSViewRepresentable {
             let renameItem = NSMenuItem(title: "Rename", action: #selector(renameFromMenu(_:)), keyEquivalent: "")
             renameItem.target = self
             renameItem.representedObject = row
+            renameItem.isEnabled = parent.viewModel.isEditable
             menu.addItem(renameItem)
 
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteSelection(_:)), keyEquivalent: "")
@@ -694,6 +694,7 @@ struct PakListView: NSViewRepresentable {
         }
 
         @objc private func renameFromMenu(_ sender: NSMenuItem) {
+            guard parent.viewModel.isEditable else { return }
             cancelPendingRename()
             guard let tableView = tableView else { return }
             
