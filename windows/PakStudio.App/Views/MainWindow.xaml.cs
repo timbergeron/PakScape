@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using PakStudio.App.ViewModels;
 
@@ -8,6 +9,9 @@ namespace PakStudio.App.Views;
 
 public partial class MainWindow : Window
 {
+    private const double FolderPaneCollapseThreshold = 120;
+    private const double FolderPaneReopenWidth = 220;
+
     private readonly MainWindowViewModel _viewModel;
     private PreviewWindow? _previewWindow;
     private bool _allowClose;
@@ -15,6 +19,8 @@ public partial class MainWindow : Window
     private string? _startupArchivePath;
     private Point? _dragStartPoint;
     private bool _isStartingDrag;
+    private bool _folderPaneWasCollapsedAtDragStart;
+    private double _lastExpandedFolderPaneWidth = 280;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -41,6 +47,53 @@ public partial class MainWindow : Window
         {
             _viewModel.SelectFolder(folder);
         }
+    }
+
+    private void FolderPaneToggle_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (FolderPaneColumn.ActualWidth < 1)
+        {
+            FolderPaneColumn.Width = new GridLength(
+                Math.Max(FolderPaneReopenWidth, _lastExpandedFolderPaneWidth));
+            return;
+        }
+
+        _lastExpandedFolderPaneWidth = Math.Max(
+            FolderPaneReopenWidth,
+            FolderPaneColumn.ActualWidth);
+        FolderPaneColumn.Width = new GridLength(0);
+    }
+
+    private void FolderSplitter_OnDragStarted(object sender, DragStartedEventArgs e)
+    {
+        _folderPaneWasCollapsedAtDragStart = FolderPaneColumn.ActualWidth < 1;
+    }
+
+    private void FolderSplitter_OnDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        var width = FolderPaneColumn.ActualWidth;
+        if (_folderPaneWasCollapsedAtDragStart)
+        {
+            if (width >= 1 && width < FolderPaneReopenWidth)
+            {
+                FolderPaneColumn.Width = new GridLength(FolderPaneReopenWidth);
+                _lastExpandedFolderPaneWidth = FolderPaneReopenWidth;
+            }
+            else if (width >= FolderPaneReopenWidth)
+            {
+                _lastExpandedFolderPaneWidth = width;
+            }
+        }
+        else if (width < FolderPaneCollapseThreshold)
+        {
+            FolderPaneColumn.Width = new GridLength(0);
+        }
+        else
+        {
+            _lastExpandedFolderPaneWidth = width;
+        }
+
+        _folderPaneWasCollapsedAtDragStart = false;
     }
 
     private void ItemList_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)

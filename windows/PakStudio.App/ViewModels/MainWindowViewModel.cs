@@ -105,6 +105,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (SetProperty(ref _document, value))
             {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(ArchiveDisplayName));
+                OnPropertyChanged(nameof(SearchPlaceholder));
                 OnPropertyChanged(nameof(CurrentFolderPath));
                 CommandManager.InvalidateRequerySuggested();
             }
@@ -172,6 +174,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             return $"{Document.DisplayName}{dirtyMarker} - PakScape";
         }
     }
+
+    public string ArchiveDisplayName => Document?.DisplayName ?? "PakScape";
+
+    public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
 
     public string StatusText
     {
@@ -490,6 +496,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             RecordRecentFile(path);
             RebuildFolderTree(_currentFolder ?? Document.Root);
             OnPropertyChanged(nameof(WindowTitle));
+            OnPropertyChanged(nameof(ArchiveDisplayName));
+            OnPropertyChanged(nameof(SearchPlaceholder));
             StatusText = $"Saved {Path.GetFileName(path)}";
             return true;
         }

@@ -42,9 +42,26 @@
 
     <Window.Resources>
         <helpers:BindingProxy x:Key="ViewModelProxy" Data="{Binding}" />
-        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <converters:ArchiveViewModeEqualsConverter x:Key="ArchiveViewModeEqualsConverter" />
         <converters:ArchiveViewModeToVisibilityConverter x:Key="ArchiveViewModeToVisibilityConverter" />
+
+        <Style x:Key="NavigationButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.35" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
 
         <ItemsPanelTemplate x:Key="WrapItemsPanel">
             <WrapPanel Orientation="Horizontal" />
@@ -218,14 +235,61 @@
     </Window.Resources>
 
     <DockPanel>
-        <Menu DockPanel.Dock="Top">
+        <Grid DockPanel.Dock="Top"
+              Height="44"
+              Margin="16,4,16,0"
+              Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0"
+                    Style="{StaticResource NavigationButtonStyle}"
+                    Click="FolderPaneToggle_OnClick"
+                    ToolTip="Show or hide folders">
+                <Grid Width="22" Height="18">
+                    <Border BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                            BorderThickness="1.5"
+                            CornerRadius="4" />
+                    <Border Width="1.5"
+                            Margin="7,1.5,0,1.5"
+                            HorizontalAlignment="Left"
+                            Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </Grid>
+            </Button>
+
+            <Button Grid.Column="1"
+                    Style="{StaticResource NavigationButtonStyle}"
+                    Command="{Binding BackCommand}"
+                    ToolTip="Back">
+                <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           FontSize="20"
+                           Text="&#xE72B;" />
+            </Button>
+
+            <Button Grid.Column="2"
+                    Style="{StaticResource NavigationButtonStyle}"
+                    Command="{Binding ForwardCommand}"
+                    ToolTip="Forward">
+                <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           FontSize="20"
+                           Text="&#xE72A;" />
+            </Button>
+
+            <Menu Grid.Column="3"
+                  VerticalAlignment="Center"
+                  Background="Transparent">
             <MenuItem Header="_File">
                 <MenuItem Header="New _PAK" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
                 <MenuItem Header="New P_K3" Command="{Binding NewPk3Command}" InputGestureText="Ctrl+Shift+N" />
                 <MenuItem Header="_Open..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O" />
                 <MenuItem Header="Open _Recent" ItemsSource="{Binding RecentFiles}">
                     <MenuItem.ItemContainerStyle>
-                        <Style TargetType="MenuItem">
+                        <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
                             <Setter Property="Header" Value="{Binding}" />
                             <Setter Property="ToolTip" Value="{Binding}" />
                             <Setter Property="Command"
@@ -291,23 +355,12 @@
             <MenuItem Header="_Help">
                 <MenuItem Header="_About" Command="{Binding AboutCommand}" />
             </MenuItem>
-        </Menu>
+            </Menu>
+        </Grid>
 
-        <StatusBar DockPanel.Dock="Bottom">
-            <StatusBarItem Content="{Binding StatusText}" />
-            <Separator />
-            <StatusBarItem Content="{Binding CurrentFolderPath}" />
-            <Separator />
-            <StatusBarItem Content="{Binding SelectionStatus}" />
-            <StatusBarItem HorizontalAlignment="Right"
-                           Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <ProgressBar Width="120" Height="8" IsIndeterminate="True" />
-            </StatusBarItem>
-        </StatusBar>
-
-        <Grid Margin="16">
+        <Grid Margin="16,4,16,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition x:Name="FolderPaneColumn" Width="280" />
                 <ColumnDefinition Width="6" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
@@ -317,7 +370,7 @@
                     Background="{DynamicResource PanelBackgroundBrush}"
                     BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
-                    CornerRadius="12">
+                    CornerRadius="12,12,0,0">
                 <TreeView x:Name="FolderTree"
                           ItemsSource="{Binding FolderRoots}"
                           SelectedItemChanged="FolderTree_OnSelectedItemChanged" />
@@ -327,36 +380,77 @@
                           Width="6"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="{DynamicResource SplitterBrush}" />
+                          Background="Transparent"
+                          DragCompleted="FolderSplitter_OnDragCompleted"
+                          DragStarted="FolderSplitter_OnDragStarted"
+                          ResizeBehavior="PreviousAndNext"
+                          ResizeDirection="Columns" />
 
             <Border Grid.Column="2"
                     Padding="12"
                     Background="{DynamicResource PanelBackgroundBrush}"
                     BorderBrush="{DynamicResource PanelBorderBrush}"
                     BorderThickness="1"
-                    CornerRadius="12">
+                    CornerRadius="12,12,0,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top"
                             Margin="0,0,0,10"
-                            Padding="8,6"
-                            Background="{DynamicResource AccentSoftBrush}"
-                            CornerRadius="7">
-                        <DockPanel>
-                            <Button DockPanel.Dock="Left"
-                                    Command="{Binding UpCommand}"
-                                    Content="Up"
-                                    Padding="8,2"
-                                    Margin="0,0,10,0" />
-                            <TextBox DockPanel.Dock="Right"
-                                     Width="220"
-                                     Padding="6,2"
-                                     VerticalContentAlignment="Center"
-                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="Search the current folder" />
-                            <TextBlock VerticalAlignment="Center"
+                            Padding="0,2">
+                        <Grid Height="32">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0"
+                                       Margin="0,0,16,0"
+                                       VerticalAlignment="Center"
                                        FontWeight="SemiBold"
-                                       Text="{Binding CurrentFolderPath}" />
-                        </DockPanel>
+                                       Text="{Binding ArchiveDisplayName}"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <Border Grid.Column="1"
+                                    Width="260"
+                                    Height="32"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource PanelBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <Grid>
+                                    <TextBox x:Name="ArchiveSearchBox"
+                                             Padding="10,4,34,4"
+                                             VerticalContentAlignment="Center"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="{Binding SearchPlaceholder}" />
+                                    <TextBlock Margin="11,0,34,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource MutedForegroundBrush}"
+                                               IsHitTestVisible="False"
+                                               Text="{Binding SearchPlaceholder}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=ArchiveSearchBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Margin="0,0,10,0"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               FontSize="14"
+                                               Foreground="{DynamicResource MutedForegroundBrush}"
+                                               IsHitTestVisible="False"
+                                               Text="&#xE721;" />
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </Border>
 
                     <Grid DockPanel.Dock="Top"
@@ -455,7 +549,7 @@
                             </ContextMenu>
                         </ListView.ContextMenu>
                         <ListView.Style>
-                            <Style TargetType="ListView">
+                            <Style TargetType="ListView" BasedOn="{StaticResource {x:Type ListView}}">
                                 <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
                                 <Setter Property="ItemTemplate" Value="{StaticResource DetailsTemplate}" />
                                 <Setter Property="BorderThickness" Value="0" />
