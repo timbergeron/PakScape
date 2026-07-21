@@ -73,7 +73,9 @@
                 SnapsToDevicePixels="True">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="18" SharedSizeGroup="MenuItemIconColumnGroup" />
+                    <ColumnDefinition x:Name="MenuIconColumn"
+                                      Width="18"
+                                      SharedSizeGroup="MenuItemIconColumnGroup" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup" />
                     <ColumnDefinition Width="18" />
@@ -113,6 +115,13 @@
             </Grid>
         </Border>
         <ControlTemplate.Triggers>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="Icon" Value="{x:Null}" />
+                    <Condition Property="IsCheckable" Value="False" />
+                </MultiTrigger.Conditions>
+                <Setter TargetName="MenuIconColumn" Property="Width" Value="0" />
+            </MultiTrigger>
             <Trigger Property="Icon" Value="{x:Null}">
                 <Setter TargetName="MenuIcon" Property="Visibility" Value="Collapsed" />
             </Trigger>
@@ -141,7 +150,9 @@
                     SnapsToDevicePixels="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="18" SharedSizeGroup="MenuItemIconColumnGroup" />
+                        <ColumnDefinition x:Name="MenuIconColumn"
+                                          Width="18"
+                                          SharedSizeGroup="MenuItemIconColumnGroup" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup" />
                         <ColumnDefinition Width="18" />
@@ -214,6 +225,13 @@
             </Popup>
         </Grid>
         <ControlTemplate.Triggers>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="Icon" Value="{x:Null}" />
+                    <Condition Property="IsCheckable" Value="False" />
+                </MultiTrigger.Conditions>
+                <Setter TargetName="MenuIconColumn" Property="Width" Value="0" />
+            </MultiTrigger>
             <Trigger Property="Icon" Value="{x:Null}">
                 <Setter TargetName="MenuIcon" Property="Visibility" Value="Collapsed" />
             </Trigger>
@@ -346,6 +364,45 @@
         <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonBorder"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBorder"
+                                    Property="Background"
+                                    Value="{DynamicResource MenuHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBorder"
+                                    Property="Background"
+                                    Value="{DynamicResource PanelBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsDefaulted" Value="True">
+                            <Setter TargetName="ButtonBorder"
+                                    Property="BorderBrush"
+                                    Value="{DynamicResource MutedForegroundBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="TextBox">
