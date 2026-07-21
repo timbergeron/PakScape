@@ -208,19 +208,20 @@ private final class AboutWindowPresenter {
     private var window: NSWindow?
 
     func show() {
-        let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow
+        let targetScreen = (NSApp.keyWindow ?? NSApp.mainWindow)?.screen ?? NSScreen.main
 
         if window == nil {
             window = makeWindow()
         }
 
         guard let window else { return }
+        centerWindow(window, on: targetScreen)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        DispatchQueue.main.async { [weak self, weak window, weak parentWindow] in
+        DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window else { return }
-            self.centerWindow(window, relativeTo: parentWindow)
+            self.centerWindow(window, on: targetScreen)
         }
     }
 
@@ -228,7 +229,7 @@ private final class AboutWindowPresenter {
         let hostingController = NSHostingController(rootView: AboutView())
         let window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 440, height: 360),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -244,26 +245,13 @@ private final class AboutWindowPresenter {
         return window
     }
 
-    private func centerWindow(_ window: NSWindow, relativeTo parent: NSWindow?) {
-        let frame = window.frame
-
-        if let parent {
-            let parentFrame = parent.frame
-            let origin = NSPoint(
-                x: parentFrame.midX - frame.size.width / 2,
-                y: parentFrame.midY - frame.size.height / 2
-            )
-            window.setFrame(NSRect(origin: origin, size: frame.size), display: true)
-            return
-        }
-
-        let targetScreen = window.screen ?? NSScreen.main
-
-        guard let screen = targetScreen else {
+    private func centerWindow(_ window: NSWindow, on screen: NSScreen?) {
+        guard let screen else {
             window.center()
             return
         }
 
+        let frame = window.frame
         let visibleFrame = screen.visibleFrame
         let origin = NSPoint(
             x: visibleFrame.midX - frame.size.width / 2,
@@ -319,6 +307,7 @@ private struct AboutView: View {
         .padding(.vertical, 24)
         .padding(.horizontal, 28)
         .frame(minWidth: 380, idealWidth: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
@@ -345,6 +334,7 @@ private final class LinkButton: NSButton {
         focusRingType = .none
 
         let color = NSColor(red: 54/255, green: 197/255, blue: 73/255, alpha: 1)
+        contentTintColor = color
         let attributed = NSAttributedString(
             string: title,
             attributes: [
