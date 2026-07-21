@@ -94,7 +94,7 @@ private final class PakListTableView: NSTableView {
 }
 
 struct PakListView: NSViewRepresentable {
-    @Binding var nodes: [PakNode]
+    var nodes: [PakNode]
     @Binding var selection: Set<PakNode.ID>
     @Binding var sortOrder: [KeyPathComparator<PakNode>]
     var viewModel: PakViewModel

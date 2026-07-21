@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var window: NSWindow?
     @State private var windowDelegate = PakWindowDelegate()
     @State private var iconZoomLevel: Int = 1
+    @State private var searchText = ""
 
     init(document: Binding<PakDocument>, fileURL: URL?) {
         self._document = document
@@ -92,6 +93,7 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
             }
         }
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search")
         .background(
             WindowAccessor { newWindow in
                 guard let newWindow else { return }
@@ -149,7 +151,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    let sortedChildren = (folder.children ?? []).sorted(using: sortOrder)
+                    let sortedChildren = filteredChildren(in: folder).sorted(using: sortOrder)
                     Group {
                         switch detailViewStyle {
                         case .list:
@@ -229,6 +231,15 @@ struct ContentView: View {
                 commitRename()
             }
         }
+        .onChange(of: searchText) { _, _ in
+            guard let folder = model.currentFolder else { return }
+            let visibleIDs = Set(filteredChildren(in: folder).map(\.id))
+            let visibleSelection = selectedFileIDs.intersection(visibleIDs)
+            updateSelection(ids: visibleSelection, in: folder)
+            if let renamingID = renamingNodeID, !visibleIDs.contains(renamingID) {
+                cancelRenaming()
+            }
+        }
         // Global shortcut for delete
         .onKeyPress(keys: ["d"]) { press in
             if press.modifiers.contains(.command) {
@@ -290,6 +301,17 @@ struct ContentView: View {
     private func selectionNodes(for ids: Set<PakNode.ID>, in folder: PakNode?) -> [PakNode] {
         guard let folder, !ids.isEmpty else { return [] }
         return (folder.children ?? []).filter { ids.contains($0.id) }
+    }
+
+    private func filteredChildren(in folder: PakNode) -> [PakNode] {
+        let children = folder.children ?? []
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return children }
+
+        return children.filter { node in
+            node.name.localizedCaseInsensitiveContains(query)
+                || node.fileType.localizedCaseInsensitiveContains(query)
+        }
     }
 
     private func handleIconSelection(for node: PakNode) {
@@ -383,17 +405,8 @@ struct ContentView: View {
     }
     @ViewBuilder
     private func listView(for folder: PakNode) -> some View {
-        let nodesBinding = Binding<[PakNode]>(
-            get: {
-                (folder.children ?? []).sorted(using: sortOrder)
-            },
-            set: { newValue in
-                folder.children = newValue
-            }
-        )
-
         PakListView(
-            nodes: nodesBinding,
+            nodes: filteredChildren(in: folder).sorted(using: sortOrder),
             selection: $selectedFileIDs,
             sortOrder: $sortOrder,
             viewModel: model,
