@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:converters="clr-namespace:PakStudio.App.Converters"
         xmlns:helpers="clr-namespace:PakStudio.App.Helpers"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:viewModels="clr-namespace:PakStudio.App.ViewModels"
         Title="{Binding WindowTitle}"
         Height="760"
@@ -11,6 +12,14 @@
         MinWidth="960"
         Closing="Window_OnClosing"
         Background="{DynamicResource WindowBackgroundBrush}">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="44"
+                            CornerRadius="0"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="6"
+                            UseAeroCaptionButtons="True" />
+    </shell:WindowChrome.WindowChrome>
+
     <Window.CommandBindings>
         <CommandBinding Command="{x:Static ApplicationCommands.Cut}"
                         CanExecute="Cut_CanExecute"
@@ -48,14 +57,24 @@
         <Style x:Key="NavigationButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Width" Value="36" />
-            <Setter Property="Height" Value="36" />
-            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,1,0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.35" />
@@ -237,9 +256,9 @@
     <DockPanel>
         <Grid DockPanel.Dock="Top"
               Height="44"
-              Margin="16,4,16,0"
               Background="Transparent">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -247,42 +266,53 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Button Grid.Column="0"
+            <Image Grid.Column="0"
+                   Width="20"
+                   Height="20"
+                   Margin="10,0,7,0"
+                   Source="/PakScape;component/Assets/PakScape.png"
+                   Stretch="Uniform" />
+
+            <Button Grid.Column="1"
                     Style="{StaticResource NavigationButtonStyle}"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
                     Click="FolderPaneToggle_OnClick"
                     ToolTip="Show or hide folders">
-                <Grid Width="22" Height="18">
+                <Grid Width="12" Height="10">
                     <Border BorderBrush="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                            BorderThickness="1.5"
-                            CornerRadius="4" />
-                    <Border Width="1.5"
-                            Margin="7,1.5,0,1.5"
+                            BorderThickness="1"
+                            CornerRadius="2" />
+                    <Border Width="1"
+                            Margin="4,1,0,1"
                             HorizontalAlignment="Left"
                             Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                 </Grid>
             </Button>
 
-            <Button Grid.Column="1"
+            <Button Grid.Column="2"
                     Style="{StaticResource NavigationButtonStyle}"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
                     Command="{Binding BackCommand}"
                     ToolTip="Back">
                 <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                           FontSize="20"
+                           FontSize="11"
                            Text="&#xE72B;" />
             </Button>
 
-            <Button Grid.Column="2"
+            <Button Grid.Column="3"
                     Style="{StaticResource NavigationButtonStyle}"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
                     Command="{Binding ForwardCommand}"
                     ToolTip="Forward">
                 <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                           FontSize="20"
+                           FontSize="11"
                            Text="&#xE72A;" />
             </Button>
 
-            <Menu Grid.Column="3"
+            <Menu Grid.Column="4"
                   VerticalAlignment="Center"
-                  Background="Transparent">
+                  Background="Transparent"
+                  shell:WindowChrome.IsHitTestVisibleInChrome="True">
             <MenuItem Header="_File">
                 <MenuItem Header="New _PAK" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
                 <MenuItem Header="New P_K3" Command="{Binding NewPk3Command}" InputGestureText="Ctrl+Shift+N" />
@@ -358,7 +388,7 @@
             </Menu>
         </Grid>
 
-        <Grid Margin="16,4,16,0">
+        <Grid Margin="0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="FolderPaneColumn" Width="280" />
                 <ColumnDefinition Width="6" />
@@ -367,10 +397,9 @@
 
             <Border Grid.Column="0"
                     Padding="8"
-                    Background="{DynamicResource PanelBackgroundBrush}"
-                    BorderBrush="{DynamicResource PanelBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12,12,0,0">
+                    Background="{DynamicResource WindowBackgroundBrush}"
+                    BorderThickness="0"
+                    CornerRadius="0">
                 <TreeView x:Name="FolderTree"
                           ItemsSource="{Binding FolderRoots}"
                           SelectedItemChanged="FolderTree_OnSelectedItemChanged" />
@@ -390,8 +419,8 @@
                     Padding="12"
                     Background="{DynamicResource PanelBackgroundBrush}"
                     BorderBrush="{DynamicResource PanelBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12,12,0,0">
+                    BorderThickness="1,1,0,0"
+                    CornerRadius="12,0,0,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top"
                             Margin="0,0,0,10"

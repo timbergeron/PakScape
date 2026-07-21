@@ -5,7 +5,7 @@
     <ControlTemplate x:Key="TopLevelMenuHeaderTemplate" TargetType="MenuItem">
         <Grid>
             <Border x:Name="MenuHeaderBorder"
-                    Margin="2,3"
+                    Margin="0,3"
                     Padding="{TemplateBinding Padding}"
                     Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
@@ -31,7 +31,9 @@
                         BorderBrush="{DynamicResource PanelBorderBrush}"
                         BorderThickness="1"
                         SnapsToDevicePixels="True">
-                    <ScrollViewer CanContentScroll="True">
+                    <ScrollViewer CanContentScroll="True"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Disabled">
                         <ItemsPresenter Grid.IsSharedSizeScope="True"
                                         KeyboardNavigation.DirectionalNavigation="Cycle"
                                         KeyboardNavigation.TabNavigation="Cycle"
@@ -200,7 +202,9 @@
                         BorderBrush="{DynamicResource PanelBorderBrush}"
                         BorderThickness="1"
                         SnapsToDevicePixels="True">
-                    <ScrollViewer CanContentScroll="True">
+                    <ScrollViewer CanContentScroll="True"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Disabled">
                         <ItemsPresenter Grid.IsSharedSizeScope="True"
                                         KeyboardNavigation.DirectionalNavigation="Cycle"
                                         KeyboardNavigation.TabNavigation="Cycle"
@@ -274,7 +278,7 @@
         <Style.Triggers>
             <Trigger Property="Role" Value="TopLevelHeader">
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Padding" Value="14,5" />
+                <Setter Property="Padding" Value="8,5" />
                 <Setter Property="Template" Value="{StaticResource TopLevelMenuHeaderTemplate}" />
             </Trigger>
             <Trigger Property="Role" Value="SubmenuHeader">
@@ -300,7 +304,9 @@
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             SnapsToDevicePixels="True">
-                        <ScrollViewer CanContentScroll="True">
+                        <ScrollViewer CanContentScroll="True"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Disabled">
                             <ItemsPresenter Grid.IsSharedSizeScope="True"
                                             KeyboardNavigation.DirectionalNavigation="Cycle"
                                             KeyboardNavigation.TabNavigation="Cycle"
