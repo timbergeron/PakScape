@@ -32,7 +32,9 @@ final class PakNode: Identifiable, Hashable {
     var isFolder: Bool { entry == nil && localData == nil }
 
     var folderChildren: [PakNode]? {
-        children?.filter { $0.isFolder }
+        guard let children else { return nil }
+        let folders = children.filter(\.isFolder)
+        return folders.isEmpty ? nil : folders
     }
 
     var fileSize: Int {

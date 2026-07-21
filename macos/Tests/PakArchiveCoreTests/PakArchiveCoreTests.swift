@@ -3,6 +3,20 @@ import XCTest
 @testable import PakArchiveCore
 
 final class PakArchiveCoreTests: XCTestCase {
+    func testFolderChildrenOnlyMarksFoldersWithSubfoldersAsExpandable() {
+        let folder = PakNode(name: "maps")
+        let file = PakNode(name: "start.bsp")
+        file.localData = Data([0x01])
+        folder.children?.append(file)
+
+        XCTAssertNil(folder.folderChildren)
+
+        let subfolder = PakNode(name: "episode1")
+        folder.children?.append(subfolder)
+
+        XCTAssertEqual(folder.folderChildren, [subfolder])
+    }
+
     func testPakWriterAndLoaderRoundTrip() throws {
         let root = PakNode(name: "/")
         let maps = PakNode(name: "maps")
