@@ -99,6 +99,9 @@
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource MenuHoverBrush}" />
                         </Trigger>
+                        <DataTrigger Binding="{Binding Folder.Parent}" Value="{x:Null}">
+                            <Setter TargetName="RowBackground" Property="Background" Value="Transparent" />
+                        </DataTrigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
                         </Trigger>
