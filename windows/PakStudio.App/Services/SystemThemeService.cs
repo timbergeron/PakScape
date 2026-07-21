@@ -97,8 +97,10 @@ internal sealed class SystemThemeService : IDisposable
         _application.Resources[SystemColors.ControlTextBrushKey] = ThemeBrush("TextForegroundBrush");
         _application.Resources[SystemColors.MenuBrushKey] = ThemeBrush("PanelBackgroundBrush");
         _application.Resources[SystemColors.MenuTextBrushKey] = ThemeBrush("TextForegroundBrush");
-        _application.Resources[SystemColors.HighlightBrushKey] = ThemeBrush("AccentSoftBrush");
+        _application.Resources[SystemColors.HighlightBrushKey] = ThemeBrush("MenuHoverBrush");
         _application.Resources[SystemColors.HighlightTextBrushKey] = ThemeBrush("TextForegroundBrush");
+        _application.Resources[SystemColors.InactiveSelectionHighlightBrushKey] = ThemeBrush("MenuHoverBrush");
+        _application.Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = ThemeBrush("TextForegroundBrush");
         _application.Resources[SystemColors.GrayTextBrushKey] = ThemeBrush("MutedForegroundBrush");
         _application.Resources[SystemColors.ControlDarkBrushKey] = ThemeBrush("PanelBorderBrush");
     }

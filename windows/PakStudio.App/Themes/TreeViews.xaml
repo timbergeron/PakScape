@@ -55,7 +55,7 @@
                                                   Width="5"
                                                   Height="9"
                                                   Data="M 0,0 L 5,4.5 L 0,9 Z"
-                                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TreeViewItem}}"
+                                                  Fill="{DynamicResource MutedForegroundBrush}"
                                                   HorizontalAlignment="Center"
                                                   RenderTransformOrigin="0.5,0.5"
                                                   VerticalAlignment="Center" />
@@ -94,10 +94,10 @@
                             <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource PanelBorderBrush}" />
+                            <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource MenuHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                            <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource MenuHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />

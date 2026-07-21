@@ -11,10 +11,8 @@
     <SolidColorBrush x:Key="PanelBorderBrush" Color="{StaticResource PanelBorderColor}" />
     <SolidColorBrush x:Key="TextForegroundBrush" Color="{StaticResource TextForegroundColor}" />
     <SolidColorBrush x:Key="MutedForegroundBrush" Color="{StaticResource MutedForegroundColor}" />
-    <SolidColorBrush x:Key="AccentBrush"
-                     Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
-    <SolidColorBrush x:Key="AccentSoftBrush"
-                     Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}"
-                     Opacity="0.24" />
     <SolidColorBrush x:Key="MenuHoverBrush" Color="#14FFFFFF" />
+    <SolidColorBrush x:Key="MenuDividerBrush" Color="#20FFFFFF" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#FF4A4A4A" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#FF5A5A5A" />
 </ResourceDictionary>

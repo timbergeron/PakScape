@@ -65,7 +65,7 @@
 
     <ControlTemplate x:Key="SubmenuItemTemplate" TargetType="MenuItem">
         <Border x:Name="MenuItemBorder"
-                Margin="2,1"
+                Margin="1,1"
                 Background="{TemplateBinding Background}"
                 BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="{TemplateBinding BorderThickness}"
@@ -73,7 +73,7 @@
                 SnapsToDevicePixels="True">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="26" SharedSizeGroup="MenuItemIconColumnGroup" />
+                    <ColumnDefinition Width="18" SharedSizeGroup="MenuItemIconColumnGroup" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup" />
                     <ColumnDefinition Width="18" />
@@ -83,7 +83,7 @@
                                   Grid.Column="0"
                                   Width="16"
                                   Height="16"
-                                  Margin="5,0"
+                                  Margin="1,0"
                                   ContentSource="Icon"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center" />
@@ -94,13 +94,13 @@
                       Data="M 0,4 L 3,7 L 9,0"
                       FlowDirection="LeftToRight"
                       HorizontalAlignment="Center"
-                      Stroke="{TemplateBinding Foreground}"
+                      Stroke="{DynamicResource MutedForegroundBrush}"
                       StrokeThickness="1.5"
                       StrokeStartLineCap="Square"
                       StrokeEndLineCap="Square"
                       Visibility="Collapsed" />
                 <ContentPresenter Grid.Column="1"
-                                  Margin="8,4,14,4"
+                                  Margin="3,4,12,4"
                                   ContentSource="Header"
                                   HorizontalAlignment="Left"
                                   RecognizesAccessKey="True"
@@ -133,7 +133,7 @@
     <ControlTemplate x:Key="SubmenuHeaderTemplate" TargetType="MenuItem">
         <Grid>
             <Border x:Name="MenuItemBorder"
-                    Margin="2,1"
+                    Margin="1,1"
                     Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
@@ -141,7 +141,7 @@
                     SnapsToDevicePixels="True">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="26" SharedSizeGroup="MenuItemIconColumnGroup" />
+                        <ColumnDefinition Width="18" SharedSizeGroup="MenuItemIconColumnGroup" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup" />
                         <ColumnDefinition Width="18" />
@@ -151,7 +151,7 @@
                                       Grid.Column="0"
                                       Width="16"
                                       Height="16"
-                                      Margin="5,0"
+                                      Margin="1,0"
                                       ContentSource="Icon"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center" />
@@ -162,13 +162,13 @@
                           Data="M 0,4 L 3,7 L 9,0"
                           FlowDirection="LeftToRight"
                           HorizontalAlignment="Center"
-                          Stroke="{TemplateBinding Foreground}"
+                          Stroke="{DynamicResource MutedForegroundBrush}"
                           StrokeThickness="1.5"
                           StrokeStartLineCap="Square"
                           StrokeEndLineCap="Square"
                           Visibility="Collapsed" />
                     <ContentPresenter Grid.Column="1"
-                                      Margin="8,4,14,4"
+                                      Margin="3,4,12,4"
                                       ContentSource="Header"
                                       HorizontalAlignment="Left"
                                       RecognizesAccessKey="True"
@@ -182,7 +182,7 @@
                           Width="4"
                           Height="8"
                           Data="M 0,0 L 4,4 L 0,8 Z"
-                          Fill="{TemplateBinding Foreground}"
+                          Fill="{DynamicResource MutedForegroundBrush}"
                           HorizontalAlignment="Center"
                           VerticalAlignment="Center" />
                 </Grid>
@@ -238,6 +238,101 @@
         </ControlTemplate.Triggers>
     </ControlTemplate>
 
+    <Style x:Key="ScrollBarPageButtonStyle" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ScrollBarThumbStyle" TargetType="Thumb">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="ThumbBackground"
+                            Margin="2"
+                            Background="{DynamicResource ScrollBarThumbBrush}"
+                            CornerRadius="4" />
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ThumbBackground"
+                                    Property="Background"
+                                    Value="{DynamicResource ScrollBarThumbHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="ThumbBackground"
+                                    Property="Background"
+                                    Value="{DynamicResource ScrollBarThumbHoverBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <ControlTemplate x:Key="VerticalScrollBarTemplate" TargetType="ScrollBar">
+        <Grid Width="12" Background="Transparent">
+            <Track x:Name="PART_Track"
+                   IsDirectionReversed="True"
+                   Orientation="Vertical">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
+                                  Style="{StaticResource ScrollBarPageButtonStyle}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb MinHeight="24"
+                           Style="{StaticResource ScrollBarThumbStyle}" />
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
+                                  Style="{StaticResource ScrollBarPageButtonStyle}" />
+                </Track.IncreaseRepeatButton>
+            </Track>
+        </Grid>
+    </ControlTemplate>
+
+    <ControlTemplate x:Key="HorizontalScrollBarTemplate" TargetType="ScrollBar">
+        <Grid Height="12" Background="Transparent">
+            <Track x:Name="PART_Track"
+                   IsDirectionReversed="False"
+                   Orientation="Horizontal">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Command="{x:Static ScrollBar.PageLeftCommand}"
+                                  Style="{StaticResource ScrollBarPageButtonStyle}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb MinWidth="24"
+                           Style="{StaticResource ScrollBarThumbStyle}" />
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Command="{x:Static ScrollBar.PageRightCommand}"
+                                  Style="{StaticResource ScrollBarPageButtonStyle}" />
+                </Track.IncreaseRepeatButton>
+            </Track>
+        </Grid>
+    </ControlTemplate>
+
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="12" />
+        <Setter Property="MinWidth" Value="12" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Template" Value="{StaticResource VerticalScrollBarTemplate}" />
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Height" Value="12" />
+                <Setter Property="MinHeight" Value="12" />
+                <Setter Property="Template" Value="{StaticResource HorizontalScrollBarTemplate}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <Style TargetType="Window">
         <Setter Property="Icon" Value="/PakScape;component/Assets/PakScape.ico" />
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
@@ -258,7 +353,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
         <Setter Property="CaretBrush" Value="{DynamicResource TextForegroundBrush}" />
-        <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource MenuHoverBrush}" />
     </Style>
 
     <Style TargetType="Menu">
@@ -278,7 +373,7 @@
         <Style.Triggers>
             <Trigger Property="Role" Value="TopLevelHeader">
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Padding" Value="8,5" />
+                <Setter Property="Padding" Value="6,5" />
                 <Setter Property="Template" Value="{StaticResource TopLevelMenuHeaderTemplate}" />
             </Trigger>
             <Trigger Property="Role" Value="SubmenuHeader">
@@ -288,6 +383,22 @@
                 <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
             </Trigger>
         </Style.Triggers>
+    </Style>
+
+    <Style TargetType="Separator">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Margin" Value="8,5" />
+        <Setter Property="Background" Value="{DynamicResource MenuDividerBrush}" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1"
+                            Background="{TemplateBinding Background}"
+                            SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="ContextMenu">
