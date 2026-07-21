@@ -5,10 +5,52 @@
         <Setter Property="BorderThickness" Value="0" />
     </Style>
 
-    <Style TargetType="ListViewItem">
+    <ControlTemplate x:Key="ListViewItemTemplate" TargetType="ListViewItem">
+        <Border Background="{TemplateBinding Background}"
+                CornerRadius="4"
+                SnapsToDevicePixels="True">
+            <ContentPresenter Margin="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+    </ControlTemplate>
+
+    <Style x:Key="ListViewItemBaseStyle" TargetType="ListViewItem">
         <Setter Property="Padding" Value="4" />
         <Setter Property="Margin" Value="0,0,0,2" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="ToolTip" Value="{Binding Node.FullPath}" />
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template" Value="{StaticResource ListViewItemTemplate}" />
     </Style>
+
+    <Style x:Key="FullRowListViewItemStyle"
+           TargetType="ListViewItem"
+           BasedOn="{StaticResource ListViewItemBaseStyle}">
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="IconListViewItemStyle"
+           TargetType="ListViewItem"
+           BasedOn="{StaticResource ListViewItemBaseStyle}">
+        <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+
+    <Style TargetType="ListViewItem"
+           BasedOn="{StaticResource FullRowListViewItemStyle}" />
 </ResourceDictionary>

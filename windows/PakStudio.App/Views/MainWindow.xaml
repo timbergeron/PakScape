@@ -138,7 +138,7 @@
                                   ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal">
                 <TextBlock FontFamily="Segoe MDL2 Assets"
-                           Foreground="{DynamicResource AccentBrush}"
+                           Foreground="{DynamicResource MutedForegroundBrush}"
                            Margin="0,0,8,0"
                            Text="&#xE8B7;" />
                 <TextBlock Text="{Binding DisplayName}" />
@@ -165,7 +165,7 @@
                                    FontSize="42"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   Foreground="{DynamicResource AccentBrush}"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
                                    Text="{Binding IconGlyph}" />
                     </Grid>
                     <TextBlock Margin="0,10,0,0"
@@ -183,6 +183,12 @@
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
                     <Setter TargetName="LargeIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}}"
+                             Value="True">
+                    <Setter TargetName="LargeIconGlyph"
+                            Property="Foreground"
+                            Value="{DynamicResource TextForegroundBrush}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -206,7 +212,7 @@
                                    FontSize="18"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   Foreground="{DynamicResource AccentBrush}"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
                                    Text="{Binding IconGlyph}" />
                     </Grid>
                     <StackPanel Margin="8,0,0,0">
@@ -220,6 +226,12 @@
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
                     <Setter TargetName="SmallIconGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}}"
+                             Value="True">
+                    <Setter TargetName="SmallIconGlyph"
+                            Property="Foreground"
+                            Value="{DynamicResource TextForegroundBrush}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -239,7 +251,7 @@
                                FontFamily="Segoe MDL2 Assets"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
-                               Foreground="{DynamicResource AccentBrush}"
+                               Foreground="{DynamicResource MutedForegroundBrush}"
                                Text="{Binding IconGlyph}" />
                 </Grid>
                 <TextBlock Grid.Column="1"
@@ -274,7 +286,7 @@
                                    FontFamily="Segoe MDL2 Assets"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   Foreground="{DynamicResource AccentBrush}"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
                                    Text="{Binding IconGlyph}" />
                     </Grid>
                     <TextBlock Text="{Binding Name}" />
@@ -685,6 +697,8 @@
                               PreviewKeyDown="ItemList_OnPreviewKeyDown"
                               PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
                               ScrollViewer.CanContentScroll="True"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ContextMenu>
@@ -714,27 +728,32 @@
                             <Style TargetType="ListView" BasedOn="{StaticResource {x:Type ListView}}">
                                 <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
                                 <Setter Property="ItemTemplate" Value="{StaticResource DetailsTemplate}" />
+                                <Setter Property="ItemContainerStyle" Value="{StaticResource FullRowListViewItemStyle}" />
                                 <Setter Property="BorderThickness" Value="0" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
                                                  Value="LargeIcons">
                                         <Setter Property="ItemsPanel" Value="{StaticResource WrapItemsPanel}" />
                                         <Setter Property="ItemTemplate" Value="{StaticResource LargeIconTemplate}" />
+                                        <Setter Property="ItemContainerStyle" Value="{StaticResource IconListViewItemStyle}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
                                                  Value="SmallIcons">
                                         <Setter Property="ItemsPanel" Value="{StaticResource WrapItemsPanel}" />
                                         <Setter Property="ItemTemplate" Value="{StaticResource SmallIconTemplate}" />
+                                        <Setter Property="ItemContainerStyle" Value="{StaticResource IconListViewItemStyle}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
                                                  Value="List">
                                         <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
                                         <Setter Property="ItemTemplate" Value="{StaticResource ListTemplate}" />
+                                        <Setter Property="ItemContainerStyle" Value="{StaticResource FullRowListViewItemStyle}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding DataContext.ActiveViewMode, RelativeSource={RelativeSource AncestorType=Window}}"
                                                  Value="Details">
                                         <Setter Property="ItemsPanel" Value="{StaticResource LinearItemsPanel}" />
                                         <Setter Property="ItemTemplate" Value="{StaticResource DetailsTemplate}" />
+                                        <Setter Property="ItemContainerStyle" Value="{StaticResource FullRowListViewItemStyle}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
