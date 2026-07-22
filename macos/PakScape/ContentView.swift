@@ -8,6 +8,17 @@ fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+private let sidebarBackgroundColor = NSColor(
+    name: NSColor.Name("PakScapeSidebarBackground")
+) { appearance in
+    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    if isDark {
+        // Match the current macOS Finder sidebar surface (RGB 20, 20, 20).
+        return NSColor(srgbRed: 20 / 255, green: 20 / 255, blue: 20 / 255, alpha: 1)
+    }
+    return NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 246 / 255, alpha: 1)
+}
+
 struct ContentView: View {
     let document: PakDocument
     let isEditable: Bool
@@ -22,6 +33,8 @@ struct ContentView: View {
     @State private var window: NSWindow?
     @State private var iconZoomLevel: Int = 1
     @State private var searchText = ""
+    @State private var isSearchPresented = false
+    @State private var isSearchFieldFocused = false
     @State private var itemInfo: PakItemInfo?
 
     init(document: PakDocument, isEditable: Bool) {
@@ -38,11 +51,6 @@ struct ContentView: View {
         } detail: {
             detailView
         }
-        .searchable(
-            text: $searchText,
-            placement: .toolbar,
-            prompt: "Search all paths"
-        )
         .sheet(item: $itemInfo) { info in
             PakItemInfoView(info: info)
         }
@@ -86,16 +94,69 @@ struct ContentView: View {
                 .controlSize(.regular)
                 .buttonStyle(.borderless)
             }
+
+            ToolbarItem(placement: .primaryAction) {
+                if isSearchPresented {
+                    ToolbarSearchField(
+                        text: $searchText,
+                        isFocused: $isSearchFieldFocused,
+                        onCancel: closeSearch
+                    )
+                    .frame(width: 260)
+                    .onChange(of: isSearchFieldFocused) { _, isFocused in
+                        if !isFocused && searchText.isEmpty {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                isSearchPresented = false
+                            }
+                        }
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    Button {
+                        presentSearch()
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .help("Search")
+                    .keyboardShortcut("f", modifiers: [.command])
+                }
+            }
         }
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .background(
             WindowAccessor { newWindow in
                 window = newWindow
+                configureWindowAppearance(newWindow)
             }
         )
     }
 
+    private func configureWindowAppearance(_ window: NSWindow?) {
+        guard let window else { return }
+        // The Dock automatically builds a document-window section from the
+        // Window menu. Our custom Dock menu already provides recent PAKs.
+        window.isExcludedFromWindowsMenu = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
+    }
+
     private func closeSearch() {
         searchText = ""
+        isSearchFieldFocused = false
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isSearchPresented = false
+        }
+    }
+
+    private func presentSearch() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isSearchPresented = true
+        }
+        DispatchQueue.main.async {
+            isSearchFieldFocused = true
+        }
     }
 
     private var sidebar: some View {
@@ -116,6 +177,11 @@ struct ContentView: View {
                 Text("Open a Quake .pak file (File → Open PAK…)")
                     .foregroundStyle(.secondary)
             }
+        }
+        .scrollContentBackground(.hidden)
+        .background {
+            Color(nsColor: sidebarBackgroundColor)
+                .ignoresSafeArea(.container, edges: .top)
         }
         .frame(minWidth: 200)
     }
@@ -531,6 +597,73 @@ private struct WindowAccessor: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             callback(nsView.window)
+        }
+    }
+}
+
+private struct ToolbarSearchField: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let searchField = NSSearchField()
+        searchField.placeholderString = "Search all paths"
+        searchField.controlSize = .large
+        searchField.delegate = context.coordinator
+        searchField.setAccessibilityLabel("Search all paths")
+        return searchField
+    }
+
+    func updateNSView(_ searchField: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+
+        if searchField.stringValue != text {
+            searchField.stringValue = text
+        }
+
+        guard isFocused else { return }
+        DispatchQueue.main.async {
+            guard let window = searchField.window,
+                  window.firstResponder !== searchField.currentEditor() else { return }
+            window.makeFirstResponder(searchField)
+        }
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: ToolbarSearchField
+
+        init(parent: ToolbarSearchField) {
+            self.parent = parent
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            parent.isFocused = true
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let searchField = notification.object as? NSSearchField else { return }
+            parent.text = searchField.stringValue
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            parent.isFocused = false
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else {
+                return false
+            }
+            parent.onCancel()
+            return true
         }
     }
 }
