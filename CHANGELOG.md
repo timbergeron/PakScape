@@ -16,6 +16,7 @@ Notable user-visible changes are documented here.
 - Self-contained x86-64/ARM64 Debian packaging with XDG desktop and MIME integration.
 - Linux-specific regression tests and Ubuntu 24.04 CI coverage.
 - Finder-style Spacebar Quick Preview on macOS, Windows, and Linux, including text, common image, and Quake asset previews.
+- Native audio controls in Quick Preview on Windows and Linux for common music and sound formats.
 - Native Finder-style inline thumbnails for common files and content-aware fallback icons on macOS.
 - A system-provided macOS toolbar search field backed by PakScape's archive-wide matching.
 - Standard Undo and Redo support for macOS archive edits.
@@ -30,6 +31,7 @@ Notable user-visible changes are documented here.
 - The Windows edition now supports archive editing, import/export, recent files, navigation, keyboard shortcuts, and unsaved-change prompts.
 - Windows tests use the maintained xUnit.net v3 packages.
 - Linux builds use .NET 10 LTS and Avalonia 12 with warnings-as-errors and recommended analyzer rules.
+- Windows and Linux now share the same modern archive shell, including integrated navigation, collapsible folder panes, contextual search, full-row selection, path tooltips, and light/dark styling.
 - macOS sources, tests, project metadata, and documentation now live under `macos/`.
 - Generated Xcode `DerivedData` is no longer tracked in the repository.
 - macOS document saving, Save As, edited-window state, and close confirmation are now managed by SwiftUI's native document lifecycle.

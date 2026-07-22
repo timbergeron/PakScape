@@ -45,7 +45,7 @@ public partial class App : Application, IDisposable
             var startupPath = desktop.Args?
                 .FirstOrDefault(argument => argument.Length == 0 || argument[0] != '-');
 
-            window.Configure(viewModel, startupPath);
+            window.Configure(viewModel, _fileTransferService, startupPath);
             desktop.MainWindow = window;
             desktop.Exit += (_, _) => Dispose();
         }

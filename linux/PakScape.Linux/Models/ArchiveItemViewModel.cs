@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PakStudio.Core.Nodes;
+using PakStudio.Core.Preview;
 
 namespace PakScape.Linux.Models;
 
@@ -64,7 +65,7 @@ public sealed class ArchiveItemViewModel : ObservableObject
     {
         ArchiveFolderNode => "📁",
         ArchiveFileNode file when file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase) => "🗺",
-        ArchiveFileNode file when file.Extension.Equals(".wav", StringComparison.OrdinalIgnoreCase) => "🔊",
+        ArchiveFileNode file when ArchivePreviewBuilder.SupportsAudioExtension(file.Extension) => "🔊",
         ArchiveFileNode file when IsImageExtension(file.Extension) => "🖼",
         _ => "📄",
     };
@@ -72,6 +73,8 @@ public sealed class ArchiveItemViewModel : ObservableObject
     public string Name => Node.Name;
 
     public bool IsFolder => Node is ArchiveFolderNode;
+
+    public bool IsFile => Node is ArchiveFileNode;
 
     public string TypeText => Node switch
     {

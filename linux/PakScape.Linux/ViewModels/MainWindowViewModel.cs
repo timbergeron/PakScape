@@ -65,6 +65,8 @@ public partial class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _document, value))
             {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(ArchiveDisplayName));
+                OnPropertyChanged(nameof(SearchPlaceholder));
                 OnPropertyChanged(nameof(CurrentFolderPath));
             }
         }
@@ -99,10 +101,21 @@ public partial class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _searchText, value))
             {
+                OnPropertyChanged(nameof(IsSearchActive));
                 RebuildCurrentItems();
             }
         }
     }
+
+    public string ArchiveDisplayName => Document?.DisplayName ?? "PakScape";
+
+    public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
+
+    public bool IsSearchActive => !string.IsNullOrWhiteSpace(SearchText);
+
+    public string SearchResultText => CurrentItems.Count == 1
+        ? "1 result"
+        : $"{CurrentItems.Count:N0} results";
 
     public string StatusText
     {
@@ -783,6 +796,8 @@ public partial class MainWindowViewModel : ObservableObject
             RecordRecentFile(path);
             RebuildFolderTree(_currentFolder ?? Document.Root);
             OnPropertyChanged(nameof(WindowTitle));
+            OnPropertyChanged(nameof(ArchiveDisplayName));
+            OnPropertyChanged(nameof(SearchPlaceholder));
             StatusText = $"Saved {Path.GetFileName(path)}";
             return true;
         }
@@ -882,6 +897,7 @@ public partial class MainWindowViewModel : ObservableObject
         CurrentItems.Clear();
         if (_currentFolder is null)
         {
+            OnPropertyChanged(nameof(SearchResultText));
             return;
         }
 
@@ -901,6 +917,8 @@ public partial class MainWindowViewModel : ObservableObject
         {
             CurrentItems.Add(item);
         }
+
+        OnPropertyChanged(nameof(SearchResultText));
 
         var selectedItem = nodeToSelect is null
             ? null

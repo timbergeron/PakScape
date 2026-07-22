@@ -42,9 +42,12 @@ Rich previews are available for:
 
 - Plain text: `.cfg`, `.txt`, `.log`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.csv`, `.qc`, `.map`, `.ent`, `.rc`, `.shader`, `.def`, `.menu`, and `.arena`.
 - Common images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.tif`, and `.tiff`.
+- Audio: `.wav`, `.mp3`, `.wma`, `.m4a`, `.aac`, `.aif`, and `.aiff`, with native play/pause, seeking, and elapsed-time controls through `mpv`.
 - Quake content: `.bsp`, `.lmp`, `.mdl`, `.pcx`, `.spr`, `.tga`, and `gfx.wad`.
 
 Folders and unsupported or malformed files receive a metadata preview rather than being extracted or launched. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection. Text is truncated after 2 MB, and decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
+
+The Debian package installs `mpv` for audio previews. Portable builds use an `mpv` executable available on `PATH`; when it or a required codec is unavailable, Quick Preview falls back to file metadata without launching another application.
 
 ## Build an Ubuntu package
 

@@ -2,23 +2,310 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="PakScape.Linux.App"
              RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="PanelBorderBrush" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="TextForegroundBrush" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="MutedForegroundBrush" Color="#616161" />
+          <SolidColorBrush x:Key="MenuHoverBrush" Color="#0F000000" />
+          <SolidColorBrush x:Key="MenuDividerBrush" Color="#20000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#73000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#99000000" />
+          <SolidColorBrush x:Key="PreviewSurfaceBrush" Color="#F7F7F7" />
+
+          <SolidColorBrush x:Key="ButtonBackground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0F000000" />
+          <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="ButtonForeground" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#616161" />
+          <SolidColorBrush x:Key="ButtonBorderBrush" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#616161" />
+          <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#E5E5E5" />
+
+          <SolidColorBrush x:Key="MenuFlyoutItemBackground" Color="Transparent" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#0F000000" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="Transparent" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundDisabled" Color="#616161" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#E5E5E5" />
+
+          <SolidColorBrush x:Key="TreeViewItemBackgroundPointerOver" Color="#0F000000" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundPressed" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelected" Color="#0F000000" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPointerOver" Color="#0F000000" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPressed" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundPointerOver" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelected" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelectedPointerOver" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelectedPressed" Color="#1A1A1A" />
+
+          <SolidColorBrush x:Key="SliderTrackFill" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#E5E5E5" Opacity="0.45" />
+          <SolidColorBrush x:Key="SliderTrackValueFill" Color="#616161" />
+          <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#616161" />
+          <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#616161" />
+          <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#616161" Opacity="0.45" />
+          <SolidColorBrush x:Key="SliderThumbBackground" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#1A1A1A" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#616161" Opacity="0.45" />
+
+          <Color x:Key="ScrollBarThumbBackgroundColor">#73000000</Color>
+          <SolidColorBrush x:Key="ScrollBarPanningThumbBackground" Color="#73000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="#99000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="#99000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillDisabled" Color="#33000000" />
+          <SolidColorBrush x:Key="ScrollBarTrackFill" Color="Transparent" />
+          <SolidColorBrush x:Key="ScrollBarTrackFillPointerOver" Color="Transparent" />
+
+          <Color x:Key="DataGridRowHoveredBackgroundColor">#0F000000</Color>
+          <SolidColorBrush x:Key="DataGridRowSelectedBackgroundBrush" Color="#0F000000" />
+          <SolidColorBrush x:Key="DataGridRowSelectedHoveredBackgroundBrush" Color="#0F000000" />
+          <SolidColorBrush x:Key="DataGridRowSelectedUnfocusedBackgroundBrush" Color="#0F000000" />
+          <SolidColorBrush x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundBrush" Color="#0F000000" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#202020" />
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="PanelBorderBrush" Color="#454545" />
+          <SolidColorBrush x:Key="TextForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="MutedForegroundBrush" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="MenuHoverBrush" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="MenuDividerBrush" Color="#20FFFFFF" />
+          <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#4A4A4A" />
+          <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#5A5A5A" />
+          <SolidColorBrush x:Key="PreviewSurfaceBrush" Color="#181B20" />
+
+          <SolidColorBrush x:Key="ButtonBackground" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#454545" />
+          <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#202020" />
+          <SolidColorBrush x:Key="ButtonForeground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="ButtonBorderBrush" Color="#454545" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#454545" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#454545" />
+
+          <SolidColorBrush x:Key="MenuFlyoutItemBackground" Color="Transparent" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#454545" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundDisabled" Color="Transparent" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundDisabled" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#454545" />
+
+          <SolidColorBrush x:Key="TreeViewItemBackgroundPointerOver" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundPressed" Color="#454545" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelected" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPointerOver" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPressed" Color="#454545" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundPointerOver" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelected" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelectedPointerOver" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="TreeViewItemForegroundSelectedPressed" Color="#FFFFFF" />
+
+          <SolidColorBrush x:Key="SliderTrackFill" Color="#454545" />
+          <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#454545" />
+          <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#454545" />
+          <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#454545" Opacity="0.45" />
+          <SolidColorBrush x:Key="SliderTrackValueFill" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C8C8C8" />
+          <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#C8C8C8" Opacity="0.45" />
+          <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#C8C8C8" Opacity="0.45" />
+
+          <Color x:Key="ScrollBarThumbBackgroundColor">#4A4A4A</Color>
+          <SolidColorBrush x:Key="ScrollBarPanningThumbBackground" Color="#4A4A4A" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="#5A5A5A" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="#5A5A5A" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillDisabled" Color="#334A4A4A" />
+          <SolidColorBrush x:Key="ScrollBarTrackFill" Color="Transparent" />
+          <SolidColorBrush x:Key="ScrollBarTrackFillPointerOver" Color="Transparent" />
+
+          <Color x:Key="DataGridRowHoveredBackgroundColor">#14FFFFFF</Color>
+          <SolidColorBrush x:Key="DataGridRowSelectedBackgroundBrush" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="DataGridRowSelectedHoveredBackgroundBrush" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="DataGridRowSelectedUnfocusedBackgroundBrush" Color="#14FFFFFF" />
+          <SolidColorBrush x:Key="DataGridRowSelectedHoveredUnfocusedBackgroundBrush" Color="#14FFFFFF" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <SolidColorBrush x:Key="BrandGreenBrush" Color="#36C549" />
+      <Thickness x:Key="MenuBarItemPadding">6,5</Thickness>
+      <Thickness x:Key="HorizontalMenuFlyoutItemMargin">0</Thickness>
+      <x:Double x:Key="SliderTrackThemeHeight">3</x:Double>
+      <x:Double x:Key="SliderHorizontalHeight">20</x:Double>
+      <x:Double x:Key="SliderHorizontalThumbWidth">12</x:Double>
+      <x:Double x:Key="SliderHorizontalThumbHeight">12</x:Double>
+      <CornerRadius x:Key="SliderThumbCornerRadius">6</CornerRadius>
+    </ResourceDictionary>
+  </Application.Resources>
+
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
 
-    <Style Selector="Button.toolbar">
-      <Setter Property="MinHeight" Value="34" />
-      <Setter Property="Padding" Value="12,6" />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+    </Style>
+    <Style Selector="Menu">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="MenuItem">
+      <Setter Property="CornerRadius" Value="5" />
+    </Style>
+    <Style Selector="Menu &gt; MenuItem">
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="Separator">
+      <Setter Property="Height" Value="1" />
+      <Setter Property="Margin" Value="8,5" />
+      <Setter Property="Background" Value="{DynamicResource MenuDividerBrush}" />
+    </Style>
+    <Style Selector="Button.nav-button">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.nav-button:disabled">
+      <Setter Property="Opacity" Value="0.35" />
+    </Style>
+    <Style Selector="Button.preview-icon-button">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.preview-icon-button:pointerover">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.preview-icon-button:pressed">
+      <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
+    </Style>
+    <Style Selector="Button.preview-icon-button:disabled">
+      <Setter Property="Opacity" Value="0.35" />
+    </Style>
+    <Style Selector="Button.clear-search">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.link-button">
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandGreenBrush}" />
+    </Style>
+    <Style Selector="Button.link-button:pointerover">
+      <Setter Property="Foreground" Value="{DynamicResource BrandGreenBrush}" />
     </Style>
     <Style Selector="TextBlock.section-title">
       <Setter Property="FontSize" Value="12" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Opacity" Value="0.72" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
     </Style>
     <Style Selector="Border.panel">
-      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderLowBrush}" />
+      <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="TreeView">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TreeViewItem">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    <Style Selector="TreeViewItem.root-folder:selected /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.full-row-list ListBoxItem">
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="Margin" Value="0,0,0,2" />
+      <Setter Property="Padding" Value="5,3" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.icon-list ListBoxItem">
+      <Setter Property="Margin" Value="0,0,8,8" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="ListBox.icon-list ListBoxItem:selected Border.icon-card">
+      <Setter Property="BorderBrush" Value="{DynamicResource TextForegroundBrush}" />
+    </Style>
+    <Style Selector="ListBox.full-row-list ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+    </Style>
+    <Style Selector="ListBox.full-row-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+    </Style>
+    <Style Selector="ListBox.full-row-list ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
+    </Style>
+    <Style Selector="DataGridRow" x:CompileBindings="False">
+      <Setter Property="ToolTip.Tip" Value="{Binding Node.FullPath}" />
+    </Style>
+    <Style Selector="Border.preview-surface">
+      <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+    </Style>
+    <Style Selector="Border.audio-artwork">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+    </Style>
+    <Style Selector="Path.preview-muted-icon">
+      <Setter Property="Stroke" Value="{DynamicResource MutedForegroundBrush}" />
+    </Style>
+    <Style Selector="Slider.audio-progress">
+      <Setter Property="Height" Value="20" />
     </Style>
   </Application.Styles>
 </Application>

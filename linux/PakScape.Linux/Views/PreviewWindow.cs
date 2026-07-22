@@ -1,25 +1,37 @@
 using System.Runtime.InteropServices;
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Threading;
+using PakScape.Linux.Services;
+using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 
 namespace PakScape.Linux.Views;
 
-public sealed class PreviewWindow : Window
+public sealed class PreviewWindow : Window, IDisposable
 {
     private readonly IReadOnlyList<ArchiveNode> _nodes;
+    private readonly IArchiveFileTransferService _fileTransferService;
+    private readonly DispatcherTimer _audioProgressTimer;
     private readonly TextBlock _titleText;
     private readonly TextBlock _subtitleText;
     private readonly Border _imagePanel;
     private readonly Image _imagePreview;
     private readonly TextBox _textPreview;
+    private readonly Grid _audioPanel;
+    private readonly Button _audioPlayPauseButton;
+    private readonly Slider _audioProgressSlider;
+    private readonly TextBlock _audioTimeText;
+    private readonly TextBlock _audioStatusText;
     private readonly Grid _metadataPanel;
     private readonly TextBlock _metadataTypeText;
     private readonly TextBlock _metadataSizeText;
@@ -27,12 +39,24 @@ public sealed class PreviewWindow : Window
     private readonly TextBlock _positionText;
     private readonly Button _previousButton;
     private readonly Button _nextButton;
+    private IReadOnlyList<string> _audioTemporaryPaths = [];
+    private MpvAudioPlayer? _audioPlayer;
+    private CancellationTokenSource? _previewCancellationSource;
+    private ArchivePreview? _activePreview;
     private Bitmap? _currentImage;
     private int _index;
+    private int _previewGeneration;
+    private bool _isAudioPlaying;
+    private bool _isUpdatingAudioProgress;
+    private bool _isClosed;
+    private bool _isDisposed;
 
-    public PreviewWindow(IReadOnlyList<ArchiveNode> nodes)
+    public PreviewWindow(
+        IReadOnlyList<ArchiveNode> nodes,
+        IArchiveFileTransferService fileTransferService)
     {
         ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(fileTransferService);
         ArchivePreviewBuilder.ValidateSelection(nodes);
         if (nodes.Count == 0)
         {
@@ -40,6 +64,12 @@ public sealed class PreviewWindow : Window
         }
 
         _nodes = nodes;
+        _fileTransferService = fileTransferService;
+        _audioProgressTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(250),
+        };
+        _audioProgressTimer.Tick += OnAudioProgressTick;
         Title = "Quick Preview";
         Width = 860;
         Height = 640;
@@ -63,12 +93,14 @@ public sealed class PreviewWindow : Window
         var closeButton = new Button
         {
             Content = "✕",
-            Width = 36,
-            Height = 32,
+            Width = 34,
+            Height = 30,
             Margin = new Thickness(12, 0, 0, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
+        closeButton.Classes.Add("preview-icon-button");
+        ToolTip.SetTip(closeButton, "Close preview (Space or Escape)");
         closeButton.Click += (_, _) => Close();
 
         var header = new Grid
@@ -116,6 +148,105 @@ public sealed class PreviewWindow : Window
         _textPreview.SetValue(
             ScrollViewer.VerticalScrollBarVisibilityProperty,
             Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
+
+        _audioPlayPauseButton = new Button
+        {
+            Content = "▶",
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            IsEnabled = false,
+            FontSize = 16,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        _audioPlayPauseButton.Classes.Add("preview-icon-button");
+        _audioPlayPauseButton.Click += OnAudioPlayPauseClick;
+        _audioProgressSlider = new Slider
+        {
+            Minimum = 0,
+            Maximum = 1,
+            Value = 0,
+            Margin = new Thickness(12, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = false,
+        };
+        _audioProgressSlider.Classes.Add("audio-progress");
+        _audioProgressSlider.ValueChanged += OnAudioProgressValueChanged;
+        _audioTimeText = new TextBlock
+        {
+            Text = "0:00 / --:--",
+            MinWidth = 76,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Right,
+            Opacity = 0.68,
+        };
+        _audioStatusText = new TextBlock
+        {
+            Text = "Loading audio…",
+            Margin = new Thickness(0, 18, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Opacity = 0.68,
+        };
+        var audioControls = new Grid
+        {
+            Width = 400,
+            MaxWidth = 400,
+            Margin = new Thickness(0, 16, 0, 0),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto),
+            },
+            Children =
+            {
+                _audioPlayPauseButton,
+                _audioProgressSlider,
+                _audioTimeText,
+            },
+        };
+        Grid.SetColumn(_audioProgressSlider, 1);
+        Grid.SetColumn(_audioTimeText, 2);
+        var audioArtworkIcon = new Avalonia.Controls.Shapes.Path
+        {
+            Width = 48,
+            Height = 48,
+            Data = Geometry.Parse("M 2,8 L 6,8 L 11,3 L 11,17 L 6,12 L 2,12 Z M 14,7 C 16,9 16,11 14,13 M 17,4 C 21,8 21,12 17,16"),
+            Fill = Brushes.Transparent,
+            StrokeThickness = 1.5,
+            Stretch = Stretch.Uniform,
+        };
+        audioArtworkIcon.Classes.Add("preview-muted-icon");
+        var audioArtwork = new Border
+        {
+            Width = 96,
+            Height = 96,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(48),
+            Child = audioArtworkIcon,
+        };
+        audioArtwork.Classes.Add("audio-artwork");
+        _audioPanel = new Grid
+        {
+            Margin = new Thickness(30),
+            IsVisible = false,
+            Children =
+            {
+                new StackPanel
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children =
+                    {
+                        audioArtwork,
+                        _audioStatusText,
+                        audioControls,
+                    },
+                },
+            },
+        };
 
         _metadataTypeText = new TextBlock
         {
@@ -166,31 +297,33 @@ public sealed class PreviewWindow : Window
 
         var contentGrid = new Grid
         {
-            Children = { _imagePanel, _textPreview, _metadataPanel },
+            Children = { _imagePanel, _textPreview, _audioPanel, _metadataPanel },
         };
         var contentBorder = new Border
         {
-            BorderBrush = new SolidColorBrush(Color.Parse("#40808080")),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             ClipToBounds = true,
             Child = contentGrid,
         };
+        contentBorder.Classes.Add("preview-surface");
 
         _previousButton = new Button
         {
             Content = "←",
-            Width = 36,
             HorizontalContentAlignment = HorizontalAlignment.Center,
         };
+        _previousButton.Classes.Add("preview-icon-button");
+        ToolTip.SetTip(_previousButton, "Previous item");
         _previousButton.Click += (_, _) => Move(-1);
         _nextButton = new Button
         {
             Content = "→",
-            Width = 36,
-            Margin = new Thickness(6, 0, 0, 0),
+            Margin = new Thickness(4, 0, 0, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
         };
+        _nextButton.Classes.Add("preview-icon-button");
+        ToolTip.SetTip(_nextButton, "Next item");
         _nextButton.Click += (_, _) => Move(1);
         _positionText = new TextBlock
         {
@@ -240,12 +373,17 @@ public sealed class PreviewWindow : Window
         Content = root;
 
         AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
-        Closed += (_, _) => DisposeCurrentImage();
-        ShowCurrentPreview();
+        Closed += OnClosed;
+        _ = ShowCurrentPreviewAsync();
     }
 
-    private void ShowCurrentPreview()
+    private async Task ShowCurrentPreviewAsync()
     {
+        _previewCancellationSource?.Cancel();
+        _previewCancellationSource?.Dispose();
+        _previewCancellationSource = new CancellationTokenSource();
+        var cancellationToken = _previewCancellationSource.Token;
+        var generation = ++_previewGeneration;
         ResetContent();
         ArchivePreview preview;
         try
@@ -261,6 +399,7 @@ public sealed class PreviewWindow : Window
                 ArchivePreviewKind.Metadata,
                 Message: exception.Message);
         }
+        _activePreview = preview;
 
         Title = $"{preview.Title} — Quick Preview";
         _titleText.Text = preview.Title;
@@ -278,6 +417,9 @@ public sealed class PreviewWindow : Window
                 {
                     _subtitleText.Text += $" • {preview.Message}";
                 }
+                break;
+            case ArchivePreviewKind.Audio:
+                await ShowAudioAsync(preview, generation, cancellationToken);
                 break;
             case ArchivePreviewKind.EncodedImage:
                 if (TryLoadEncodedImage(
@@ -302,6 +444,60 @@ public sealed class PreviewWindow : Window
         }
     }
 
+    private async Task ShowAudioAsync(
+        ArchivePreview preview,
+        int generation,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> temporaryPaths = [];
+        MpvAudioPlayer? player = null;
+        try
+        {
+            var audioData = preview.EncodedAudio
+                ?? throw new InvalidOperationException("The audio preview contains no playable data.");
+            var file = new ArchiveFileNode(preview.Title, audioData);
+            temporaryPaths = _fileTransferService.ExportToTemporaryLocation([file]);
+            if (temporaryPaths.Count != 1)
+            {
+                throw new InvalidOperationException("The audio preview could not be prepared.");
+            }
+
+            _audioPanel.IsVisible = true;
+            _audioStatusText.Text = "Loading audio…";
+            player = await MpvAudioPlayer.StartAsync(temporaryPaths[0], cancellationToken);
+            if (_isClosed || generation != _previewGeneration)
+            {
+                player.Dispose();
+                _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
+                return;
+            }
+
+            _audioPlayer = player;
+            _audioTemporaryPaths = temporaryPaths;
+            _audioProgressSlider.Maximum = Math.Max(player.DurationSeconds, 1);
+            _audioProgressSlider.IsEnabled = true;
+            _audioPlayPauseButton.IsEnabled = true;
+            _audioStatusText.Text = $"{FormatAudioTime(TimeSpan.FromSeconds(player.DurationSeconds))} audio";
+            UpdateAudioProgress(0, player);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            player?.Dispose();
+            if (temporaryPaths.Count > 0)
+            {
+                _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
+            }
+            if (!_isClosed && generation == _previewGeneration)
+            {
+                _audioPanel.IsVisible = false;
+                ShowMetadata(preview with
+                {
+                    Message = $"Audio preview unavailable: {exception.Message}",
+                });
+            }
+        }
+    }
+
     private void ShowMetadata(ArchivePreview preview)
     {
         _metadataTypeText.Text = preview.TypeDescription;
@@ -312,12 +508,70 @@ public sealed class PreviewWindow : Window
 
     private void ResetContent()
     {
+        ResetAudioPlayback();
         DisposeCurrentImage();
         _textPreview.Text = string.Empty;
         _imagePanel.IsVisible = false;
         _textPreview.IsVisible = false;
+        _audioPanel.IsVisible = false;
         _metadataPanel.IsVisible = false;
     }
+
+    private void ResetAudioPlayback()
+    {
+        _audioProgressTimer.Stop();
+        _isAudioPlaying = false;
+
+        var player = _audioPlayer;
+        _audioPlayer = null;
+        player?.Dispose();
+
+        var temporaryPaths = _audioTemporaryPaths;
+        _audioTemporaryPaths = [];
+        if (temporaryPaths.Count > 0)
+        {
+            _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
+        }
+
+        _audioPlayPauseButton.IsEnabled = false;
+        _audioProgressSlider.IsEnabled = false;
+        _isUpdatingAudioProgress = true;
+        _audioProgressSlider.Maximum = 1;
+        _audioProgressSlider.Value = 0;
+        _isUpdatingAudioProgress = false;
+        _audioTimeText.Text = "0:00 / --:--";
+        _audioStatusText.Text = "Loading audio…";
+        UpdateAudioPlayPauseButton();
+    }
+
+    private void UpdateAudioProgress(double seconds, MpvAudioPlayer player)
+    {
+        if (!ReferenceEquals(player, _audioPlayer))
+        {
+            return;
+        }
+
+        var clampedSeconds = Math.Clamp(seconds, 0, player.DurationSeconds);
+        _isUpdatingAudioProgress = true;
+        _audioProgressSlider.Value = clampedSeconds;
+        _isUpdatingAudioProgress = false;
+        _audioTimeText.Text =
+            $"{FormatAudioTime(TimeSpan.FromSeconds(clampedSeconds))} / " +
+            FormatAudioTime(TimeSpan.FromSeconds(player.DurationSeconds));
+    }
+
+    private void UpdateAudioPlayPauseButton()
+    {
+        _audioPlayPauseButton.Content = _isAudioPlaying ? "Ⅱ" : "▶";
+        ToolTip.SetTip(
+            _audioPlayPauseButton,
+            _isAudioPlaying ? "Pause audio" : "Play audio");
+    }
+
+    private static string FormatAudioTime(TimeSpan value) =>
+        value.TotalHours >= 1
+            ? value.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
+            : value.ToString(@"m\:ss", CultureInfo.InvariantCulture);
 
     private void SetImage(Bitmap bitmap)
     {
@@ -387,7 +641,143 @@ public sealed class PreviewWindow : Window
     private void Move(int delta)
     {
         _index = (_index + delta + _nodes.Count) % _nodes.Count;
-        ShowCurrentPreview();
+        _ = ShowCurrentPreviewAsync();
+    }
+
+    private async void OnAudioPlayPauseClick(object? sender, RoutedEventArgs e)
+    {
+        var player = _audioPlayer;
+        if (player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var play = !_isAudioPlaying;
+            if (play && _audioProgressSlider.Value >= player.DurationSeconds - 0.05)
+            {
+                await player.SeekAsync(0);
+                UpdateAudioProgress(0, player);
+            }
+
+            await player.SetPausedAsync(paused: !play);
+            if (!ReferenceEquals(player, _audioPlayer))
+            {
+                return;
+            }
+
+            _isAudioPlaying = play;
+            _audioStatusText.Text = play ? "Playing" : "Paused";
+            if (play)
+            {
+                _audioProgressTimer.Start();
+            }
+            else
+            {
+                _audioProgressTimer.Stop();
+            }
+            UpdateAudioPlayPauseButton();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
+    }
+
+    private async void OnAudioProgressValueChanged(
+        object? sender,
+        RangeBaseValueChangedEventArgs e)
+    {
+        var player = _audioPlayer;
+        if (_isUpdatingAudioProgress || player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await player.SeekAsync(e.NewValue);
+            UpdateAudioProgress(e.NewValue, player);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
+    }
+
+    private async void OnAudioProgressTick(object? sender, EventArgs e)
+    {
+        var player = _audioPlayer;
+        if (!_isAudioPlaying || player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (player.HasExited)
+            {
+                throw new InvalidOperationException("mpv stopped unexpectedly.");
+            }
+
+            var seconds = await player.GetPositionAsync();
+            if (!ReferenceEquals(player, _audioPlayer))
+            {
+                return;
+            }
+
+            UpdateAudioProgress(seconds, player);
+            if (seconds >= player.DurationSeconds - 0.05)
+            {
+                _audioProgressTimer.Stop();
+                _isAudioPlaying = false;
+                _audioStatusText.Text = "Ready";
+                UpdateAudioPlayPauseButton();
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
+    }
+
+    private void ShowAudioFailure(MpvAudioPlayer player, Exception exception)
+    {
+        if (!ReferenceEquals(player, _audioPlayer) || _activePreview is not { } preview)
+        {
+            return;
+        }
+
+        ResetAudioPlayback();
+        _audioPanel.IsVisible = false;
+        ShowMetadata(preview with
+        {
+            Message = $"Audio preview unavailable: {exception.Message}",
+        });
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isClosed = true;
+        _previewCancellationSource?.Cancel();
+        _previewCancellationSource?.Dispose();
+        _previewCancellationSource = null;
+        _previewGeneration++;
+        ResetAudioPlayback();
+        DisposeCurrentImage();
+        _isDisposed = true;
+        GC.SuppressFinalize(this);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)

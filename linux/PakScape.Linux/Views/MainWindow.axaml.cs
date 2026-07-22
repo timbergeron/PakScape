@@ -7,14 +7,19 @@ using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using PakScape.Linux.Models;
 using PakScape.Linux.ViewModels;
+using PakStudio.Core.Interfaces;
 
 namespace PakScape.Linux.Views;
 
 public partial class MainWindow : Window
 {
+    private const double FolderPaneCollapseThreshold = 120;
+    private const double FolderPaneReopenWidth = 220;
+
     private static readonly DataFormat<byte[]> ArchiveClipboardFormat =
         DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-clipboard-id");
     private MainWindowViewModel? _viewModel;
+    private IArchiveFileTransferService? _fileTransferService;
     private string? _startupPath;
     private bool _closeConfirmed;
     private bool _isCloseConfirmationPending;
@@ -24,6 +29,8 @@ public partial class MainWindow : Window
     private Control? _dragSource;
     private bool _isStartingDrag;
     private bool _isSynchronizingSelection;
+    private bool _folderPaneWasCollapsedAtDragStart;
+    private double _lastExpandedFolderPaneWidth = 280;
 
     public MainWindow()
     {
@@ -44,17 +51,24 @@ public partial class MainWindow : Window
             InputElement.PointerReleasedEvent,
             OnArchiveGridPointerReleased,
             RoutingStrategies.Tunnel);
+        FolderSplitter.DragStarted += OnFolderSplitterDragStarted;
+        FolderSplitter.DragCompleted += OnFolderSplitterDragCompleted;
     }
 
-    public void Configure(MainWindowViewModel viewModel, string? startupPath)
+    public void Configure(
+        MainWindowViewModel viewModel,
+        IArchiveFileTransferService fileTransferService,
+        string? startupPath)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(fileTransferService);
         if (_viewModel is not null)
         {
             throw new InvalidOperationException("The main window has already been configured.");
         }
 
         _viewModel = viewModel;
+        _fileTransferService = fileTransferService;
         _startupPath = startupPath;
         DataContext = viewModel;
 
@@ -102,6 +116,91 @@ public partial class MainWindow : Window
     private void OnCloseRequested(object? sender, EventArgs e)
     {
         Close();
+    }
+
+    private void OnFolderTreeContainerPrepared(object? sender, ContainerPreparedEventArgs e)
+    {
+        if (e.Container is TreeViewItem item)
+        {
+            item.Classes.Set(
+                "root-folder",
+                item.DataContext is FolderNodeViewModel { Folder.Parent: null });
+        }
+    }
+
+    private void OnClearSearchClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel.SearchText = string.Empty;
+        ArchiveSearchBox.Focus();
+    }
+
+    private void OnFolderPaneToggleClick(object? sender, RoutedEventArgs e)
+    {
+        if (FolderPaneColumn.ActualWidth < 1)
+        {
+            FolderPaneColumn.Width = new GridLength(
+                Math.Max(FolderPaneReopenWidth, _lastExpandedFolderPaneWidth));
+            SetFolderPaneChrome(collapsed: false);
+            return;
+        }
+
+        _lastExpandedFolderPaneWidth = Math.Max(
+            FolderPaneReopenWidth,
+            FolderPaneColumn.ActualWidth);
+        CollapseFolderPane();
+    }
+
+    private void OnFolderSplitterDragStarted(object? sender, VectorEventArgs e)
+    {
+        _folderPaneWasCollapsedAtDragStart = FolderPaneColumn.ActualWidth < 1;
+    }
+
+    private void OnFolderSplitterDragCompleted(object? sender, VectorEventArgs e)
+    {
+        var width = FolderPaneColumn.ActualWidth;
+        if (_folderPaneWasCollapsedAtDragStart)
+        {
+            if (width >= 1 && width < FolderPaneReopenWidth)
+            {
+                FolderPaneColumn.Width = new GridLength(FolderPaneReopenWidth);
+                _lastExpandedFolderPaneWidth = FolderPaneReopenWidth;
+                SetFolderPaneChrome(collapsed: false);
+            }
+            else if (width >= FolderPaneReopenWidth)
+            {
+                _lastExpandedFolderPaneWidth = width;
+                SetFolderPaneChrome(collapsed: false);
+            }
+        }
+        else if (width < FolderPaneCollapseThreshold)
+        {
+            CollapseFolderPane();
+        }
+        else
+        {
+            _lastExpandedFolderPaneWidth = width;
+            SetFolderPaneChrome(collapsed: false);
+        }
+
+        _folderPaneWasCollapsedAtDragStart = false;
+    }
+
+    private void CollapseFolderPane()
+    {
+        FolderPaneColumn.Width = new GridLength(0);
+        SetFolderPaneChrome(collapsed: true);
+    }
+
+    private void SetFolderPaneChrome(bool collapsed)
+    {
+        FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
+        FolderSplitter.IsVisible = !collapsed;
+        ContentPaneBorder.CornerRadius = collapsed
+            ? new CornerRadius(0)
+            : new CornerRadius(12, 0, 0, 0);
+        ContentPaneBorder.BorderThickness = collapsed
+            ? new Thickness(0, 1, 0, 0)
+            : new Thickness(1, 1, 0, 0);
     }
 
     private void OnRecentFilesChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -484,7 +583,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var previewWindow = new PreviewWindow(nodes);
+            var previewWindow = new PreviewWindow(nodes, FileTransferService);
             previewWindow.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_previewWindow, previewWindow))
@@ -534,4 +633,11 @@ public partial class MainWindow : Window
 
     private MainWindowViewModel ViewModel => _viewModel
         ?? throw new InvalidOperationException("The main window has not been configured.");
+
+    private IArchiveFileTransferService FileTransferService => _fileTransferService
+        ?? throw new InvalidOperationException("The main window has not been configured.");
+
+    private ColumnDefinition FolderPaneColumn => ContentLayoutGrid.ColumnDefinitions[0];
+
+    private ColumnDefinition FolderSplitterColumn => ContentLayoutGrid.ColumnDefinitions[1];
 }

@@ -38,8 +38,8 @@ public sealed class AboutWindow : Window, IDisposable
         {
             Content = "github.com/timbergeron/PakScape",
             HorizontalAlignment = HorizontalAlignment.Center,
-            Padding = new Thickness(8, 3),
         };
+        projectButton.Classes.Add("link-button");
         projectButton.Click += OpenProjectPage;
 
         Content = new Grid
