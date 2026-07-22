@@ -7,6 +7,7 @@ Thanks for helping improve PakScape. Keep changes focused, explain user-visible 
 Run the portable archive tests:
 
 ```bash
+native/scripts/build-linux.sh # use build-macos.sh or build-windows.ps1 on those platforms
 swift test --package-path macos
 dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release
 dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release
@@ -15,6 +16,7 @@ dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --co
 On macOS, also build the app:
 
 ```bash
+native/scripts/build-macos.sh
 xcodebuild \
   -project macos/PakScape.xcodeproj \
   -scheme PakScape \

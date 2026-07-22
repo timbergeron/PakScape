@@ -27,8 +27,9 @@ Build prerequisites:
 - Windows 10/11
 - Visual Studio 2022 with the `.NET desktop development` workload
 - .NET 8 SDK
+- CMake and a Visual Studio C++ toolchain
 
-Open `PakStudio.sln` in Visual Studio on Windows to build and run the app.
+Run `../native/scripts/build-windows.ps1`, then open `PakStudio.sln` in Visual Studio to build and run the app.
 
 ## Quick Preview
 
@@ -37,11 +38,11 @@ Select one or more archive items and press Space, or choose **View > Quick Previ
 Rich previews are available for:
 
 - Plain text: `.cfg`, `.txt`, `.log`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.csv`, `.qc`, `.map`, `.ent`, `.rc`, `.shader`, `.def`, `.menu`, and `.arena`.
-- Native audio playback: `.wav`, `.mp3`, `.wma`, `.m4a`, `.aac`, `.aif`, and `.aiff`.
+- Cross-platform audio playback: `.wav`, `.mp3`, `.flac`, `.ogg`, `.opus`, `.it`, `.s3m`, `.xm`, `.mod`, and `.umx`.
 - Common images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.tif`, and `.tiff`.
 - Quake content: `.bsp`, `.lmp`, `.mdl`, `.pcx`, `.spr`, `.tga`, and `gfx.wad`.
 
-Folders and unsupported or malformed files receive a metadata preview rather than being extracted or launched. Audio playback uses the media codecs available in Windows and falls back to metadata when a file cannot be decoded. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection. Text is truncated after 2 MB, and decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
+Folders and unsupported or malformed files receive a metadata preview rather than being extracted or launched. Audio playback uses PakScape's bundled native decoder rather than optional Windows codecs and falls back to metadata when a file is malformed. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection. Text is truncated after 2 MB, and decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
 
 Run the portable regression suite from the repository root with:
 

@@ -24,7 +24,8 @@ public static class ArchivePreviewBuilder
 
     private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".wav", ".mp3", ".wma", ".m4a", ".aac", ".aif", ".aiff",
+        ".wav", ".mp3", ".flac", ".ogg", ".opus",
+        ".it", ".s3m", ".xm", ".mod", ".umx",
     };
 
     public static void ValidateSelection(IReadOnlyCollection<ArchiveNode> nodes)

@@ -19,6 +19,7 @@ let package = Package(
                 "BspLevelPreviewRenderer.swift",
                 "ContentView.swift",
                 "FinderServices.swift",
+                "NativeAudioPlayer.swift",
                 "PakDocument.swift",
                 "PakExplorerApp.swift",
                 "PakIconView.swift",
@@ -26,6 +27,7 @@ let package = Package(
                 "PakListView.swift",
                 "PakQuickLook.swift",
                 "PakViewModel.swift",
+                "PakScape-Bridging-Header.h",
                 "PreferencesView.swift",
             ],
             sources: ["PakModels.swift", "PakFormatDetails.swift"]

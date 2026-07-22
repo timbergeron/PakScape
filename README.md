@@ -17,6 +17,7 @@ Each edition uses the platform's native desktop conventions while sharing the sa
 - Browse archives as a folder tree, list, or icon grid with inline thumbnails and platform-appropriate file-type icons.
 - Add, rename, move, copy, remove, and export files and folders, with native Undo and Redo on macOS.
 - Press Space to preview selected text, common images, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files.
+- Preview QSS-M audio consistently on every platform: WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX.
 - Read and write PAK and PK3 archives with traversal, duplicate-path, symlink, and size validation.
 - Integrate with platform file pickers, recent files, drag and drop, and native keyboard navigation.
 

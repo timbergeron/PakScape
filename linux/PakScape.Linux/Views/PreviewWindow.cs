@@ -10,8 +10,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
-using PakScape.Linux.Services;
-using PakStudio.Core.Interfaces;
+using PakStudio.Core.Audio;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 
@@ -20,7 +19,6 @@ namespace PakScape.Linux.Views;
 public sealed class PreviewWindow : Window, IDisposable
 {
     private readonly IReadOnlyList<ArchiveNode> _nodes;
-    private readonly IArchiveFileTransferService _fileTransferService;
     private readonly DispatcherTimer _audioProgressTimer;
     private readonly TextBlock _titleText;
     private readonly TextBlock _subtitleText;
@@ -39,8 +37,7 @@ public sealed class PreviewWindow : Window, IDisposable
     private readonly TextBlock _positionText;
     private readonly Button _previousButton;
     private readonly Button _nextButton;
-    private IReadOnlyList<string> _audioTemporaryPaths = [];
-    private MpvAudioPlayer? _audioPlayer;
+    private NativeAudioPlayer? _audioPlayer;
     private CancellationTokenSource? _previewCancellationSource;
     private ArchivePreview? _activePreview;
     private Bitmap? _currentImage;
@@ -51,12 +48,9 @@ public sealed class PreviewWindow : Window, IDisposable
     private bool _isClosed;
     private bool _isDisposed;
 
-    public PreviewWindow(
-        IReadOnlyList<ArchiveNode> nodes,
-        IArchiveFileTransferService fileTransferService)
+    public PreviewWindow(IReadOnlyList<ArchiveNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(fileTransferService);
         ArchivePreviewBuilder.ValidateSelection(nodes);
         if (nodes.Count == 0)
         {
@@ -64,7 +58,6 @@ public sealed class PreviewWindow : Window, IDisposable
         }
 
         _nodes = nodes;
-        _fileTransferService = fileTransferService;
         _audioProgressTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -449,31 +442,23 @@ public sealed class PreviewWindow : Window, IDisposable
         int generation,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<string> temporaryPaths = [];
-        MpvAudioPlayer? player = null;
+        NativeAudioPlayer? player = null;
         try
         {
             var audioData = preview.EncodedAudio
                 ?? throw new InvalidOperationException("The audio preview contains no playable data.");
-            var file = new ArchiveFileNode(preview.Title, audioData);
-            temporaryPaths = _fileTransferService.ExportToTemporaryLocation([file]);
-            if (temporaryPaths.Count != 1)
-            {
-                throw new InvalidOperationException("The audio preview could not be prepared.");
-            }
-
             _audioPanel.IsVisible = true;
             _audioStatusText.Text = "Loading audio…";
-            player = await MpvAudioPlayer.StartAsync(temporaryPaths[0], cancellationToken);
+            player = await Task.Run(
+                () => NativeAudioPlayer.Create(audioData, Path.GetExtension(preview.Title)),
+                cancellationToken);
             if (_isClosed || generation != _previewGeneration)
             {
                 player.Dispose();
-                _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
                 return;
             }
 
             _audioPlayer = player;
-            _audioTemporaryPaths = temporaryPaths;
             _audioProgressSlider.Maximum = Math.Max(player.DurationSeconds, 1);
             _audioProgressSlider.IsEnabled = true;
             _audioPlayPauseButton.IsEnabled = true;
@@ -483,10 +468,6 @@ public sealed class PreviewWindow : Window, IDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             player?.Dispose();
-            if (temporaryPaths.Count > 0)
-            {
-                _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
-            }
             if (!_isClosed && generation == _previewGeneration)
             {
                 _audioPanel.IsVisible = false;
@@ -526,13 +507,6 @@ public sealed class PreviewWindow : Window, IDisposable
         _audioPlayer = null;
         player?.Dispose();
 
-        var temporaryPaths = _audioTemporaryPaths;
-        _audioTemporaryPaths = [];
-        if (temporaryPaths.Count > 0)
-        {
-            _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
-        }
-
         _audioPlayPauseButton.IsEnabled = false;
         _audioProgressSlider.IsEnabled = false;
         _isUpdatingAudioProgress = true;
@@ -544,7 +518,7 @@ public sealed class PreviewWindow : Window, IDisposable
         UpdateAudioPlayPauseButton();
     }
 
-    private void UpdateAudioProgress(double seconds, MpvAudioPlayer player)
+    private void UpdateAudioProgress(double seconds, NativeAudioPlayer player)
     {
         if (!ReferenceEquals(player, _audioPlayer))
         {
@@ -644,7 +618,7 @@ public sealed class PreviewWindow : Window, IDisposable
         _ = ShowCurrentPreviewAsync();
     }
 
-    private async void OnAudioPlayPauseClick(object? sender, RoutedEventArgs e)
+    private void OnAudioPlayPauseClick(object? sender, RoutedEventArgs e)
     {
         var player = _audioPlayer;
         if (player is null)
@@ -657,11 +631,18 @@ public sealed class PreviewWindow : Window, IDisposable
             var play = !_isAudioPlaying;
             if (play && _audioProgressSlider.Value >= player.DurationSeconds - 0.05)
             {
-                await player.SeekAsync(0);
+                player.Seek(0);
                 UpdateAudioProgress(0, player);
             }
 
-            await player.SetPausedAsync(paused: !play);
+            if (play)
+            {
+                player.Play();
+            }
+            else
+            {
+                player.Pause();
+            }
             if (!ReferenceEquals(player, _audioPlayer))
             {
                 return;
@@ -685,7 +666,7 @@ public sealed class PreviewWindow : Window, IDisposable
         }
     }
 
-    private async void OnAudioProgressValueChanged(
+    private void OnAudioProgressValueChanged(
         object? sender,
         RangeBaseValueChangedEventArgs e)
     {
@@ -697,7 +678,7 @@ public sealed class PreviewWindow : Window, IDisposable
 
         try
         {
-            await player.SeekAsync(e.NewValue);
+            player.Seek(e.NewValue);
             UpdateAudioProgress(e.NewValue, player);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -706,7 +687,7 @@ public sealed class PreviewWindow : Window, IDisposable
         }
     }
 
-    private async void OnAudioProgressTick(object? sender, EventArgs e)
+    private void OnAudioProgressTick(object? sender, EventArgs e)
     {
         var player = _audioPlayer;
         if (!_isAudioPlaying || player is null)
@@ -716,19 +697,14 @@ public sealed class PreviewWindow : Window, IDisposable
 
         try
         {
-            if (player.HasExited)
-            {
-                throw new InvalidOperationException("mpv stopped unexpectedly.");
-            }
-
-            var seconds = await player.GetPositionAsync();
+            var seconds = player.PositionSeconds;
             if (!ReferenceEquals(player, _audioPlayer))
             {
                 return;
             }
 
             UpdateAudioProgress(seconds, player);
-            if (seconds >= player.DurationSeconds - 0.05)
+            if (player.IsFinished || seconds >= player.DurationSeconds - 0.05)
             {
                 _audioProgressTimer.Stop();
                 _isAudioPlaying = false;
@@ -742,7 +718,7 @@ public sealed class PreviewWindow : Window, IDisposable
         }
     }
 
-    private void ShowAudioFailure(MpvAudioPlayer player, Exception exception)
+    private void ShowAudioFailure(NativeAudioPlayer player, Exception exception)
     {
         if (!ReferenceEquals(player, _audioPlayer) || _activePreview is not { } preview)
         {

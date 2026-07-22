@@ -176,7 +176,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var previewWindow = new PreviewWindow(nodes, _fileTransferService) { Owner = this };
+            var previewWindow = new PreviewWindow(nodes) { Owner = this };
             previewWindow.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_previewWindow, previewWindow))

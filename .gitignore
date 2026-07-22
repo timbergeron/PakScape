@@ -18,3 +18,5 @@ linux/TestResults/
 linux/artifacts/
 *.user
 *.suo
+# Native audio build output
+native/build/

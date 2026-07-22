@@ -21,6 +21,7 @@ Notable user-visible changes are documented here.
 - A system-provided macOS toolbar search field backed by PakScape's archive-wide matching.
 - Finder-style Get Info details for macOS archive files and folders, available from menus and Command-I.
 - Standard Undo and Redo support for macOS archive edits.
+- Bundled cross-platform Quick Preview audio for the QSS-M WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX formats.
 
 ### Changed
 
@@ -40,6 +41,7 @@ Notable user-visible changes are documented here.
 - macOS Undo stores operation-sized changes with a 50-action limit instead of retaining a full archive tree per edit.
 - Cross-document cut/paste safely copies into the destination so Undo remains scoped to one archive.
 - Native macOS thumbnails stage bounded payload ranges off the main thread, queue at most 32 requests, and limit Quick Look generation to four concurrent jobs.
+- Windows and Linux audio preview no longer depends on optional system codecs or an external `mpv` process.
 
 ### Security
 

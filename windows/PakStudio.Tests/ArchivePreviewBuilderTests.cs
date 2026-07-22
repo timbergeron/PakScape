@@ -56,12 +56,15 @@ public sealed class ArchivePreviewBuilderTests
     [Theory]
     [InlineData("SOUND.WAV")]
     [InlineData("music.mp3")]
-    [InlineData("music.wma")]
-    [InlineData("music.m4a")]
-    [InlineData("music.aac")]
-    [InlineData("music.aif")]
-    [InlineData("music.aiff")]
-    public void NativeAudioFilesRemainEncodedForPlayback(string fileName)
+    [InlineData("music.flac")]
+    [InlineData("music.ogg")]
+    [InlineData("music.opus")]
+    [InlineData("music.it")]
+    [InlineData("music.s3m")]
+    [InlineData("music.xm")]
+    [InlineData("music.mod")]
+    [InlineData("music.umx")]
+    public void QssMAudioFilesRemainEncodedForPlayback(string fileName)
     {
         byte[] data = [1, 2, 3];
         var file = new ArchiveFileNode(fileName, data);

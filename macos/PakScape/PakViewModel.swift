@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import Combine
-import AVFoundation
 import ImageIO
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
@@ -56,7 +55,7 @@ private actor ThumbnailWorkLimiter {
     }
 }
 
-final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
+final class PakViewModel: NSObject, ObservableObject {
     @Published var pakFile: PakFile?
     @Published var currentFolder: PakNode? { // Directory shown in right pane
         didSet {
@@ -74,7 +73,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         get { Self.sharedClipboard }
         set { Self.sharedClipboard = newValue }
     }
-    private static let previewableAudioExtensions: Set<String> = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf", "au", "snd"]
+    private static let previewableAudioExtensions: Set<String> = [
+        "wav", "mp3", "flac", "ogg", "opus", "it", "s3m", "xm", "mod", "umx",
+    ]
     private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
     private static let textQuickLookExtensions: Set<String> = [
         "arena", "cfg", "csv", "def", "ent", "ini", "json", "log", "map", "md",
@@ -91,7 +92,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private weak var undoManager: UndoManager?
     private var documentDidChange: ((PakFile) -> Void)?
     private var isNavigatingHistory = false
-    private var audioPreviewPlayer: AVAudioPlayer?
+    private var audioPreviewPlayer: NativeAudioPlayer?
     private var audioPreviewTimer: Timer?
     private var audioPreviewNodeID: PakNode.ID?
     private var audioPreviewProgress: Double = 0
@@ -358,11 +359,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let ext = (node.name as NSString).pathExtension.lowercased()
         guard !ext.isEmpty else { return false }
 
-        if Self.previewableAudioExtensions.contains(ext) {
-            return true
-        }
-
-        return UTType(filenameExtension: ext)?.conforms(to: .audio) == true
+        return Self.previewableAudioExtensions.contains(ext)
     }
 
     func audioPreviewState(for node: PakNode) -> AudioPreviewVisualState {
@@ -390,20 +387,16 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         stopAudioPreview()
 
         do {
-            let player = try AVAudioPlayer(data: data)
-            player.delegate = self
-            player.prepareToPlay()
+            let fileExtension = (node.name as NSString).pathExtension.lowercased()
+            let player = try NativeAudioPlayer(data: data, fileExtension: fileExtension)
 
             audioPreviewPlayer = player
             audioPreviewNodeID = node.id
             audioPreviewProgress = 0
 
-            if player.play() {
-                startAudioPreviewTimer()
-                postAudioPreviewStateDidChange()
-            } else {
-                stopAudioPreview()
-            }
+            try player.play()
+            startAudioPreviewTimer()
+            postAudioPreviewStateDidChange()
         } catch {
             stopAudioPreview()
         }
@@ -413,7 +406,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         audioPreviewTimer?.invalidate()
         audioPreviewTimer = nil
 
-        audioPreviewPlayer?.stop()
+        audioPreviewPlayer?.pause()
         audioPreviewPlayer = nil
 
         let hadState = audioPreviewNodeID != nil || audioPreviewProgress > 0
@@ -1308,6 +1301,11 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return
         }
 
+        if player.isFinished {
+            stopAudioPreview()
+            return
+        }
+
         guard player.duration > 0 else {
             audioPreviewProgress = 0
             postAudioPreviewStateDidChange()
@@ -1322,13 +1320,6 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         NotificationCenter.default.post(name: .pakAudioPreviewStateDidChange, object: self)
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        stopAudioPreview()
-    }
-
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        stopAudioPreview()
-    }
 }
 
 extension Notification.Name {

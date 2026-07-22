@@ -20,6 +20,13 @@
   <ItemGroup>
     <Resource Include="Assets\PakScape.ico" />
     <Resource Include="Assets\PakScape.png" />
+    <None Include="..\..\native\build\windows\Release\pakscape_audio.dll"
+          Link="pakscape_audio.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\..\native\build\windows\Release\pakscape_audio.dll')" />
+    <None Include="..\..\native\THIRD_PARTY_NOTICES.md"
+          Link="THIRD_PARTY_NOTICES.md"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -26,5 +26,14 @@
   <ItemGroup>
     <AvaloniaResource Include="../../macos/PakScape/Assets.xcassets/AppIcon.appiconset/AppIcon_256x256@1x.png"
                       Link="Assets/pakscape.png" />
+    <None Include="../../native/build/linux/libpakscape_audio.so"
+          Link="libpakscape_audio.so"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/linux/libpakscape_audio.so')" />
+    <None Include="../../native/THIRD_PARTY_NOTICES.md"
+          Link="THIRD_PARTY_NOTICES.md"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

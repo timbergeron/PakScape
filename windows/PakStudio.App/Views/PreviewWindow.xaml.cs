@@ -1,9 +1,9 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using PakStudio.App.Services;
-using PakStudio.Core.Interfaces;
+using PakStudio.Core.Audio;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 
@@ -12,20 +12,16 @@ namespace PakStudio.App.Views;
 public partial class PreviewWindow : Window
 {
     private readonly IReadOnlyList<ArchiveNode> _nodes;
-    private readonly IArchiveFileTransferService _fileTransferService;
     private readonly DispatcherTimer _audioProgressTimer;
-    private IReadOnlyList<string> _audioTemporaryPaths = [];
-    private MediaPlayer? _audioPlayer;
+    private NativeAudioPlayer? _audioPlayer;
+    private ArchivePreview? _activePreview;
     private int _index;
     private bool _isAudioPlaying;
     private bool _isUpdatingAudioProgress;
 
-    public PreviewWindow(
-        IReadOnlyList<ArchiveNode> nodes,
-        IArchiveFileTransferService fileTransferService)
+    public PreviewWindow(IReadOnlyList<ArchiveNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(fileTransferService);
         ArchivePreviewBuilder.ValidateSelection(nodes);
         if (nodes.Count == 0)
         {
@@ -33,7 +29,6 @@ public partial class PreviewWindow : Window
         }
 
         _nodes = nodes;
-        _fileTransferService = fileTransferService;
         _audioProgressTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -62,6 +57,7 @@ public partial class PreviewWindow : Window
         }
 
         Title = $"{preview.Title} — Quick Preview";
+        _activePreview = preview;
         TitleText.Text = preview.Title;
         SubtitleText.Text = $"{preview.TypeDescription} • {ArchivePreviewBuilder.FormatSize(preview.Size)}";
         PositionText.Text = _nodes.Count == 1 ? "1 of 1" : $"{_index + 1:N0} of {_nodes.Count:N0}";
@@ -116,80 +112,21 @@ public partial class PreviewWindow : Window
         {
             var audioData = preview.EncodedAudio
                 ?? throw new InvalidOperationException("The audio preview contains no playable data.");
-            var file = new ArchiveFileNode(preview.Title, audioData);
-            _audioTemporaryPaths = _fileTransferService.ExportToTemporaryLocation([file]);
-            if (_audioTemporaryPaths.Count != 1)
-            {
-                throw new InvalidOperationException("The audio preview could not be prepared.");
-            }
-
-            var player = new MediaPlayer
-            {
-                ScrubbingEnabled = true,
-                Volume = 0.8,
-            };
-            player.MediaOpened += (_, _) => AudioPlayer_OnMediaOpened(player);
-            player.MediaEnded += (_, _) => AudioPlayer_OnMediaEnded(player);
-            player.MediaFailed += (_, _) => AudioPlayer_OnMediaFailed(player, preview);
+            var player = NativeAudioPlayer.Create(audioData, Path.GetExtension(preview.Title));
             _audioPlayer = player;
 
             AudioPanel.Visibility = Visibility.Visible;
-            AudioStatusText.Text = "Loading audio...";
-            player.Open(new Uri(_audioTemporaryPaths[0], UriKind.Absolute));
+            AudioPlayPauseButton.IsEnabled = true;
+            AudioProgressSlider.Maximum = Math.Max(player.DurationSeconds, 1);
+            AudioProgressSlider.IsEnabled = true;
+            AudioStatusText.Text = $"{FormatAudioTime(TimeSpan.FromSeconds(player.DurationSeconds))} audio";
+            UpdateAudioProgress();
         }
         catch (Exception exception)
         {
             ResetAudioPlayback();
             ShowMetadata(preview with { Message = $"Audio preview unavailable: {exception.Message}" });
         }
-    }
-
-    private void AudioPlayer_OnMediaOpened(MediaPlayer player)
-    {
-        if (!ReferenceEquals(player, _audioPlayer))
-        {
-            return;
-        }
-
-        AudioPlayPauseButton.IsEnabled = true;
-        if (player.NaturalDuration.HasTimeSpan)
-        {
-            var duration = player.NaturalDuration.TimeSpan;
-            AudioProgressSlider.Maximum = Math.Max(duration.TotalSeconds, 1);
-            AudioProgressSlider.IsEnabled = true;
-            AudioStatusText.Text = $"{FormatAudioTime(duration)} audio";
-        }
-        else
-        {
-            AudioStatusText.Text = "Ready";
-        }
-        UpdateAudioProgress();
-    }
-
-    private void AudioPlayer_OnMediaEnded(MediaPlayer player)
-    {
-        if (!ReferenceEquals(player, _audioPlayer))
-        {
-            return;
-        }
-
-        player.Stop();
-        _audioProgressTimer.Stop();
-        _isAudioPlaying = false;
-        AudioStatusText.Text = "Ready";
-        UpdateAudioPlayPauseButton();
-        UpdateAudioProgress();
-    }
-
-    private void AudioPlayer_OnMediaFailed(MediaPlayer player, ArchivePreview preview)
-    {
-        if (!ReferenceEquals(player, _audioPlayer))
-        {
-            return;
-        }
-
-        ResetAudioPlayback();
-        ShowMetadata(preview with { Message = "Windows could not decode or play this audio file." });
     }
 
     private void ResetContent()
@@ -209,18 +146,7 @@ public partial class PreviewWindow : Window
 
         var player = _audioPlayer;
         _audioPlayer = null;
-        if (player is not null)
-        {
-            player.Stop();
-            player.Close();
-        }
-
-        var temporaryPaths = _audioTemporaryPaths;
-        _audioTemporaryPaths = [];
-        if (temporaryPaths.Count > 0)
-        {
-            _fileTransferService.ReleaseTemporaryLocation(temporaryPaths);
-        }
+        player?.Dispose();
 
         AudioPanel.Visibility = Visibility.Collapsed;
         AudioPlayPauseButton.IsEnabled = false;
@@ -237,19 +163,34 @@ public partial class PreviewWindow : Window
     private void UpdateAudioProgress()
     {
         var player = _audioPlayer;
-        if (player is null || !player.NaturalDuration.HasTimeSpan)
+        if (player is null)
         {
             return;
         }
 
-        var duration = player.NaturalDuration.TimeSpan;
-        var position = player.Position;
-        var seconds = Math.Clamp(position.TotalSeconds, 0, duration.TotalSeconds);
-        _isUpdatingAudioProgress = true;
-        AudioProgressSlider.Value = seconds;
-        _isUpdatingAudioProgress = false;
-        AudioTimeText.Text =
-            $"{FormatAudioTime(TimeSpan.FromSeconds(seconds))} / {FormatAudioTime(duration)}";
+        try
+        {
+            var durationSeconds = player.DurationSeconds;
+            var seconds = Math.Clamp(player.PositionSeconds, 0, durationSeconds);
+            _isUpdatingAudioProgress = true;
+            AudioProgressSlider.Value = seconds;
+            _isUpdatingAudioProgress = false;
+            AudioTimeText.Text =
+                $"{FormatAudioTime(TimeSpan.FromSeconds(seconds))} / " +
+                FormatAudioTime(TimeSpan.FromSeconds(durationSeconds));
+
+            if (_isAudioPlaying && player.IsFinished)
+            {
+                _audioProgressTimer.Stop();
+                _isAudioPlaying = false;
+                AudioStatusText.Text = "Ready";
+                UpdateAudioPlayPauseButton();
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
     }
 
     private void UpdateAudioPlayPauseButton()
@@ -301,26 +242,32 @@ public partial class PreviewWindow : Window
             return;
         }
 
-        if (_isAudioPlaying)
+        try
         {
-            player.Pause();
-            _audioProgressTimer.Stop();
-            AudioStatusText.Text = "Paused";
-        }
-        else
-        {
-            if (player.NaturalDuration.HasTimeSpan &&
-                player.Position >= player.NaturalDuration.TimeSpan)
+            if (_isAudioPlaying)
             {
-                player.Position = TimeSpan.Zero;
+                player.Pause();
+                _audioProgressTimer.Stop();
+                AudioStatusText.Text = "Paused";
             }
-            player.Play();
-            _audioProgressTimer.Start();
-            AudioStatusText.Text = "Playing";
-        }
+            else
+            {
+                if (player.IsFinished || player.PositionSeconds >= player.DurationSeconds)
+                {
+                    player.Seek(0);
+                }
+                player.Play();
+                _audioProgressTimer.Start();
+                AudioStatusText.Text = "Playing";
+            }
 
-        _isAudioPlaying = !_isAudioPlaying;
-        UpdateAudioPlayPauseButton();
+            _isAudioPlaying = !_isAudioPlaying;
+            UpdateAudioPlayPauseButton();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
     }
 
     private void AudioProgressSlider_OnValueChanged(
@@ -328,15 +275,37 @@ public partial class PreviewWindow : Window
         RoutedPropertyChangedEventArgs<double> e)
     {
         var player = _audioPlayer;
-        if (_isUpdatingAudioProgress || player is null || !player.NaturalDuration.HasTimeSpan)
+        if (_isUpdatingAudioProgress || player is null)
         {
             return;
         }
 
-        var seconds = Math.Clamp(e.NewValue, 0, player.NaturalDuration.TimeSpan.TotalSeconds);
-        player.Position = TimeSpan.FromSeconds(seconds);
-        AudioTimeText.Text =
-            $"{FormatAudioTime(player.Position)} / {FormatAudioTime(player.NaturalDuration.TimeSpan)}";
+        try
+        {
+            var seconds = Math.Clamp(e.NewValue, 0, player.DurationSeconds);
+            player.Seek(seconds);
+            AudioTimeText.Text =
+                $"{FormatAudioTime(TimeSpan.FromSeconds(seconds))} / " +
+                FormatAudioTime(TimeSpan.FromSeconds(player.DurationSeconds));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowAudioFailure(player, exception);
+        }
+    }
+
+    private void ShowAudioFailure(NativeAudioPlayer player, Exception exception)
+    {
+        if (!ReferenceEquals(player, _audioPlayer) || _activePreview is not { } preview)
+        {
+            return;
+        }
+
+        ResetAudioPlayback();
+        ShowMetadata(preview with
+        {
+            Message = $"Audio preview unavailable: {exception.Message}",
+        });
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Close();

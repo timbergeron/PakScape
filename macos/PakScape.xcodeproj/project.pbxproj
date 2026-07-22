@@ -6,9 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10D10012F31000100A0D101 /* libpakscape_audio.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = A10D10002F31000100A0D101 /* libpakscape_audio.dylib */; };
+		A10D10022F31000100A0D101 /* libpakscape_audio.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = A10D10002F31000100A0D101 /* libpakscape_audio.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		A10D10042F31000100A0D101 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = A10D10052F31000100A0D101 /* THIRD_PARTY_NOTICES.md */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10D10032F31000100A0D101 /* Embed Libraries */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A10D10022F31000100A0D101 /* libpakscape_audio.dylib in Embed Libraries */,
+			);
+			name = "Embed Libraries";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		85121D9F2ECD6CE600FCB4CC /* PakScape.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PakScape.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		85121DAF2ECD6CE600FCB4DD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10D10002F31000100A0D101 /* libpakscape_audio.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; path = ../native/build/macos/libpakscape_audio.dylib; sourceTree = SOURCE_ROOT; };
+		A10D10052F31000100A0D101 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ../native/THIRD_PARTY_NOTICES.md; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -24,6 +46,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10D10012F31000100A0D101 /* libpakscape_audio.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -35,6 +58,8 @@
 			children = (
 				85121DAF2ECD6CE600FCB4DD /* Info.plist */,
 				85121DA12ECD6CE600FCB4CC /* PakScape */,
+				A10D10002F31000100A0D101 /* libpakscape_audio.dylib */,
+				A10D10052F31000100A0D101 /* THIRD_PARTY_NOTICES.md */,
 				85121DA02ECD6CE600FCB4CC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -57,6 +82,7 @@
 				85121D9B2ECD6CE600FCB4CC /* Sources */,
 				85121D9C2ECD6CE600FCB4CC /* Frameworks */,
 				85121D9D2ECD6CE600FCB4CC /* Resources */,
+				A10D10032F31000100A0D101 /* Embed Libraries */,
 			);
 			buildRules = (
 			);
@@ -111,6 +137,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10D10042F31000100A0D101 /* THIRD_PARTY_NOTICES.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -272,6 +299,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakScape;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "PakScape/PakScape-Bridging-Header.h";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -304,6 +332,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakScape;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "PakScape/PakScape-Bridging-Header.h";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

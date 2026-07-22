@@ -1,0 +1,10 @@
+_pka_supports_extension
+_pka_player_create
+_pka_player_destroy
+_pka_player_play
+_pka_player_pause
+_pka_player_seek
+_pka_player_duration
+_pka_player_position
+_pka_player_is_playing
+_pka_player_is_finished

@@ -15,6 +15,7 @@ Debian packages are self-contained and do not require a system-wide .NET install
 Install the .NET 10 SDK, then restore, build, and run the tests:
 
 ```bash
+native/scripts/build-linux.sh
 dotnet restore linux/PakScape.Linux.slnx
 dotnet build linux/PakScape.Linux.slnx --configuration Release --no-restore
 dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release --no-build
@@ -42,18 +43,19 @@ Rich previews are available for:
 
 - Plain text: `.cfg`, `.txt`, `.log`, `.md`, `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.csv`, `.qc`, `.map`, `.ent`, `.rc`, `.shader`, `.def`, `.menu`, and `.arena`.
 - Common images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.tif`, and `.tiff`.
-- Audio: `.wav`, `.mp3`, `.wma`, `.m4a`, `.aac`, `.aif`, and `.aiff`, with native play/pause, seeking, and elapsed-time controls through `mpv`.
+- Audio: `.wav`, `.mp3`, `.flac`, `.ogg`, `.opus`, `.it`, `.s3m`, `.xm`, `.mod`, and `.umx`, with bundled decoding plus native play/pause, seeking, and elapsed-time controls.
 - Quake content: `.bsp`, `.lmp`, `.mdl`, `.pcx`, `.spr`, `.tga`, and `gfx.wad`.
 
 Folders and unsupported or malformed files receive a metadata preview rather than being extracted or launched. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection. Text is truncated after 2 MB, and decoded images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
 
-The Debian package installs `mpv` for audio previews. Portable builds use an `mpv` executable available on `PATH`; when it or a required codec is unavailable, Quick Preview falls back to file metadata without launching another application.
+The Debian package and portable archive include PakScape's native audio component, so audio preview does not require `mpv` or a system codec pack.
 
 ## Build an Ubuntu package
 
-On an Ubuntu or Debian build host with `dpkg-deb` installed:
+On an Ubuntu or Debian build host with CMake, a C/C++ toolchain, and `dpkg-deb` installed:
 
 ```bash
+native/scripts/build-linux.sh
 linux/packaging/build-deb.sh 1.0.1 linux-x64
 ```
 

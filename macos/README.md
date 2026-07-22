@@ -15,6 +15,7 @@ The macOS edition is a native Swift application built with SwiftUI and AppKit. I
 Open `macos/PakScape.xcodeproj` in Xcode 26, or build from the repository root:
 
 ```bash
+native/scripts/build-macos.sh
 xcodebuild \
   -project macos/PakScape.xcodeproj \
   -scheme PakScape \
@@ -50,6 +51,8 @@ The tests cover round trips, malformed and duplicate paths, traversal attempts, 
 ## Platform integration
 
 The app uses sandbox-approved file access, native document windows, Quick Look, default-application previews, and Finder Services. SwiftUI's reference-document lifecycle owns saving, Save As, edited-window state, close confirmation, read-only state, and standard Undo and Redo. File drops use typed Transferable URLs. Select one or more archive items and press Space to open a Finder-style Quick Look preview. Select one item and press Command-I to inspect its archive path, kind, size, and folder contents.
+
+Inline audio preview uses PakScape's shared native player for the same formats as QSS-M: `.wav`, `.mp3`, `.flac`, `.ogg`, `.opus`, `.it`, `.s3m`, `.xm`, `.mod`, and `.umx`.
 
 PakScape renders deterministic still-image previews for Quake BSP, LMP, MDL, PCX, SPR, TGA, and `gfx.wad` content. The icon and list views ask Quick Look Thumbnailing for native, Finder-style previews of system-supported documents and media, with content-aware system icons as the fallback. Other files are passed to the system Quick Look service when opened in the preview panel. Unknown, malformed, or unsupported formats still receive Quick Look's generic file preview. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection; inline native thumbnails are limited to 32 MB per file, text thumbnails use at most the first 2 MB, and decoded custom images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
 

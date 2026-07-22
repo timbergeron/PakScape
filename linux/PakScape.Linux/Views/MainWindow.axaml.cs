@@ -583,7 +583,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var previewWindow = new PreviewWindow(nodes, FileTransferService);
+            var previewWindow = new PreviewWindow(nodes);
             previewWindow.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_previewWindow, previewWindow))

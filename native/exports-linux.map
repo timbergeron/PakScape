@@ -1,0 +1,6 @@
+{
+    global:
+        pka_*;
+    local:
+        *;
+};

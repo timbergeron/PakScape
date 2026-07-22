@@ -18,4 +18,15 @@
     <ProjectReference Include="..\PakStudio.Core\PakStudio.Core.csproj" />
     <ProjectReference Include="..\PakStudio.Formats\PakStudio.Formats.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../native/build/linux/libpakscape_audio.so"
+          Link="libpakscape_audio.so"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/linux/libpakscape_audio.so')" />
+    <None Include="../../native/build/windows/Release/pakscape_audio.dll"
+          Link="pakscape_audio.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/windows/Release/pakscape_audio.dll')" />
+  </ItemGroup>
 </Project>

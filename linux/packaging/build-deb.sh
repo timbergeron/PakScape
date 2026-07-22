@@ -29,6 +29,11 @@ if ! command -v "${dotnet_command}" >/dev/null 2>&1; then
     echo "Required .NET command not found: ${dotnet_command}" >&2
     exit 1
 fi
+native_audio_library="${repository_root}/native/build/linux/libpakscape_audio.so"
+if [[ ! -f "${native_audio_library}" ]]; then
+    echo "Native audio library not found. Run native/scripts/build-linux.sh first." >&2
+    exit 1
+fi
 for command_name in dpkg-deb find install sed tar; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Required command not found: ${command_name}" >&2
@@ -99,6 +104,9 @@ done
 install -m 0644 \
     "${script_directory}/copyright" \
     "${package_root}/usr/share/doc/pakscape/copyright"
+install -m 0644 \
+    "${repository_root}/native/THIRD_PARTY_NOTICES.md" \
+    "${package_root}/usr/share/doc/pakscape/THIRD_PARTY_NOTICES.md"
 install -m 0755 "${script_directory}/postinst" "${package_root}/DEBIAN/postinst"
 install -m 0755 "${script_directory}/postrm" "${package_root}/DEBIAN/postrm"
 
