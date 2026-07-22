@@ -682,7 +682,7 @@ struct PakNodeDataSource: Sendable {
     let data: Data
     let range: Range<Int>
 
-    func materialize() -> Data {
+    nonisolated func materialize() -> Data {
         data.subdata(in: range)
     }
 }
