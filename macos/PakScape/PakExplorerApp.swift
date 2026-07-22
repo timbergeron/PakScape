@@ -325,6 +325,7 @@ private struct AboutView: View {
         .padding(.horizontal, 28)
         .frame(minWidth: 380, idealWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 
