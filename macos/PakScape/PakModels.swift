@@ -409,7 +409,7 @@ enum PakArchiveSearch {
         return nil
     }
 
-    private static func searchableTerm(_ rawTerm: String) -> String? {
+    nonisolated private static func searchableTerm(_ rawTerm: String) -> String? {
         rawTerm.isEmpty ? nil : rawTerm
     }
 
