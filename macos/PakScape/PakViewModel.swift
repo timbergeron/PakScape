@@ -927,6 +927,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     private func nativeThumbnailContentType(forExtension ext: String) -> UTType? {
         guard !ext.isEmpty else { return nil }
+        if Self.textQuickLookExtensions.contains(ext) {
+            return .plainText
+        }
         if let contentType = UTType(filenameExtension: ext) {
             if contentType.conforms(to: .image) ||
                 contentType.conforms(to: .text) ||
@@ -939,7 +942,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 return contentType
             }
         }
-        return Self.textQuickLookExtensions.contains(ext) ? .plainText : nil
+        return nil
     }
 
     private func requestNativeThumbnail(
@@ -949,6 +952,7 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     ) {
         guard previewImageRequests.count < Self.maximumPendingNativeThumbnailRequests else { return }
         let isText = contentType.conforms(to: .text)
+        let thumbnailFileExtension = isText ? "txt" : fileExtension
         guard isText || node.fileSize <= Self.maximumNativeThumbnailFileSize else {
             previewImageMisses.insert(node.id)
             return
@@ -986,7 +990,9 @@ final class PakViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                     )
 
                     do {
-                        let sourceURL = base.appendingPathComponent("preview.\(fileExtension)")
+                        // Use a canonical text extension so Quick Look does not
+                        // reinterpret formats such as .cfg as opaque data.
+                        let sourceURL = base.appendingPathComponent("preview.\(thumbnailFileExtension)")
                         let thumbnailData = source.materialize()
                         try thumbnailData.write(to: sourceURL, options: .atomic)
                         return (base: base, source: sourceURL)
