@@ -19,6 +19,7 @@ Notable user-visible changes are documented here.
 - Native audio controls in Quick Preview on Windows and Linux for common music and sound formats.
 - Native Finder-style inline thumbnails for common files and content-aware fallback icons on macOS.
 - A system-provided macOS toolbar search field backed by PakScape's archive-wide matching.
+- Finder-style Get Info details for macOS archive files and folders, available from menus and Command-I.
 - Standard Undo and Redo support for macOS archive edits.
 
 ### Changed

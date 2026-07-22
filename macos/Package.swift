@@ -22,6 +22,7 @@ let package = Package(
                 "PakDocument.swift",
                 "PakExplorerApp.swift",
                 "PakIconView.swift",
+                "PakItemInfo.swift",
                 "PakListView.swift",
                 "PakQuickLook.swift",
                 "PakViewModel.swift",

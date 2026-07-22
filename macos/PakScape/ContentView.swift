@@ -22,7 +22,7 @@ struct ContentView: View {
     @State private var window: NSWindow?
     @State private var iconZoomLevel: Int = 1
     @State private var searchText = ""
-    @State private var isSearchExpanded = false
+    @State private var itemInfo: PakItemInfo?
 
     init(document: PakDocument, isEditable: Bool) {
         self.document = document
@@ -40,10 +40,12 @@ struct ContentView: View {
         }
         .searchable(
             text: $searchText,
-            isPresented: $isSearchExpanded,
             placement: .toolbar,
             prompt: "Search all paths"
         )
+        .sheet(item: $itemInfo) { info in
+            PakItemInfoView(info: info)
+        }
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
             model.connectDocument(undoManager: undoManager) { pakFile in
@@ -90,16 +92,10 @@ struct ContentView: View {
                 window = newWindow
             }
         )
-        .onChange(of: isSearchExpanded) { _, isPresented in
-            if !isPresented {
-                searchText = ""
-            }
-        }
     }
 
     private func closeSearch() {
         searchText = ""
-        isSearchExpanded = false
     }
 
     private var sidebar: some View {
@@ -412,6 +408,9 @@ struct ContentView: View {
             onOpenFolder: { folder in
                 openFolder(folder)
             },
+            onGetInfo: { node in
+                showInfo(for: node)
+            },
             onNewFolder: {
                 createFolder(at: model.currentFolder)
             },
@@ -441,6 +440,9 @@ struct ContentView: View {
             onOpenFolder: { folder in
                 openFolder(folder)
             },
+            onGetInfo: { node in
+                showInfo(for: node)
+            },
             onNewFolder: {
                 createFolder(at: model.currentFolder)
             },
@@ -464,6 +466,11 @@ struct ContentView: View {
             closeSearch()
         }
         model.navigate(to: folder)
+    }
+
+    private func showInfo(for node: PakNode) {
+        guard let pakFile = model.pakFile else { return }
+        itemInfo = PakItemInfo(node: node, root: pakFile.root, archiveName: pakFile.name)
     }
 
 }
@@ -493,6 +500,8 @@ struct PakCommands {
     let canEnclosingFolder: Bool
     let openSelection: () -> Void
     let canOpenSelection: Bool
+    let getInfo: () -> Void
+    let canGetInfo: Bool
     let quickLook: () -> Void
     let canQuickLook: Bool
 }
@@ -586,6 +595,12 @@ private extension ContentView {
                 model.openSelectedFolder()
             },
             canOpenSelection: model.canOpenSelectedFolder,
+            getInfo: {
+                if let node = selectedInfoNode {
+                    showInfo(for: node)
+                }
+            },
+            canGetInfo: selectedInfoNode != nil,
             quickLook: {
                 quickLookSelection()
             },
@@ -595,6 +610,16 @@ private extension ContentView {
 
     func quickLookSelection() {
         model.toggleQuickLook(for: model.selectedNodes)
+    }
+
+    var selectedInfoNode: PakNode? {
+        if model.selectedNodes.count == 1 {
+            return model.selectedNodes.first
+        }
+        if model.selectedNodes.isEmpty {
+            return model.currentFolder
+        }
+        return nil
     }
 
     func createFolder(at parent: PakNode?) {

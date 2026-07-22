@@ -158,6 +158,7 @@ struct PakIconView: NSViewRepresentable {
     var zoomLevel: Int
     var viewModel: PakViewModel
     var onOpenFolder: (PakNode) -> Void
+    var onGetInfo: (PakNode) -> Void
     var onNewFolder: () -> Void
     var onAddFiles: () -> Void
     var onCut: () -> Void
@@ -520,6 +521,11 @@ struct PakIconView: NSViewRepresentable {
             openItem.representedObject = node
             menu.addItem(openItem)
 
+            let infoItem = NSMenuItem(title: "Get Info", action: #selector(getInfo(_:)), keyEquivalent: "")
+            infoItem.target = self
+            infoItem.representedObject = node
+            menu.addItem(infoItem)
+
             menu.addItem(.separator())
 
             let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
@@ -567,6 +573,11 @@ struct PakIconView: NSViewRepresentable {
         @objc private func openFromMenu(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? PakNode else { return }
             open(node: node)
+        }
+
+        @objc private func getInfo(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? PakNode else { return }
+            parent.onGetInfo(node)
         }
 
         @objc private func cutSelection(_ sender: NSMenuItem) {

@@ -63,25 +63,25 @@ struct PakEditCommands: Commands {
             Button("Cut") {
                 pakCommands?.cut()
             }
-            .keyboardShortcut("X")
+            .keyboardShortcut("x")
             .disabled(!(pakCommands?.canCut ?? false))
 
             Button("Copy") {
                 pakCommands?.copy()
             }
-            .keyboardShortcut("C")
+            .keyboardShortcut("c")
             .disabled(!(pakCommands?.canCopy ?? false))
 
             Button("Paste") {
                 _ = pakCommands?.paste()
             }
-            .keyboardShortcut("V")
+            .keyboardShortcut("v")
             .disabled(!(pakCommands?.canPaste ?? false))
 
             Button("Select All") {
                 pakCommands?.selectAll()
             }
-            .keyboardShortcut("A")
+            .keyboardShortcut("a")
             .disabled(!(pakCommands?.canSelectAll ?? false))
 
             Button("Rename…") {
@@ -103,6 +103,8 @@ struct PakEditCommands: Commands {
 }
 
 struct PakOpenCommands: Commands {
+    @FocusedValue(\.pakCommands) private var pakCommands
+
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button {
@@ -110,7 +112,15 @@ struct PakOpenCommands: Commands {
             } label: {
                 Label("Open…", systemImage: "folder")
             }
-            .keyboardShortcut("O")
+            .keyboardShortcut("o")
+
+            Divider()
+
+            Button("Get Info") {
+                pakCommands?.getInfo()
+            }
+            .keyboardShortcut("i")
+            .disabled(!(pakCommands?.canGetInfo ?? false))
         }
     }
 }
@@ -125,7 +135,7 @@ struct PakNewCommands: Commands {
             } label: {
                 Label("New Pak", systemImage: "doc")
             }
-            .keyboardShortcut("N")
+            .keyboardShortcut("n")
 
             Button {
                 pakCommands?.newFolder()
