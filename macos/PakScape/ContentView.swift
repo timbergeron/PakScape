@@ -52,7 +52,7 @@ struct ContentView: View {
             detailView
         }
         .sheet(item: $itemInfo) { info in
-            PakItemInfoView(info: info)
+            PakItemInfoView(info: info, viewModel: model)
         }
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
@@ -536,7 +536,17 @@ struct ContentView: View {
 
     private func showInfo(for node: PakNode) {
         guard let pakFile = model.pakFile else { return }
-        itemInfo = PakItemInfo(node: node, root: pakFile.root, archiveName: pakFile.name)
+        let formatData = try? PakNodeData.boundedSource(
+            for: node,
+            originalData: pakFile.data,
+            maximumLength: PakFormatInspector.maximumInspectionBytes
+        ).materialize()
+        itemInfo = PakItemInfo(
+            node: node,
+            root: pakFile.root,
+            archiveName: pakFile.name,
+            formatData: formatData
+        )
     }
 
 }

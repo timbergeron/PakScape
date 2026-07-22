@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 
 struct PakItemInfo: Identifiable {
+    let node: PakNode
     let id: PakNode.ID
     let name: String
     let kind: String
@@ -11,14 +12,19 @@ struct PakItemInfo: Identifiable {
     let size: String
     let contents: String?
     let isFolder: Bool
+    let formatDetails: [PakFormatDetail]
 
-    init(node: PakNode, root: PakNode, archiveName: String) {
+    init(node: PakNode, root: PakNode, archiveName: String, formatData: Data? = nil) {
+        self.node = node
         id = node.id
         name = node.name
         kind = node.fileType
         path = Self.path(to: node, in: root) ?? node.name
         self.archiveName = archiveName
         isFolder = node.isFolder
+        formatDetails = node.isFolder
+            ? []
+            : PakFormatInspector.details(fileName: node.name, data: formatData, fileSize: node.fileSize)
 
         if node.isFolder {
             let summary = Self.folderSummary(node)
@@ -87,20 +93,31 @@ struct PakItemInfo: Identifiable {
 
 struct PakItemInfoView: View {
     let info: PakItemInfo
+    @ObservedObject var viewModel: PakViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 16) {
-                Image(systemName: info.isFolder ? "folder.fill" : "doc.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(
-                        info.isFolder
-                            ? Color.accentColor
-                            : Color(nsColor: .secondaryLabelColor)
-                    )
-                    .frame(width: 58, height: 58)
-                    .accessibilityHidden(true)
+                Group {
+                    if let previewImage = viewModel.previewImage(for: info.node) {
+                        Image(nsImage: previewImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        Image(systemName: info.isFolder ? "folder.fill" : "doc.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(
+                                info.isFolder
+                                    ? Color.accentColor
+                                    : Color(nsColor: .secondaryLabelColor)
+                            )
+                    }
+                }
+                .frame(width: 64, height: 64)
+                .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(info.name)
@@ -122,6 +139,19 @@ struct PakItemInfoView: View {
                 infoRow("Size:", info.size)
                 if let contents = info.contents {
                     infoRow("Contents:", contents)
+                }
+            }
+
+            if !info.formatDetails.isEmpty {
+                Divider()
+
+                Text("Format Details")
+                    .font(.headline)
+
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+                    ForEach(info.formatDetails) { detail in
+                        infoRow("\(detail.label):", detail.value)
+                    }
                 }
             }
 

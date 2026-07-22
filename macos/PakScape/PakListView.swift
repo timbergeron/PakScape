@@ -10,6 +10,7 @@ private final class PakListTableView: NSTableView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
     var contextMenuProvider: ((Int) -> NSMenu?)?
     var renameHandler: (() -> Void)?
+    var getInfoHandler: (() -> Bool)?
 
     var lastMouseDownRow: Int = -1
     var lastMouseDownWasOnAlreadySelectedRow: Bool = false
@@ -70,6 +71,16 @@ private final class PakListTableView: NSTableView {
         super.keyDown(with: event)
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "i",
+           getInfoHandler?() == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let row = self.row(at: point)
@@ -90,6 +101,10 @@ private final class PakListTableView: NSTableView {
 
     @objc func renameSelectedItem(_ sender: Any?) {
         renameHandler?()
+    }
+
+    @objc func showPakItemInfo(_ sender: Any?) {
+        _ = getInfoHandler?()
     }
 }
 
@@ -162,6 +177,9 @@ struct PakListView: NSViewRepresentable {
         }
         tableView.renameHandler = { [weak coordinator = context.coordinator] in
             coordinator?.renameFromEditCommand()
+        }
+        tableView.getInfoHandler = { [weak coordinator = context.coordinator] in
+            coordinator?.getInfoForSelection() ?? false
         }
 
         let scrollView = NSScrollView()
@@ -452,6 +470,27 @@ struct PakListView: NSViewRepresentable {
             renameWorkItem = workItem
             DispatchQueue.main.async(execute: workItem)
         }
+
+        func getInfoForSelection() -> Bool {
+            guard let tableView else { return false }
+
+            let node: PakNode?
+            if tableView.selectedRowIndexes.count == 1,
+               let row = tableView.selectedRowIndexes.first,
+               row >= 0,
+               row < parent.nodes.count {
+                node = parent.nodes[row]
+            } else if tableView.selectedRowIndexes.isEmpty {
+                node = parent.viewModel.currentFolder
+            } else {
+                node = nil
+            }
+
+            guard let node else { return false }
+            parent.onGetInfo(node)
+            return true
+        }
+
         // MARK: - Type-to-select handling
 
         func handleKeyDown(_ event: NSEvent) -> Bool {

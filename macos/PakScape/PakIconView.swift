@@ -7,6 +7,7 @@ private final class PakIconCollectionView: NSCollectionView {
     var contextMenuProvider: ((IndexPath) -> NSMenu?)?
     var renameHandler: (() -> Void)?
     var onRenameClick: ((IndexPath) -> Void)?
+    var getInfoHandler: (() -> Bool)?
 
     private var lastMouseDownIndexPath: IndexPath?
     private var lastMouseDownWasOnAlreadySelectedItem = false
@@ -17,6 +18,16 @@ private final class PakIconCollectionView: NSCollectionView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "i",
+           getInfoHandler?() == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -98,6 +109,10 @@ private final class PakIconCollectionView: NSCollectionView {
 
     @objc func renameSelectedItem(_ sender: Any?) {
         renameHandler?()
+    }
+
+    @objc func showPakItemInfo(_ sender: Any?) {
+        _ = getInfoHandler?()
     }
 }
 
@@ -193,6 +208,9 @@ struct PakIconView: NSViewRepresentable {
         }
         collectionView.renameHandler = { [weak coordinator = context.coordinator] in
             coordinator?.renameFromEditCommand()
+        }
+        collectionView.getInfoHandler = { [weak coordinator = context.coordinator] in
+            coordinator?.getInfoForSelection() ?? false
         }
         collectionView.onRenameClick = { [weak coordinator = context.coordinator] indexPath in
             coordinator?.renameFromSecondClick(at: indexPath)
@@ -402,6 +420,26 @@ struct PakIconView: NSViewRepresentable {
             let menuItem = NSMenuItem()
             menuItem.representedObject = indexPath
             renameItem(menuItem)
+        }
+
+        func getInfoForSelection() -> Bool {
+            guard let collectionView else { return false }
+
+            let node: PakNode?
+            if collectionView.selectionIndexPaths.count == 1,
+               let indexPath = collectionView.selectionIndexPaths.first,
+               indexPath.item >= 0,
+               indexPath.item < parent.nodes.count {
+                node = parent.nodes[indexPath.item]
+            } else if collectionView.selectionIndexPaths.isEmpty {
+                node = parent.viewModel.currentFolder
+            } else {
+                node = nil
+            }
+
+            guard let node else { return false }
+            parent.onGetInfo(node)
+            return true
         }
 
         func handleKeyDown(_ event: NSEvent) -> Bool {

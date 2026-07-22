@@ -89,6 +89,56 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertEqual(source.materialize(), Data([8, 9, 10, 11]))
     }
 
+    func testFormatInspectorReadsQuakeModelMetadata() {
+        var data = Data("IDPO".utf8)
+        appendInt32(6, to: &data) // version
+        data.append(Data(repeating: 0, count: 40))
+        appendInt32(2, to: &data) // skins
+        appendInt32(320, to: &data) // skin width
+        appendInt32(200, to: &data) // skin height
+        appendInt32(512, to: &data) // vertices
+        appendInt32(640, to: &data) // triangles
+        appendInt32(10, to: &data) // frames
+
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "player.mdl",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Format"], "Quake alias model")
+        XCTAssertEqual(details["Version"], "6")
+        XCTAssertEqual(details["Skin Size"], "320 × 200 pixels")
+        XCTAssertEqual(details["Skins"], "2")
+        XCTAssertEqual(details["Vertices"], "512")
+        XCTAssertEqual(details["Triangles"], "640")
+        XCTAssertEqual(details["Frames"], "10")
+    }
+
+    func testFormatInspectorRejectsTruncatedKnownFormat() {
+        XCTAssertEqual(
+            PakFormatInspector.details(
+                fileName: "broken.mdl",
+                data: Data("IDPO".utf8),
+                fileSize: 4
+            ),
+            []
+        )
+    }
+
+    func testFormatInspectorReportsTextEncodingAndLines() {
+        let data = Data("first\nsecond\nthird".utf8)
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "autoexec.cfg",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Format"], "Quake configuration")
+        XCTAssertEqual(details["Encoding"], "UTF-8")
+        XCTAssertEqual(details["Lines"], "3")
+    }
+
     func testWriterDoesNotMutateDocumentUntilOutputIsCommitted() throws {
         let root = PakNode(name: "/")
         let file = PakNode(name: "readme.txt")

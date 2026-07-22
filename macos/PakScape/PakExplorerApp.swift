@@ -117,9 +117,16 @@ struct PakOpenCommands: Commands {
             Divider()
 
             Button("Get Info") {
-                pakCommands?.getInfo()
+                let handledByNativeView = NSApp.sendAction(
+                    NSSelectorFromString("showPakItemInfo:"),
+                    to: nil,
+                    from: nil
+                )
+                if !handledByNativeView {
+                    pakCommands?.getInfo()
+                }
             }
-            .keyboardShortcut("i")
+            .keyboardShortcut("i", modifiers: [.command])
             .disabled(!(pakCommands?.canGetInfo ?? false))
         }
     }

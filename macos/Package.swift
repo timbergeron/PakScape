@@ -28,7 +28,7 @@ let package = Package(
                 "PakViewModel.swift",
                 "PreferencesView.swift",
             ],
-            sources: ["PakModels.swift"]
+            sources: ["PakModels.swift", "PakFormatDetails.swift"]
         ),
         .testTarget(
             name: "PakArchiveCoreTests",
