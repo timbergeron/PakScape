@@ -93,7 +93,11 @@ struct PakScapeApp: App {
     
     var body: some Scene {
         DocumentGroup(newDocument: { PakDocument() }) { file in
-            ContentView(document: file.document, isEditable: file.isEditable)
+            ContentView(
+                document: file.document,
+                fileURL: file.fileURL,
+                isEditable: file.isEditable
+            )
                 .id(ObjectIdentifier(file.document))
         }
         .commands {
@@ -184,6 +188,17 @@ struct PakOpenCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: [.command])
             .disabled(!(pakCommands?.canGetInfo ?? false))
+        }
+
+        CommandGroup(after: .saveItem) {
+            Divider()
+
+            Button {
+                pakCommands?.openPakFolder()
+            } label: {
+                Label("Open PAK Folder", systemImage: "folder")
+            }
+            .disabled(!(pakCommands?.canOpenPakFolder ?? false))
         }
     }
 }

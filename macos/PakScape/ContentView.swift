@@ -21,6 +21,7 @@ private let sidebarBackgroundColor = NSColor(
 
 struct ContentView: View {
     let document: PakDocument
+    let fileURL: URL?
     let isEditable: Bool
     @Environment(\.undoManager) private var undoManager
     @StateObject private var model: PakViewModel
@@ -37,8 +38,9 @@ struct ContentView: View {
     @State private var isSearchFieldFocused = false
     @State private var itemInfo: PakItemInfo?
 
-    init(document: PakDocument, isEditable: Bool) {
+    init(document: PakDocument, fileURL: URL?, isEditable: Bool) {
         self.document = document
+        self.fileURL = fileURL
         self.isEditable = isEditable
         self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.pakFile, isEditable: isEditable))
     }
@@ -578,6 +580,8 @@ struct PakCommands {
     let canOpenSelection: Bool
     let getInfo: () -> Void
     let canGetInfo: Bool
+    let openPakFolder: () -> Void
+    let canOpenPakFolder: Bool
     let quickLook: () -> Void
     let canQuickLook: Bool
 }
@@ -744,6 +748,11 @@ private extension ContentView {
                 }
             },
             canGetInfo: selectedInfoNode != nil,
+            openPakFolder: {
+                guard let fileURL else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            },
+            canOpenPakFolder: fileURL != nil,
             quickLook: {
                 quickLookSelection()
             },
