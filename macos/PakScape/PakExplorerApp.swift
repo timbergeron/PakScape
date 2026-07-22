@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let maximumVisibleDockRecents = 5
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         FinderServiceManager.shared.applyInitialSettings()
         removeBlankFileMenuItem()
@@ -9,6 +11,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         PakQuickLook.shared.hide()
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let recentURLs = NSDocumentController.shared.recentDocumentURLs
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let heading = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        menu.addItem(heading)
+
+        for url in recentURLs.prefix(maximumVisibleDockRecents) {
+            menu.addItem(recentMenuItem(for: url))
+        }
+
+        let remainingURLs = recentURLs.dropFirst(maximumVisibleDockRecents)
+        if !remainingURLs.isEmpty {
+            let moreMenu = NSMenu(title: "More")
+            moreMenu.autoenablesItems = false
+            for url in remainingURLs {
+                moreMenu.addItem(recentMenuItem(for: url))
+            }
+
+            let moreItem = NSMenuItem(title: "More", action: nil, keyEquivalent: "")
+            moreItem.submenu = moreMenu
+            moreItem.isEnabled = true
+            menu.addItem(moreItem)
+        }
+
+        return menu
+    }
+
+    private func recentMenuItem(for url: URL) -> NSMenuItem {
+        let displayName = FileManager.default.displayName(atPath: url.path)
+        let title = displayName.isEmpty ? url.lastPathComponent : displayName
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(openRecentDocument(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = url
+        item.toolTip = url.path
+        item.isEnabled = true
+        return item
+    }
+
+    @objc private func openRecentDocument(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+            if let error {
+                NSApp.presentError(error)
+            }
+        }
     }
 
     private func removeBlankFileMenuItem() {
