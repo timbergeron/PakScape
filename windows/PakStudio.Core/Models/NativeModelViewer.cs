@@ -10,6 +10,8 @@ public enum ModelFormat
     Mdl = 1,
     Md3 = 2,
     Md5 = 3,
+    Spr = 4,
+    Bsp = 5,
 }
 
 public enum ModelNudge
@@ -36,7 +38,8 @@ public sealed record ModelTextureRequest(int Index, string Surface, string Name)
 
 /// <summary>
 /// Cross-platform managed owner for PakScape's private model viewer, which parses
-/// MDL, MD3, and MD5 meshes and software renders them with an orbit camera.
+/// MDL, MD3, and MD5 meshes plus SPR sprites and BSP brush models, and software
+/// renders them with an orbit camera.
 /// </summary>
 public sealed class NativeModelViewer : IDisposable
 {
@@ -69,6 +72,29 @@ public sealed class NativeModelViewer : IDisposable
         try
         {
             return NativeMethods.SupportsExtension(extension) != 0;
+        }
+        catch (Exception exception) when (IsMissingBackend(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when BSP data is a brush model — an ammo box or a health kit — rather than
+    /// a playable level. A level has its own flat overview preview, so only brush models
+    /// are handed to the viewer. The file's content decides, not its name.
+    /// </summary>
+    public static bool IsBspBrushModel(byte[] bspData)
+    {
+        ArgumentNullException.ThrowIfNull(bspData);
+        if (bspData.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            return NativeMethods.BspIsBrushModel(bspData, (nuint)bspData.Length) != 0;
         }
         catch (Exception exception) when (IsMissingBackend(exception))
         {
@@ -350,6 +376,9 @@ public sealed class NativeModelViewer : IDisposable
         [DllImport(LibraryName, EntryPoint = "pkm_supports_extension", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int SupportsExtension(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string extension);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_bsp_is_brush_model", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int BspIsBrushModel([In] byte[] bspData, nuint bspSize);
 
         [DllImport(LibraryName, EntryPoint = "pkm_model_create", CallingConvention = CallingConvention.Cdecl)]
         internal static extern SafeModelHandle ModelCreate(

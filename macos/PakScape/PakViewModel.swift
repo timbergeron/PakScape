@@ -245,11 +245,18 @@ final class PakViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// Opens formats that PakScape previews better than external applications.
-    /// Models use the interactive viewer and LMP images use the rendered Quick Look path.
+    /// Handles opening formats PakScape has a better destination for than whichever
+    /// application happens to claim the extension. Models use the interactive viewer, LMP
+    /// images use the rendered Quick Look path, and demos go to the web player. Returns
+    /// false when the caller should fall back to the default application.
     @discardableResult
-    func showQuickPreviewOnOpen(for node: PakNode) -> Bool {
+    func handleOpen(for node: PakNode) -> Bool {
         if showModelPreview(for: [node]) {
+            return true
+        }
+
+        if canPlayDemoInBrowser(node) {
+            playDemoInBrowser(node)
             return true
         }
 
@@ -305,6 +312,11 @@ final class PakViewModel: NSObject, ObservableObject {
 
         for (node, fileExtension) in zip(files, extensions) {
             guard let data = extractData(for: node) else { return nil }
+
+            /* Only a BSP brush model belongs here; a level keeps its flat overview. */
+            if fileExtension == "bsp", !QuakeModelFormats.isBrushModel(data: data) {
+                return nil
+            }
 
             let path = node.entry?.name ?? node.name
             let resolver = QuakeModelTextureResolver(
@@ -460,6 +472,64 @@ final class PakViewModel: NSObject, ObservableObject {
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
+    }
+
+    func canPlayDemoInBrowser(_ node: PakNode) -> Bool {
+        guard !node.isFolder,
+              node.fileSize <= DemoPlaybackHandoff.maximumSessionBytes else { return false }
+        return (node.name as NSString).pathExtension.lowercased() == "dem"
+    }
+
+    /// Publishes the demo on a loopback socket and opens the web player on it. The demo is
+    /// never uploaded: the browser fetches it back from this machine.
+    func playDemoInBrowser(_ node: PakNode) {
+        guard canPlayDemoInBrowser(node) else { return }
+
+        do {
+            let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let summary = QuakeDemoInspector.inspect(data)
+            let url = try DemoPlaybackHandoff.launchURL(
+                demo: DemoPlaybackAsset(fileName: node.name, data: data),
+                packages: archivePackages(providingMapsFor: summary),
+                summary: summary
+            )
+            NSWorkspace.shared.open(url)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Play \(node.name)"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    /// Offers the open archive to the player only when it actually holds a map the demo
+    /// visits, so a large PAK is not shipped across for a stock level.
+    private func archivePackages(providingMapsFor summary: QuakeDemoSummary?) -> [DemoPlaybackAsset] {
+        guard let summary, let pakFile, !pakFile.data.isEmpty else { return [] }
+
+        let wanted = Set(summary.segments.map { $0.map.lowercased() }.filter { !$0.isEmpty })
+        guard !wanted.isEmpty else { return [] }
+
+        var provides = false
+        var stack = [pakFile.root]
+        while let node = stack.popLast(), !provides {
+            for child in node.children ?? [] {
+                if child.isFolder {
+                    stack.append(child)
+                    continue
+                }
+                let name = (child.name as NSString).deletingPathExtension.lowercased()
+                if (child.name as NSString).pathExtension.lowercased() == "bsp",
+                   wanted.contains(name) {
+                    provides = true
+                    break
+                }
+            }
+        }
+        guard provides else { return [] }
+
+        return [DemoPlaybackAsset(fileName: pakFile.name, data: pakFile.data)]
     }
 
     func canPreviewAudio(_ node: PakNode) -> Bool {
@@ -1007,9 +1077,9 @@ final class PakViewModel: NSObject, ObservableObject {
         let data = try? PakNodeData.boundedSource(
             for: node,
             originalData: pakFile?.data,
-            maximumLength: PakFormatInspector.maximumInspectionBytes
+            maximumLength: PakFormatInspector.inspectionByteLimit(for: node.name)
         ).materialize()
-        let summary = PakFormatInspector.summary(
+        let summary = PakFormatInspector.detailsColumnSummary(
             fileName: node.name,
             data: data,
             fileSize: node.fileSize
@@ -1029,7 +1099,7 @@ final class PakViewModel: NSObject, ObservableObject {
         let data = try? PakNodeData.boundedSource(
             for: node,
             originalData: pakFile?.data,
-            maximumLength: PakFormatInspector.maximumInspectionBytes
+            maximumLength: PakFormatInspector.inspectionByteLimit(for: node.name)
         ).materialize()
         let text = PakFormatInspector.searchableText(
             fileName: node.name,

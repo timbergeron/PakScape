@@ -672,6 +672,17 @@ struct PakListView: NSViewRepresentable {
             infoItem.representedObject = node
             menu.addItem(infoItem)
 
+            if parent.viewModel.canPlayDemoInBrowser(node) {
+                let playItem = NSMenuItem(
+                    title: "Play Demo in Browser…",
+                    action: #selector(playDemoInBrowser(_:)),
+                    keyEquivalent: ""
+                )
+                playItem.target = self
+                playItem.representedObject = node
+                menu.addItem(playItem)
+            }
+
             if parent.viewModel.canSaveImageAs(node) {
                 let saveAsItem = NSMenuItem(title: "Save As", action: nil, keyEquivalent: "")
                 let saveAsMenu = NSMenu(title: "Save As")
@@ -743,6 +754,11 @@ struct PakListView: NSViewRepresentable {
             parent.onGetInfo(node)
         }
 
+        @objc private func playDemoInBrowser(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? PakNode else { return }
+            parent.viewModel.playDemoInBrowser(node)
+        }
+
         @objc private func saveImageAs(_ sender: NSMenuItem) {
             guard let request = sender.representedObject as? PakImageSaveRequest else { return }
             parent.viewModel.saveImageAs(request.node, format: request.format)
@@ -807,8 +823,9 @@ struct PakListView: NSViewRepresentable {
         private func open(node: PakNode) {
             if node.isFolder {
                 parent.onOpenFolder(node)
-            } else if !parent.viewModel.showQuickPreviewOnOpen(for: node) {
-                /* Preview-native assets stay in PakScape; anything else goes to its own app. */
+            } else if !parent.viewModel.handleOpen(for: node) {
+                /* Assets PakScape has its own destination for stay here; the rest go to
+                   whichever application claims them. */
                 parent.viewModel.openInDefaultApp(node: node)
             }
         }

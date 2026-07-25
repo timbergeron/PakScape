@@ -10,8 +10,9 @@ using PakStudio.Core.Preview;
 namespace PakStudio.App.Controls;
 
 /// <summary>
-/// Interactive MDL, MD3, and MD5 preview: drag to orbit, right-drag to pan, wheel
-/// to zoom, and a turntable that starts on its own once the pane goes idle.
+/// Interactive MDL, MD3, MD5, sprite, and BSP brush model preview: drag to orbit,
+/// right-drag to pan, wheel to zoom, and a turntable that starts on its own once the
+/// pane goes idle. Sprites skip the turntable and play their frames instead.
 /// </summary>
 public sealed class ModelPreviewControl : UserControl, IDisposable
 {

@@ -689,8 +689,9 @@ struct PakIconView: NSViewRepresentable {
         private func open(node: PakNode) {
             if node.isFolder {
                 parent.onOpenFolder(node)
-            } else if !parent.viewModel.showQuickPreviewOnOpen(for: node) {
-                /* Preview-native assets stay in PakScape; anything else goes to its own app. */
+            } else if !parent.viewModel.handleOpen(for: node) {
+                /* Assets PakScape has its own destination for stay here; the rest go to
+                   whichever application claims them. */
                 parent.viewModel.openInDefaultApp(node: node)
             }
         }

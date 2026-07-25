@@ -36,7 +36,6 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var isSearchFieldFocused = false
-    @State private var itemInfo: PakItemInfo?
 
     init(document: PakDocument, fileURL: URL?, isEditable: Bool) {
         self.document = document
@@ -53,9 +52,6 @@ struct ContentView: View {
         } detail: {
             detailView
         }
-        .sheet(item: $itemInfo) { info in
-            PakItemInfoView(info: info, viewModel: model)
-        }
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
             model.connectDocument(undoManager: undoManager) { pakFile in
@@ -69,6 +65,9 @@ struct ContentView: View {
         .onChange(of: model.selectionResetVersion) { _, _ in
             selectedFileIDs.removeAll()
             cancelRenaming()
+            if let root = model.pakFile?.root {
+                PakItemInfoPresenter.shared.closeWindows(missingFrom: root)
+            }
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -455,6 +454,11 @@ struct ContentView: View {
                 select(node)
                 model.exportSelectedFile()
             }
+            if model.canPlayDemoInBrowser(node) {
+                Button("Play Demo in Browser…") {
+                    model.playDemoInBrowser(node)
+                }
+            }
             if model.canSaveImageAs(node) {
                 Menu("Save As") {
                     ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
@@ -554,13 +558,16 @@ struct ContentView: View {
         let formatData = try? PakNodeData.boundedSource(
             for: node,
             originalData: pakFile.data,
-            maximumLength: PakFormatInspector.maximumInspectionBytes
+            maximumLength: PakFormatInspector.inspectionByteLimit(for: node.name)
         ).materialize()
-        itemInfo = PakItemInfo(
-            node: node,
-            root: pakFile.root,
-            archiveName: pakFile.name,
-            formatData: formatData
+        PakItemInfoPresenter.shared.show(
+            info: PakItemInfo(
+                node: node,
+                root: pakFile.root,
+                archiveName: pakFile.name,
+                formatData: formatData
+            ),
+            viewModel: model
         )
     }
 

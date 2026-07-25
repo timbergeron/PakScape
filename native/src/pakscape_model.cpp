@@ -24,6 +24,13 @@ constexpr int kMaxJoints = 4096;
 constexpr int kMaxWeights = 4'000'000;
 constexpr int kMaxRenderDimension = 4096;
 constexpr int kMaxRenderPixels = 6'000'000;
+/* Every sprite frame is decoded up front, so the whole flipbook shares a budget. */
+constexpr int kMaxSpritePixels = 32'000'000;
+
+/* Sprites that store no intervals animate at the rate Quake plays them. */
+constexpr float kDefaultSpriteInterval = 0.1f;
+constexpr float kMinSpriteInterval = 0.02f;
+constexpr float kMaxSpriteInterval = 5.0f;
 
 constexpr float kFieldOfView = 32.0f * kPi / 180.0f;
 constexpr float kDefaultYaw = 32.0f * kPi / 180.0f;
@@ -31,7 +38,6 @@ constexpr float kDefaultPitch = 15.0f * kPi / 180.0f;
 constexpr float kMaxPitch = 88.0f * kPi / 180.0f;
 constexpr float kAutoRotateDelay = 2.75f;
 constexpr float kAutoRotateSpeed = 0.32f;
-constexpr int kShadowResolution = 128;
 
 /* The id1 palette, matching the one the 2D preview decoders already use. */
 const unsigned char kQuakePalette[768] = {
@@ -150,6 +156,8 @@ struct Surface {
     std::vector<Vertex> vertices;
     std::vector<int> indices;
     int texture = -1;
+    /* Sprites are fullbright in Quake, so the studio rig must not touch them. */
+    bool unlit = false;
 };
 
 /* Bounds-checked little-endian access into the untrusted file buffer. */
@@ -281,7 +289,12 @@ void computeSmoothNormals(Surface &surface, const std::vector<int> &smoothingKey
     }
 }
 
-Texture decodePalettedSkin(const Reader &reader, size_t offset, int width, int height) {
+/*
+ * MDL skins and sprites treat palette index 255 as a cutout. BSP textures do not:
+ * there 255 is an ordinary colour, so a cutout would punch holes in the brushwork.
+ */
+Texture decodePalettedSkin(const Reader &reader, size_t offset, int width, int height,
+                           bool cutoutLastIndex = true) {
     Texture texture;
     const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
     if (!reader.has(offset, pixelCount)) {
@@ -298,8 +311,23 @@ Texture decodePalettedSkin(const Reader &reader, size_t offset, int width, int h
         texture.rgba[index * 4] = kQuakePalette[paletteOffset];
         texture.rgba[index * 4 + 1] = kQuakePalette[paletteOffset + 1];
         texture.rgba[index * 4 + 2] = kQuakePalette[paletteOffset + 2];
-        texture.rgba[index * 4 + 3] = paletteIndex == 255 ? 0 : 255;
+        texture.rgba[index * 4 + 3] = (cutoutLastIndex && paletteIndex == 255) ? 0 : 255;
     }
+    return texture;
+}
+
+/* SPR32 stores straight RGBA rows where a version 1 sprite stores palette indices. */
+Texture decodeRgbaFrame(const Reader &reader, size_t offset, int width, int height) {
+    Texture texture;
+    const size_t byteCount = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    if (!reader.has(offset, byteCount)) {
+        return texture;
+    }
+
+    texture.width = width;
+    texture.height = height;
+    texture.smooth = false;
+    texture.rgba.assign(reader.data() + offset, reader.data() + offset + byteCount);
     return texture;
 }
 
@@ -318,7 +346,36 @@ struct pkm_model {
     Vec3 boundsMax;
     Vec3 center;
     float radius = 1.0f;
-    std::vector<float> shadow;
+
+    /*
+     * A sprite is a flipbook: every frame is its own quad, because frames differ in
+     * size and in where their origin sits. surfaces holds whichever one is playing,
+     * so the renderer stays the single-mesh path the other formats use.
+     */
+    std::vector<Surface> spriteFrames;
+    std::vector<float> spriteIntervals;
+    int activeFrame = 0;
+    /* Sprites start square to the camera and never drift into the turntable. */
+    bool faceOn = false;
+
+    bool animates() const { return spriteFrames.size() > 1; }
+
+    float frameInterval() const {
+        if (spriteIntervals.empty()) {
+            return kDefaultSpriteInterval;
+        }
+        return spriteIntervals[static_cast<size_t>(activeFrame) % spriteIntervals.size()];
+    }
+
+    /* Quads are four vertices, so swapping the playing frame is a trivial copy. */
+    void setFrame(int index) {
+        if (spriteFrames.empty() || surfaces.empty()) {
+            return;
+        }
+        const int count = static_cast<int>(spriteFrames.size());
+        activeFrame = ((index % count) + count) % count;
+        surfaces[0] = spriteFrames[static_cast<size_t>(activeFrame)];
+    }
 
     const Texture *textureFor(const Surface &surface) const {
         if (surface.texture < 0 || static_cast<size_t>(surface.texture) >= textures.size()) {
@@ -1033,11 +1090,574 @@ bool parseMd5(const Reader &reader, pkm_model &model, std::string &error) {
     return true;
 }
 
+/* ------------------------------------------------------------------ SPR --- */
+
+/*
+ * Hangs one frame off the sprite's origin as a quad in the plane the camera starts
+ * square to: y runs to screen right and z runs up, which is the pair of axes Quake
+ * itself builds a sprite from once it has faced the viewer.
+ */
+Surface makeSpriteQuad(int textureIndex, int originX, int originY, int width, int height) {
+    const float left = static_cast<float>(originX);
+    const float right = static_cast<float>(originX + width);
+    const float up = static_cast<float>(originY);
+    const float down = static_cast<float>(originY - height);
+
+    struct Corner {
+        float y;
+        float z;
+        float u;
+        float v;
+    };
+    const Corner corners[4] = {
+        {left, down, 0.0f, 1.0f},
+        {right, down, 1.0f, 1.0f},
+        {right, up, 1.0f, 0.0f},
+        {left, up, 0.0f, 0.0f},
+    };
+
+    Surface surface;
+    surface.name = "sprite";
+    surface.texture = textureIndex;
+    surface.unlit = true;
+    surface.vertices.reserve(4);
+    for (const Corner &corner : corners) {
+        Vertex vertex;
+        vertex.position = {0.0f, corner.y, corner.z};
+        vertex.normal = {1.0f, 0.0f, 0.0f};  // toward where the camera starts
+        vertex.u = corner.u;
+        vertex.v = corner.v;
+        surface.vertices.push_back(vertex);
+    }
+    surface.indices = {0, 1, 2, 0, 2, 3};
+    return surface;
+}
+
+bool parseSpr(const Reader &reader, pkm_model &model, std::string &error) {
+    int ident = 0;
+    int version = 0;
+    if (!reader.int32(0, ident) || !reader.int32(4, version)) {
+        error = "The sprite header is truncated.";
+        return false;
+    }
+    if (ident != 0x50534449) {  // "IDSP"
+        error = "The file is not a Quake sprite.";
+        return false;
+    }
+    /* Half-Life reuses the magic for a different layout, palette and all. */
+    if (version == 2) {
+        error = "Half-Life sprites are not supported.";
+        return false;
+    }
+    if (version != 1 && version != 32) {
+        error = "Only version 1 and version 32 sprites are supported.";
+        return false;
+    }
+    const bool rgba = version == 32;
+
+    int canvasWidth = 0;
+    int canvasHeight = 0;
+    int frameCount = 0;
+    if (!reader.int32(16, canvasWidth) || !reader.int32(20, canvasHeight) ||
+        !reader.int32(24, frameCount)) {
+        error = "The sprite header is truncated.";
+        return false;
+    }
+    if (canvasWidth <= 0 || canvasHeight <= 0 || canvasWidth > kMaxTextureDimension ||
+        canvasHeight > kMaxTextureDimension || frameCount <= 0 || frameCount > kMaxFrames) {
+        error = "The sprite header describes an unsupported amount of image data.";
+        return false;
+    }
+
+    size_t cursor = 36;
+    long long totalPixels = 0;
+
+    /* Reads one frame's header and pixels, whether it stands alone or is in a group. */
+    const auto readFrame = [&](float interval) -> bool {
+        int originX = 0;
+        int originY = 0;
+        int width = 0;
+        int height = 0;
+        if (!reader.int32(cursor, originX) || !reader.int32(cursor + 4, originY) ||
+            !reader.int32(cursor + 8, width) || !reader.int32(cursor + 12, height)) {
+            error = "The sprite frames are truncated.";
+            return false;
+        }
+        cursor += 16;
+
+        if (width <= 0 || height <= 0 || width > kMaxTextureDimension ||
+            height > kMaxTextureDimension) {
+            error = "A sprite frame has an unsupported size.";
+            return false;
+        }
+        const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+        totalPixels += static_cast<long long>(pixelCount);
+        if (totalPixels > kMaxSpritePixels) {
+            error = "The sprite holds more frames than the viewer can decode.";
+            return false;
+        }
+
+        Texture texture = rgba ? decodeRgbaFrame(reader, cursor, width, height)
+                               : decodePalettedSkin(reader, cursor, width, height);
+        if (!texture.valid()) {
+            error = "The sprite frames are truncated.";
+            return false;
+        }
+        cursor += pixelCount * (rgba ? 4u : 1u);
+
+        model.textures.push_back(std::move(texture));
+        model.spriteFrames.push_back(makeSpriteQuad(static_cast<int>(model.textures.size()) - 1,
+                                                    originX, originY, width, height));
+        model.spriteIntervals.push_back(clampf(interval, kMinSpriteInterval, kMaxSpriteInterval));
+        return true;
+    };
+
+    for (int frame = 0; frame < frameCount; frame++) {
+        int frameType = 0;
+        if (!reader.int32(cursor, frameType)) {
+            error = "The sprite frames are truncated.";
+            return false;
+        }
+        cursor += 4;
+
+        if (frameType == 0) {  // SPR_SINGLE
+            if (!readFrame(kDefaultSpriteInterval)) {
+                return false;
+            }
+            continue;
+        }
+
+        /*
+         * Groups and the eight-way angled frames share a layout: a count, one
+         * interval per member, then the members. Every member becomes a frame of the
+         * same flipbook, which is the only way to see all of them in a still viewer.
+         */
+        int members = 0;
+        if (!reader.int32(cursor, members)) {
+            error = "The sprite frames are truncated.";
+            return false;
+        }
+        cursor += 4;
+        if (members <= 0 || members > kMaxFrames ||
+            static_cast<int>(model.spriteFrames.size()) + members > kMaxFrames) {
+            error = "A sprite frame group is invalid.";
+            return false;
+        }
+
+        const size_t intervalOffset = cursor;
+        if (!reader.has(cursor, static_cast<size_t>(members) * 4)) {
+            error = "A sprite frame group is truncated.";
+            return false;
+        }
+        cursor += static_cast<size_t>(members) * 4;
+
+        for (int member = 0; member < members; member++) {
+            float interval = kDefaultSpriteInterval;
+            if (!reader.float32(intervalOffset + static_cast<size_t>(member) * 4, interval) ||
+                interval <= 0.0f) {
+                interval = kDefaultSpriteInterval;
+            }
+            if (!readFrame(interval)) {
+                return false;
+            }
+        }
+    }
+
+    if (model.spriteFrames.empty()) {
+        error = "The sprite holds no frames.";
+        return false;
+    }
+
+    model.surfaces.push_back(model.spriteFrames.front());
+    model.format = PKM_FORMAT_SPR;
+    model.frameCount = static_cast<int>(model.spriteFrames.size());
+    model.skinCount = 0;
+    model.faceOn = true;
+    return true;
+}
+
+/* ------------------------------------------------------------------ BSP --- */
+
+/*
+ * Quake stores ammo boxes, health kits, and other props as BSP brush models, so the
+ * viewer reads the faces of a BSP's first hull the way the engine draws them: edges
+ * walked through the surfedge list, a plane for the normal, and the texture axes in
+ * the texinfo for coordinates.
+ */
+constexpr int kBspVersion = 29;
+constexpr int kBspLumpCount = 15;
+constexpr int kBspHeaderSize = 4 + kBspLumpCount * 8;
+constexpr int kBspLumpEntities = 0;
+constexpr int kBspLumpPlanes = 1;
+constexpr int kBspLumpTextures = 2;
+constexpr int kBspLumpVertexes = 3;
+constexpr int kBspLumpVisibility = 4;
+constexpr int kBspLumpTexinfo = 6;
+constexpr int kBspLumpFaces = 7;
+constexpr int kBspLumpEdges = 12;
+constexpr int kBspLumpSurfedges = 13;
+constexpr int kBspLumpModels = 14;
+
+constexpr int kBspModelSize = 64;
+constexpr int kBspFaceSize = 20;
+constexpr int kBspPlaneSize = 20;
+constexpr int kBspTexinfoSize = 40;
+constexpr int kBspMaxFaceEdges = 1024;
+constexpr int kMaxBspTextures = 4096;
+constexpr int kMaxBspTexturePixels = 32'000'000;
+/* Untextured brushwork still needs a coordinate scale; this is Quake's own. */
+constexpr float kBspDefaultTextureSize = 64.0f;
+
+struct BspLump {
+    size_t offset = 0;
+    size_t size = 0;
+};
+
+bool readBspLumps(const Reader &reader, BspLump (&lumps)[kBspLumpCount]) {
+    int version = 0;
+    if (!reader.has(0, static_cast<size_t>(kBspHeaderSize)) || !reader.int32(0, version) ||
+        version != kBspVersion) {
+        return false;
+    }
+
+    for (int index = 0; index < kBspLumpCount; index++) {
+        int offset = 0;
+        int size = 0;
+        if (!reader.int32(4 + static_cast<size_t>(index) * 8, offset) ||
+            !reader.int32(4 + static_cast<size_t>(index) * 8 + 4, size) || offset < 0 || size < 0 ||
+            !reader.has(static_cast<size_t>(offset), static_cast<size_t>(size))) {
+            return false;
+        }
+        lumps[index].offset = static_cast<size_t>(offset);
+        lumps[index].size = static_cast<size_t>(size);
+    }
+    return true;
+}
+
+/* Case-insensitive substring search that never copies the lump it reads. */
+bool containsAsciiFolded(const Reader &reader, size_t offset, size_t size, const char *needle) {
+    const size_t length = std::strlen(needle);
+    if (length == 0 || size < length) {
+        return false;
+    }
+
+    for (size_t start = 0; start + length <= size; start++) {
+        size_t index = 0;
+        while (index < length) {
+            unsigned char character = reader.data()[offset + start + index];
+            if (character >= 'A' && character <= 'Z') {
+                character = static_cast<unsigned char>(character - 'A' + 'a');
+            }
+            if (character != static_cast<unsigned char>(needle[index])) {
+                break;
+            }
+            index++;
+        }
+        if (index == length) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * A brush model is a BSP nobody can play: one hull, no visibility data, and no spawn
+ * point of any kind. Levels are told apart by content rather than by their name,
+ * because the b_ prefix is only an id1 habit and mods do not keep it.
+ */
+bool bspIsBrushModel(const Reader &reader) {
+    BspLump lumps[kBspLumpCount];
+    if (!readBspLumps(reader, lumps)) {
+        return false;
+    }
+    if (lumps[kBspLumpVisibility].size != 0) {
+        return false;
+    }
+    if (lumps[kBspLumpModels].size != static_cast<size_t>(kBspModelSize)) {
+        return false;
+    }
+    if (lumps[kBspLumpFaces].size < static_cast<size_t>(kBspFaceSize)) {
+        return false;
+    }
+
+    /* info_player_start, _deathmatch, _coop, and _team all share the one prefix. */
+    const BspLump &entities = lumps[kBspLumpEntities];
+    return !containsAsciiFolded(reader, entities.offset, entities.size, "info_player") &&
+           !containsAsciiFolded(reader, entities.offset, entities.size, "testplayerstart");
+}
+
+bool parseBsp(const Reader &reader, pkm_model &model, std::string &error) {
+    BspLump lumps[kBspLumpCount];
+    if (!readBspLumps(reader, lumps)) {
+        error = "Only version 29 Quake BSP files can be previewed.";
+        return false;
+    }
+
+    const size_t vertexCount = lumps[kBspLumpVertexes].size / 12;
+    const size_t edgeCount = lumps[kBspLumpEdges].size / 4;
+    const size_t surfedgeCount = lumps[kBspLumpSurfedges].size / 4;
+    const size_t faceTotal = lumps[kBspLumpFaces].size / kBspFaceSize;
+    const size_t planeCount = lumps[kBspLumpPlanes].size / kBspPlaneSize;
+    const size_t texinfoCount = lumps[kBspLumpTexinfo].size / kBspTexinfoSize;
+
+    if (vertexCount == 0 || edgeCount == 0 || surfedgeCount == 0 || faceTotal == 0 ||
+        planeCount == 0) {
+        error = "The brush model holds no geometry.";
+        return false;
+    }
+    if (vertexCount > static_cast<size_t>(kMaxVertices) ||
+        faceTotal > static_cast<size_t>(kMaxTriangles)) {
+        error = "The brush model describes an unsupported amount of geometry.";
+        return false;
+    }
+
+    /* Only the first hull is the model itself; the rest are a level's moving parts. */
+    int firstFace = 0;
+    int faceCount = 0;
+    if (lumps[kBspLumpModels].size < static_cast<size_t>(kBspModelSize) ||
+        !reader.int32(lumps[kBspLumpModels].offset + 56, firstFace) ||
+        !reader.int32(lumps[kBspLumpModels].offset + 60, faceCount) || firstFace < 0 ||
+        faceCount <= 0 || static_cast<size_t>(firstFace) + static_cast<size_t>(faceCount) >
+                              faceTotal) {
+        error = "The brush model does not name any faces.";
+        return false;
+    }
+
+    /* Textures live in the file, mip level zero first, as palette indices. */
+    int miptexCount = 0;
+    const BspLump &textureLump = lumps[kBspLumpTextures];
+    if (textureLump.size >= 4) {
+        reader.int32(textureLump.offset, miptexCount);
+    }
+    if (miptexCount < 0 || miptexCount > kMaxBspTextures) {
+        miptexCount = 0;
+    }
+
+    std::vector<int> miptexTexture(static_cast<size_t>(miptexCount), -1);
+    std::vector<std::string> miptexName(static_cast<size_t>(miptexCount));
+    std::vector<int> miptexWidth(static_cast<size_t>(miptexCount), 0);
+    std::vector<int> miptexHeight(static_cast<size_t>(miptexCount), 0);
+    long long texturePixels = 0;
+
+    for (int index = 0; index < miptexCount; index++) {
+        int relative = 0;
+        if (!reader.int32(textureLump.offset + 4 + static_cast<size_t>(index) * 4, relative) ||
+            relative < 0) {
+            continue;
+        }
+
+        const size_t base = textureLump.offset + static_cast<size_t>(relative);
+        std::string name;
+        int width = 0;
+        int height = 0;
+        int pixelOffset = 0;
+        if (!reader.name(base, 16, name) || !reader.int32(base + 16, width) ||
+            !reader.int32(base + 20, height) || !reader.int32(base + 24, pixelOffset) ||
+            width <= 0 || height <= 0 || width > kMaxTextureDimension ||
+            height > kMaxTextureDimension || pixelOffset <= 0) {
+            continue;
+        }
+
+        texturePixels += static_cast<long long>(width) * static_cast<long long>(height);
+        if (texturePixels > kMaxBspTexturePixels) {
+            error = "The brush model holds more texture data than the viewer can decode.";
+            return false;
+        }
+
+        Texture texture = decodePalettedSkin(reader, base + static_cast<size_t>(pixelOffset), width,
+                                             height, /*cutoutLastIndex=*/false);
+        if (!texture.valid()) {
+            continue;
+        }
+
+        model.textures.push_back(std::move(texture));
+        miptexTexture[static_cast<size_t>(index)] = static_cast<int>(model.textures.size()) - 1;
+        miptexName[static_cast<size_t>(index)] = name;
+        miptexWidth[static_cast<size_t>(index)] = width;
+        miptexHeight[static_cast<size_t>(index)] = height;
+    }
+
+    /* Faces are grouped by texture so the renderer keeps one surface per material. */
+    std::vector<int> surfaceForMiptex(static_cast<size_t>(miptexCount), -1);
+    int untexturedSurface = -1;
+    size_t triangles = 0;
+
+    for (int face = firstFace; face < firstFace + faceCount; face++) {
+        const size_t faceOffset =
+            lumps[kBspLumpFaces].offset + static_cast<size_t>(face) * kBspFaceSize;
+        int planeIndex = 0;
+        int side = 0;
+        int firstEdge = 0;
+        int edges = 0;
+        int texinfoIndex = 0;
+        if (!reader.int16(faceOffset, planeIndex) || !reader.int16(faceOffset + 2, side) ||
+            !reader.int32(faceOffset + 4, firstEdge) || !reader.int16(faceOffset + 8, edges) ||
+            !reader.int16(faceOffset + 10, texinfoIndex)) {
+            error = "The brush model faces are truncated.";
+            return false;
+        }
+
+        /* The plane, edge count, and texinfo are unsigned in the file. */
+        planeIndex = static_cast<unsigned short>(planeIndex);
+        edges = static_cast<unsigned short>(edges);
+        texinfoIndex = static_cast<unsigned short>(texinfoIndex);
+
+        if (planeIndex < 0 || static_cast<size_t>(planeIndex) >= planeCount || edges < 3 ||
+            edges > kBspMaxFaceEdges || firstEdge < 0 ||
+            static_cast<size_t>(firstEdge) + static_cast<size_t>(edges) > surfedgeCount) {
+            continue;
+        }
+
+        Vec3 normal;
+        if (!reader.vec3(lumps[kBspLumpPlanes].offset + static_cast<size_t>(planeIndex) *
+                                                            kBspPlaneSize,
+                         normal)) {
+            continue;
+        }
+        if (side != 0) {
+            normal = normal * -1.0f;
+        }
+        normal = normalize(normal);
+
+        /* Texture axes are unnormalized, which is what makes BSP textures tile. */
+        float axes[2][4] = {{1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}};
+        int miptexIndex = -1;
+        if (texinfoIndex >= 0 && static_cast<size_t>(texinfoIndex) < texinfoCount) {
+            const size_t texinfoOffset =
+                lumps[kBspLumpTexinfo].offset + static_cast<size_t>(texinfoIndex) * kBspTexinfoSize;
+            bool readAxes = true;
+            for (int axis = 0; axis < 2 && readAxes; axis++) {
+                for (int component = 0; component < 4 && readAxes; component++) {
+                    readAxes = reader.float32(
+                        texinfoOffset + static_cast<size_t>(axis) * 16 +
+                            static_cast<size_t>(component) * 4,
+                        axes[axis][component]);
+                }
+            }
+            int requested = 0;
+            if (readAxes && reader.int32(texinfoOffset + 32, requested) && requested >= 0 &&
+                static_cast<size_t>(requested) < static_cast<size_t>(miptexCount)) {
+                miptexIndex = requested;
+            }
+        }
+
+        int surfaceIndex = -1;
+        if (miptexIndex >= 0) {
+            surfaceIndex = surfaceForMiptex[static_cast<size_t>(miptexIndex)];
+        } else {
+            surfaceIndex = untexturedSurface;
+        }
+
+        if (surfaceIndex < 0) {
+            if (model.surfaces.size() >= static_cast<size_t>(kMaxSurfaces)) {
+                continue;
+            }
+            Surface surface;
+            surface.name = miptexIndex >= 0 ? miptexName[static_cast<size_t>(miptexIndex)] : "brush";
+            surface.texture = miptexIndex >= 0 ? miptexTexture[static_cast<size_t>(miptexIndex)] : -1;
+            model.surfaces.push_back(std::move(surface));
+            surfaceIndex = static_cast<int>(model.surfaces.size()) - 1;
+            if (miptexIndex >= 0) {
+                surfaceForMiptex[static_cast<size_t>(miptexIndex)] = surfaceIndex;
+            } else {
+                untexturedSurface = surfaceIndex;
+            }
+        }
+
+        Surface &surface = model.surfaces[static_cast<size_t>(surfaceIndex)];
+        /* A texture the file failed to hand over still needs a coordinate scale. */
+        const int namedWidth = miptexIndex >= 0 ? miptexWidth[static_cast<size_t>(miptexIndex)] : 0;
+        const int namedHeight = miptexIndex >= 0 ? miptexHeight[static_cast<size_t>(miptexIndex)] : 0;
+        const float textureWidth =
+            namedWidth > 0 ? static_cast<float>(namedWidth) : kBspDefaultTextureSize;
+        const float textureHeight =
+            namedHeight > 0 ? static_cast<float>(namedHeight) : kBspDefaultTextureSize;
+
+        const int firstVertex = static_cast<int>(surface.vertices.size());
+        bool complete = true;
+        for (int edge = 0; edge < edges && complete; edge++) {
+            int surfedge = 0;
+            if (!reader.int32(lumps[kBspLumpSurfedges].offset +
+                                  (static_cast<size_t>(firstEdge) + static_cast<size_t>(edge)) * 4,
+                              surfedge)) {
+                complete = false;
+                break;
+            }
+
+            /* A negative surfedge walks its edge backwards, which orders the loop. */
+            const size_t edgeIndex = static_cast<size_t>(surfedge < 0 ? -surfedge : surfedge);
+            if (edgeIndex >= edgeCount) {
+                complete = false;
+                break;
+            }
+            int start = 0;
+            int end = 0;
+            if (!reader.int16(lumps[kBspLumpEdges].offset + edgeIndex * 4, start) ||
+                !reader.int16(lumps[kBspLumpEdges].offset + edgeIndex * 4 + 2, end)) {
+                complete = false;
+                break;
+            }
+            /* Edge endpoints are unsigned in the file. */
+            const size_t vertexIndex = static_cast<size_t>(
+                static_cast<unsigned short>(surfedge < 0 ? end : start));
+            if (vertexIndex >= vertexCount) {
+                complete = false;
+                break;
+            }
+
+            Vertex vertex;
+            if (!reader.vec3(lumps[kBspLumpVertexes].offset + vertexIndex * 12, vertex.position)) {
+                complete = false;
+                break;
+            }
+            vertex.normal = normal;
+            vertex.u = (vertex.position.x * axes[0][0] + vertex.position.y * axes[0][1] +
+                        vertex.position.z * axes[0][2] + axes[0][3]) /
+                       textureWidth;
+            vertex.v = (vertex.position.x * axes[1][0] + vertex.position.y * axes[1][1] +
+                        vertex.position.z * axes[1][2] + axes[1][3]) /
+                       textureHeight;
+            surface.vertices.push_back(vertex);
+        }
+
+        if (!complete) {
+            surface.vertices.resize(static_cast<size_t>(firstVertex));
+            continue;
+        }
+
+        /* Every BSP face is a convex loop, so a fan triangulates it exactly. */
+        for (int corner = 1; corner + 1 < edges; corner++) {
+            surface.indices.push_back(firstVertex);
+            surface.indices.push_back(firstVertex + corner);
+            surface.indices.push_back(firstVertex + corner + 1);
+            triangles++;
+        }
+        if (triangles > static_cast<size_t>(kMaxTriangles)) {
+            error = "The brush model describes an unsupported amount of geometry.";
+            return false;
+        }
+    }
+
+    if (model.surfaces.empty() || triangles == 0) {
+        error = "The brush model holds no drawable faces.";
+        return false;
+    }
+
+    model.format = PKM_FORMAT_BSP;
+    model.frameCount = 1;
+    model.skinCount = 0;
+    return true;
+}
+
 /* ------------------------------------------------------------ post-load --- */
 
 void computeBounds(pkm_model &model) {
+    /* A sprite is framed by every pose it flips through, so playback never rescales. */
+    const std::vector<Surface> &geometry =
+        model.spriteFrames.empty() ? model.surfaces : model.spriteFrames;
+
     bool first = true;
-    for (const Surface &surface : model.surfaces) {
+    for (const Surface &surface : geometry) {
         for (const Vertex &vertex : surface.vertices) {
             if (first) {
                 model.boundsMin = vertex.position;
@@ -1065,109 +1685,6 @@ void computeBounds(pkm_model &model) {
     model.radius = radius > 1e-4f ? radius : 1.0f;
 }
 
-/*
- * Bakes the contact shadow once by dropping the silhouette onto the ground and
- * blurring it, the same trick model-viewer uses instead of a shadow map.
- */
-void bakeShadow(pkm_model &model) {
-    const int size = kShadowResolution;
-    std::vector<float> coverage(static_cast<size_t>(size) * static_cast<size_t>(size), 0.0f);
-
-    const float extentX = std::max(model.boundsMax.x - model.boundsMin.x, 1e-3f) * 1.3f;
-    const float extentY = std::max(model.boundsMax.y - model.boundsMin.y, 1e-3f) * 1.3f;
-    const float extent = std::max(extentX, extentY);
-    const float originX = model.center.x - extent * 0.5f;
-    const float originY = model.center.y - extent * 0.5f;
-    const float scale = static_cast<float>(size) / extent;
-
-    for (const Surface &surface : model.surfaces) {
-        for (size_t index = 0; index + 2 < surface.indices.size(); index += 3) {
-            float xs[3];
-            float ys[3];
-            for (int corner = 0; corner < 3; corner++) {
-                const Vertex &vertex =
-                    surface.vertices[static_cast<size_t>(surface.indices[index + corner])];
-                xs[corner] = (vertex.position.x - originX) * scale;
-                ys[corner] = (vertex.position.y - originY) * scale;
-            }
-
-            const int minX = std::max(0, static_cast<int>(std::floor(std::min({xs[0], xs[1], xs[2]}))));
-            const int maxX = std::min(size - 1, static_cast<int>(std::ceil(std::max({xs[0], xs[1], xs[2]}))));
-            const int minY = std::max(0, static_cast<int>(std::floor(std::min({ys[0], ys[1], ys[2]}))));
-            const int maxY = std::min(size - 1, static_cast<int>(std::ceil(std::max({ys[0], ys[1], ys[2]}))));
-            const float area = (xs[1] - xs[0]) * (ys[2] - ys[0]) - (ys[1] - ys[0]) * (xs[2] - xs[0]);
-            if (std::fabs(area) < 1e-6f) {
-                continue;
-            }
-
-            for (int y = minY; y <= maxY; y++) {
-                for (int x = minX; x <= maxX; x++) {
-                    const float px = static_cast<float>(x) + 0.5f;
-                    const float py = static_cast<float>(y) + 0.5f;
-                    const float w0 = (xs[1] - xs[0]) * (py - ys[0]) - (ys[1] - ys[0]) * (px - xs[0]);
-                    const float w1 = (xs[2] - xs[1]) * (py - ys[1]) - (ys[2] - ys[1]) * (px - xs[1]);
-                    const float w2 = (xs[0] - xs[2]) * (py - ys[2]) - (ys[0] - ys[2]) * (px - xs[2]);
-                    const bool inside = area > 0.0f ? (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f)
-                                                    : (w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f);
-                    if (inside) {
-                        coverage[static_cast<size_t>(y) * static_cast<size_t>(size) +
-                                 static_cast<size_t>(x)] = 1.0f;
-                    }
-                }
-            }
-        }
-    }
-
-    std::vector<float> blurred = coverage;
-    std::vector<float> scratch(coverage.size(), 0.0f);
-    const int radius = std::max(2, size / 16);
-    for (int pass = 0; pass < 3; pass++) {
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                float total = 0.0f;
-                int count = 0;
-                for (int offset = -radius; offset <= radius; offset++) {
-                    const int sample = x + offset;
-                    if (sample >= 0 && sample < size) {
-                        total += blurred[static_cast<size_t>(y) * static_cast<size_t>(size) +
-                                         static_cast<size_t>(sample)];
-                        count++;
-                    }
-                }
-                scratch[static_cast<size_t>(y) * static_cast<size_t>(size) +
-                        static_cast<size_t>(x)] = count > 0 ? total / static_cast<float>(count) : 0.0f;
-            }
-        }
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                float total = 0.0f;
-                int count = 0;
-                for (int offset = -radius; offset <= radius; offset++) {
-                    const int sample = y + offset;
-                    if (sample >= 0 && sample < size) {
-                        total += scratch[static_cast<size_t>(sample) * static_cast<size_t>(size) +
-                                         static_cast<size_t>(x)];
-                        count++;
-                    }
-                }
-                blurred[static_cast<size_t>(y) * static_cast<size_t>(size) +
-                        static_cast<size_t>(x)] = count > 0 ? total / static_cast<float>(count) : 0.0f;
-            }
-        }
-    }
-
-    float peak = 0.0f;
-    for (const float value : blurred) {
-        peak = std::max(peak, value);
-    }
-    if (peak > 1e-4f) {
-        for (float &value : blurred) {
-            value = clampf(value / peak, 0.0f, 1.0f);
-        }
-    }
-    model.shadow = std::move(blurred);
-}
-
 }  // namespace
 
 /* ----------------------------------------------------------------- view --- */
@@ -1184,6 +1701,12 @@ struct pkm_view {
     float goalPitch = kDefaultPitch;
     float goalDistance = 1.0f;
     Vec3 goalTarget;
+
+    /* Where framing and reset put the camera, which sprites move square to the quad. */
+    float homeYaw = kDefaultYaw;
+    float homePitch = kDefaultPitch;
+    /* Time spent on the sprite frame that is playing. */
+    double frameClock = 0.0;
 
     float yawVelocity = 0.0f;
     float pitchVelocity = 0.0f;
@@ -1230,8 +1753,8 @@ struct pkm_view {
     }
 
     void reset() {
-        goalYaw = kDefaultYaw;
-        goalPitch = kDefaultPitch;
+        goalYaw = homeYaw;
+        goalPitch = homePitch;
         goalDistance = frameDistance;
         goalTarget = model->center;
         yawVelocity = 0.0f;
@@ -1489,6 +2012,14 @@ public:
         }
         const float inverseArea = 1.0f / area;
 
+        /*
+         * Two triangles that share an edge evaluate that edge from different corners,
+         * so rounding can leave a pixel just outside both and open a hairline seam.
+         * Claiming the edge in both triangles closes it; the depth test then keeps the
+         * first one that covered the pixel.
+         */
+        const float bias = std::fabs(area) * 1e-6f;
+
         const int minX = std::max(0, static_cast<int>(std::floor(std::min({a.x, b.x, c.x}))));
         const int maxX = std::min(width_ - 1, static_cast<int>(std::ceil(std::max({a.x, b.x, c.x}))));
         const int minY = std::max(rowBegin_, static_cast<int>(std::floor(std::min({a.y, b.y, c.y}))));
@@ -1502,8 +2033,9 @@ public:
                 const float e0 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
                 const float e1 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
                 const float e2 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
-                const bool inside = area > 0.0f ? (e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f)
-                                                : (e0 <= 0.0f && e1 <= 0.0f && e2 <= 0.0f);
+                const bool inside = area > 0.0f
+                                        ? (e0 >= -bias && e1 >= -bias && e2 >= -bias)
+                                        : (e0 <= bias && e1 <= bias && e2 <= bias);
                 if (!inside) {
                     continue;
                 }
@@ -1675,7 +2207,22 @@ extern "C" {
 
 int pkm_supports_extension(const char *extension) {
     const std::string value = lowerExtension(extension);
-    return (value == "mdl" || value == "md3" || value == "md5mesh" || value == "md5") ? 1 : 0;
+    return (value == "mdl" || value == "md3" || value == "md5mesh" || value == "md5" ||
+            value == "spr" || value == "spr32" || value == "bsp")
+               ? 1
+               : 0;
+}
+
+int pkm_bsp_is_brush_model(const void *bsp_data, size_t bsp_size) {
+    if (bsp_data == nullptr || bsp_size == 0) {
+        return 0;
+    }
+    try {
+        const Reader reader(static_cast<const unsigned char *>(bsp_data), bsp_size);
+        return bspIsBrushModel(reader) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
 }
 
 pkm_model *pkm_model_create(const void *model_data, size_t model_size, const char *extension,
@@ -1701,6 +2248,10 @@ pkm_model *pkm_model_create(const void *model_data, size_t model_size, const cha
             parsed = parseMdl(reader, model, error);
         } else if (format == "md3") {
             parsed = parseMd3(reader, model, error);
+        } else if (format == "spr" || format == "spr32") {
+            parsed = parseSpr(reader, model, error);
+        } else if (format == "bsp") {
+            parsed = parseBsp(reader, model, error);
         } else {
             parsed = parseMd5(reader, model, error);
         }
@@ -1716,7 +2267,6 @@ pkm_model *pkm_model_create(const void *model_data, size_t model_size, const cha
         }
 
         computeBounds(model);
-        bakeShadow(model);
         return new pkm_model(std::move(model));
     } catch (const std::bad_alloc &) {
         setError(error_message, error_message_size, "The model is too large to preview.");
@@ -1827,6 +2377,16 @@ pkm_view *pkm_view_create(pkm_model *model) {
         view->model = model;
         view->target = model->center;
         view->goalTarget = model->center;
+        if (model->faceOn) {
+            /* A flat card reads as itself head-on, and gains nothing from a turntable. */
+            view->homeYaw = 0.0f;
+            view->homePitch = 0.0f;
+            view->yaw = 0.0f;
+            view->pitch = 0.0f;
+            view->goalYaw = 0.0f;
+            view->goalPitch = 0.0f;
+            view->autoRotate = false;
+        }
         view->frame(1.0f);
         view->goalDistance = view->frameDistance;
         view->distance = view->frameDistance;
@@ -1984,6 +2544,20 @@ int pkm_view_advance(pkm_view *view, double elapsed_seconds) {
         return view->dirty ? 1 : 0;
     }
 
+    /* Sprite playback runs on its own clock, so a still camera keeps flipping frames. */
+    if (view->model->animates()) {
+        view->frameClock += dt;
+        for (int step = 0; step < kMaxFrames; step++) {
+            const double interval = static_cast<double>(view->model->frameInterval());
+            if (view->frameClock < interval) {
+                break;
+            }
+            view->frameClock -= interval;
+            view->model->setFrame(view->model->activeFrame + 1);
+            view->dirty = true;
+        }
+    }
+
     if (view->interacting) {
         /* Remember the drag speed so the model coasts when the button is released. */
         const float blend = 1.0f - std::exp(-dt / 0.06f);
@@ -2113,14 +2687,6 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
         /* Surfaces with no skin fall back to a neutral studio material. */
         const Color neutral{srgbToLinear(0.74f), srgbToLinear(0.74f), srgbToLinear(0.76f)};
 
-        const float extentX = std::max(model.boundsMax.x - model.boundsMin.x, 1e-3f) * 1.3f;
-        const float extentY = std::max(model.boundsMax.y - model.boundsMin.y, 1e-3f) * 1.3f;
-        const float extent = std::max(extentX, extentY);
-        const float originX = model.center.x - extent * 0.5f;
-        const float originY = model.center.y - extent * 0.5f;
-        const float groundZ = model.boundsMin.z - model.radius * 0.004f;
-        const float strength = view->dark ? 0.55f : 0.42f;
-
         const auto drawBand = [&](int rowBegin, int rowEnd) {
             const size_t bandOffset =
                 static_cast<size_t>(rowBegin) * static_cast<size_t>(renderWidth);
@@ -2132,78 +2698,6 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
 
             Rasterizer rasterizer(view->color.data(), view->depth.data(), renderWidth, rowBegin,
                                   rowEnd);
-
-        /* The ground plane only darkens the backdrop, so it has no visible edge. */
-        if (!model.shadow.empty()) {
-            const Vec3 corners[4] = {{originX, originY, groundZ},
-                                     {originX + extent, originY, groundZ},
-                                     {originX + extent, originY + extent, groundZ},
-                                     {originX, originY + extent, groundZ}};
-            const Vec3 up{0.0f, 0.0f, 1.0f};
-
-            auto shadeGround = [&](int x, int y, const Vec3 &world, const Vec3 &, float, float,
-                                   Color &out) {
-                const float u = (world.x - originX) / extent;
-                const float v = (world.y - originY) / extent;
-                if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) {
-                    return false;
-                }
-
-                /* A soft pool of floor gives the shadow something to fall on. */
-                const float radius =
-                    std::sqrt((u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f)) * 2.0f;
-                const float pool = clampf(1.0f - radius * radius, 0.0f, 1.0f);
-
-                const float sx = clampf(u * static_cast<float>(kShadowResolution) - 0.5f, 0.0f,
-                                        static_cast<float>(kShadowResolution - 1));
-                const float sy = clampf(v * static_cast<float>(kShadowResolution) - 0.5f, 0.0f,
-                                        static_cast<float>(kShadowResolution - 1));
-                const int x0 = static_cast<int>(sx);
-                const int y0 = static_cast<int>(sy);
-                const int x1 = std::min(x0 + 1, kShadowResolution - 1);
-                const int y1 = std::min(y0 + 1, kShadowResolution - 1);
-                const float tx = sx - static_cast<float>(x0);
-                const float ty = sy - static_cast<float>(y0);
-                const auto sample = [&](int px, int py) {
-                    return model.shadow[static_cast<size_t>(py) *
-                                            static_cast<size_t>(kShadowResolution) +
-                                        static_cast<size_t>(px)];
-                };
-                const float shadow = (sample(x0, y0) * (1.0f - tx) * (1.0f - ty) +
-                                      sample(x1, y0) * tx * (1.0f - ty) +
-                                      sample(x0, y1) * (1.0f - tx) * ty +
-                                      sample(x1, y1) * tx * ty) *
-                                     pool;
-                if (shadow <= 0.004f && pool <= 0.004f) {
-                    return false;
-                }
-
-                /* The backdrop is already on the pixel, so read it back instead
-                   of recomputing and re-encoding it. */
-                const unsigned char *pixel =
-                    view->color.data() +
-                    (static_cast<size_t>(y) * static_cast<size_t>(renderWidth) +
-                     static_cast<size_t>(x)) * 4;
-                const float *decode = srgbTable();
-                const float floorLight = pool * (view->dark ? 0.024f : -0.050f);
-                const float factor = 1.0f - shadow * strength;
-                out.r = (decode[pixel[2]] + floorLight) * factor;
-                out.g = (decode[pixel[1]] + floorLight) * factor;
-                out.b = (decode[pixel[0]] + floorLight * 1.1f) * factor;
-                return true;
-            };
-
-            const ClipVertex quad[4] = {projection.toView(corners[0], up, 0.0f, 0.0f),
-                                        projection.toView(corners[1], up, 1.0f, 0.0f),
-                                        projection.toView(corners[2], up, 1.0f, 1.0f),
-                                        projection.toView(corners[3], up, 0.0f, 1.0f)};
-            const auto emitGround = [&](const ScreenVertex &a, const ScreenVertex &b,
-                                        const ScreenVertex &c) {
-                rasterizer.triangle(a, b, c, shadeGround);
-            };
-            clipAndEmit(projection, quad[0], quad[1], quad[2], emitGround);
-            clipAndEmit(projection, quad[0], quad[2], quad[3], emitGround);
-        }
 
         for (const Surface &surface : model.surfaces) {
             const Texture *texture = model.textureFor(surface);
@@ -2220,6 +2714,11 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
                 }
                 if (alpha < 0.5f) {
                     return false;
+                }
+                /* Sprites are drawn fullbright in the game, so the rig stays off them. */
+                if (surface.unlit) {
+                    out = base;
+                    return true;
                 }
 
                 Vec3 normal = normalize(rawNormal);

@@ -110,8 +110,17 @@ public sealed class ModelPreviewSession : IDisposable
                 ModelFormat.Mdl => "Quake MDL",
                 ModelFormat.Md3 => "Quake III MD3",
                 ModelFormat.Md5 => "Doom 3 MD5",
+                ModelFormat.Spr => "Quake sprite",
+                ModelFormat.Bsp => "Quake brush model",
                 _ => "Model",
             };
+
+            /* A sprite is one quad, so its frame count is the only count worth showing. */
+            if (stats.Format == ModelFormat.Spr)
+            {
+                var frameLabel = stats.FrameCount == 1 ? "frame" : "frames";
+                return $"{format} • {stats.FrameCount:N0} {frameLabel}";
+            }
 
             var parts = new List<string>
             {

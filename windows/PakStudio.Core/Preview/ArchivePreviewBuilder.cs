@@ -29,10 +29,14 @@ public static class ArchivePreviewBuilder
         ".it", ".s3m", ".xm", ".mod", ".umx",
     };
 
-    /* The model formats QSS-M loads. MDL keeps its flat skin preview as a fallback. */
+    /*
+     * The model formats QSS-M loads. MDL, SPR, and BSP keep their flat preview as a
+     * fallback, which is what a file the viewer cannot parse falls back to. BSP is
+     * conditional: only a brush model goes to the viewer, never a playable level.
+     */
     private static readonly HashSet<string> ModelExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mdl", ".md3", ".md5mesh", ".md5",
+        ".mdl", ".md3", ".md5mesh", ".md5", ".spr", ".spr32", ".bsp",
     };
 
     private static readonly HashSet<string> QuickPreviewOnOpenExtensions =
@@ -83,7 +87,10 @@ public static class ArchivePreviewBuilder
         file.Size > 0 &&
         file.Size <= MaximumFileSize &&
         SupportsModelExtension(file.Extension) &&
-        NativeModelViewer.SupportsExtension(file.Extension);
+        NativeModelViewer.SupportsExtension(file.Extension) &&
+        /* A .bsp is ours only when it holds a brush model rather than a level. */
+        (!file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase) ||
+            NativeModelViewer.IsBspBrushModel(file.Data));
 
     /// <summary>
     /// True when opening a node should keep it inside Quick Preview instead of

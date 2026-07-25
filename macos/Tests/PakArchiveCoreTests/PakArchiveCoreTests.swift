@@ -3,6 +3,23 @@ import XCTest
 @testable import PakArchiveCore
 
 final class PakArchiveCoreTests: XCTestCase {
+    func testDetailsColumnOmitsPreviewMetadata() {
+        let data = Data([
+            137, 80, 78, 71, 13, 10, 26, 10,
+            0, 0, 0, 13, 73, 72, 68, 82,
+            0, 0, 1, 64, 0, 0, 0, 200, 8, 6, 0, 0, 0,
+        ])
+
+        let column = PakFormatInspector.detailsColumnSummary(
+            fileName: "shot.png",
+            data: data,
+            fileSize: data.count
+        )
+
+        XCTAssertFalse(column.contains("Dimensions:"))
+        XCTAssertTrue(column.contains("Bit Depth:"))
+    }
+
     func testFolderChildrenOnlyMarksFoldersWithSubfoldersAsExpandable() {
         let folder = PakNode(name: "maps")
         let file = PakNode(name: "start.bsp")
@@ -115,6 +132,167 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertEqual(details["Frames"], "10")
     }
 
+    func testFormatInspectorReadsQuakeCProgramMetadata() {
+        var data = Data()
+        appendInt32(6, to: &data)      // version
+        appendInt32(5927, to: &data)   // progdefs CRC
+        appendInt32(60, to: &data)     // statement offset
+        appendInt32(20940, to: &data)  // statements
+        appendInt32(0, to: &data)      // global definition offset
+        appendInt32(4287, to: &data)   // global definitions
+        appendInt32(0, to: &data)      // field definition offset
+        appendInt32(218, to: &data)    // field definitions
+        appendInt32(0, to: &data)      // function offset
+        appendInt32(2091, to: &data)   // functions
+        appendInt32(60, to: &data)     // string offset
+        appendInt32(88336, to: &data)  // string bytes
+        appendInt32(0, to: &data)      // global offset
+        appendInt32(11471, to: &data)  // globals
+        appendInt32(195, to: &data)    // entity fields
+
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "progs.dat",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Format"], "Compiled QuakeC program")
+        XCTAssertEqual(details["Version"], "6")
+        XCTAssertEqual(details["Progdefs CRC"], "5927")
+        XCTAssertEqual(details["Functions"], "2,091")
+        XCTAssertEqual(details["Entity Fields"], "195")
+        XCTAssertEqual(details["String Data"], "88,336 bytes")
+        XCTAssertTrue(details["Purpose"]?.contains("compiled QuakeC program") == true)
+
+        /* The column stays a stat rather than the sentence. */
+        XCTAssertEqual(
+            PakFormatInspector.summary(fileName: "progs.dat", data: data, fileSize: data.count),
+            "Functions: 2,091  •  Entity Fields: 195"
+        )
+    }
+
+    func testFormatInspectorReadsDosTextScreen() {
+        let headline = "QUAKE: The Doomed Dimension by id Software"
+        var data = Data(repeating: 0, count: 80 * 25 * 2)
+        for (index, character) in headline.utf8.enumerated() {
+            data[index * 2] = character
+            data[index * 2 + 1] = 0x4f  // colour attribute
+        }
+
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "end1.bin",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Format"], "DOS text-mode screen")
+        XCTAssertEqual(details["Screen Size"], "80 × 25 characters")
+        XCTAssertEqual(details["Description"], headline)
+        XCTAssertTrue(details["Purpose"]?.contains("shareware") == true)
+    }
+
+    func testFormatInspectorDescribesWellKnownQuakeFiles() {
+        let script = Data("exec default.cfg\nexec config.cfg\n".utf8)
+        let startup = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "quake.rc",
+            data: script,
+            fileSize: script.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(startup["Format"], "Quake console script")
+        XCTAssertTrue(startup["Purpose"]?.contains("startup script") == true)
+
+        /* A name PakScape does not know still gets its extension's description. */
+        let other = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "sv_main.qc",
+            data: Data("void() main = {};\n".utf8),
+            fileSize: 18
+        ).map { ($0.label, $0.value) })
+        XCTAssertTrue(other["Purpose"]?.contains("QuakeC source") == true)
+
+        /* A file with nothing known about it keeps saying nothing. */
+        XCTAssertEqual(
+            PakFormatInspector.details(
+                fileName: "unknown.xyz",
+                data: Data([1, 2, 3, 4]),
+                fileSize: 4
+            ),
+            []
+        )
+    }
+
+    func testGetInfoWindowsCascadeFromTheArchiveWindow() {
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        let archiveWindow = CGRect(x: 200, y: 300, width: 900, height: 600)
+        let size = CGSize(width: 460, height: 320)
+
+        let base = PakItemInfoPlacement.base(
+            parentFrame: archiveWindow,
+            windowSize: size,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(base, CGPoint(x: 232, y: 868))
+
+        let first = PakItemInfoPlacement.topLeft(
+            base: base,
+            previous: nil,
+            windowSize: size,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(first, base)
+
+        let second = PakItemInfoPlacement.topLeft(
+            base: base,
+            previous: first,
+            windowSize: size,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(second, CGPoint(x: 256, y: 844))
+    }
+
+    func testGetInfoCascadeStartsOverWhenItRunsOffScreen() {
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        let size = CGSize(width: 460, height: 320)
+        let base = CGPoint(x: 100, y: 900)
+
+        /* One more step would put the bottom of the window below the screen. */
+        let placed = PakItemInfoPlacement.topLeft(
+            base: base,
+            previous: CGPoint(x: 100, y: 321),
+            windowSize: size,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(placed, base)
+    }
+
+    func testGetInfoWindowStaysOnScreenBesideAnArchiveWindowAtTheEdge() {
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        let size = CGSize(width: 460, height: 320)
+
+        let base = PakItemInfoPlacement.base(
+            parentFrame: CGRect(x: 1100, y: 700, width: 900, height: 600),
+            windowSize: size,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(base.x, visibleFrame.maxX - size.width)
+        XCTAssertEqual(base.y, visibleFrame.maxY)
+        XCTAssertTrue(base.y - size.height >= visibleFrame.minY)
+    }
+
+    func testGetInfoWindowCentersWithoutAnArchiveWindow() {
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        let size = CGSize(width: 460, height: 320)
+
+        XCTAssertEqual(
+            PakItemInfoPlacement.base(
+                parentFrame: nil,
+                windowSize: size,
+                visibleFrame: visibleFrame
+            ),
+            CGPoint(x: 370, y: 560)
+        )
+    }
+
     func testFormatInspectorRejectsTruncatedKnownFormat() {
         XCTAssertEqual(
             PakFormatInspector.details(
@@ -150,6 +328,154 @@ final class PakArchiveCoreTests: XCTestCase {
         )
     }
 
+    func testFormatInspectorReadsDemoServerInfoAndScores() {
+        var signon = Data()
+        appendServerInfo(
+            to: &signon,
+            protocolVersion: 15,
+            maxClients: 4,
+            gameType: 1,
+            levelName: "the Slipgate Complex",
+            models: ["maps/e1m3.bsp", "progs/player.mdl"],
+            sounds: ["weapons/r_exp3.wav"]
+        )
+        appendPlayer(to: &signon, slot: 0, name: "alice", frags: 12, colors: 0x44)
+        appendPlayer(to: &signon, slot: 1, name: "bob", frags: 7, colors: 0x33)
+        appendTime(to: &signon, 0)
+
+        var closing = Data()
+        appendTime(to: &closing, 95.5)
+        closing.append(14) // svc_updatefrags
+        closing.append(1)
+        appendUInt16(20, to: &closing)
+
+        let data = demo(frames: [signon, closing])
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "duel.dem",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Format"], "Quake demo")
+        XCTAssertEqual(details["Map"], "e1m3")
+        XCTAssertEqual(details["Level"], "the Slipgate Complex")
+        XCTAssertEqual(details["Duration"], "1:36")
+        XCTAssertEqual(details["Mode"], "Deathmatch")
+        XCTAssertEqual(details["Players"], "alice, bob")
+        XCTAssertEqual(details["Scores"], "bob 20, alice 12")
+        XCTAssertEqual(details["Protocol"], "15")
+        XCTAssertEqual(
+            PakFormatInspector.summary(fileName: "duel.dem", data: data, fileSize: data.count),
+            "Map: e1m3  •  Duration: 1:36"
+        )
+        XCTAssertEqual(
+            PakFormatInspector.detailsColumnSummary(
+                fileName: "duel.dem",
+                data: data,
+                fileSize: data.count
+            ),
+            "Map: e1m3"
+        )
+    }
+
+    func testFormatInspectorReportsSinglePlayerDemoMode() {
+        var signon = Data()
+        appendServerInfo(
+            to: &signon,
+            protocolVersion: 666,
+            maxClients: 1,
+            gameType: 0,
+            levelName: "the Slipgate Complex",
+            models: ["maps/e1m1.bsp"],
+            sounds: []
+        )
+        appendPlayer(to: &signon, slot: 0, name: "player", frags: 0, colors: 0x00)
+        appendTime(to: &signon, 1.25)
+
+        let data = demo(frames: [signon])
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "run.dem",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Map"], "e1m1")
+        XCTAssertEqual(details["Mode"], "Single player")
+        XCTAssertEqual(details["Player"], "player")
+        XCTAssertEqual(details["Protocol"], "666")
+        XCTAssertNil(details["Scores"])
+    }
+
+    /// A frame this parser cannot decode must not cost the timings the frame walk already has.
+    func testFormatInspectorKeepsDemoTimingAcrossUnreadableFrames() {
+        var signon = Data()
+        appendServerInfo(
+            to: &signon,
+            protocolVersion: 15,
+            maxClients: 2,
+            gameType: 1,
+            levelName: "",
+            models: ["maps/dm4.bsp"],
+            sounds: []
+        )
+        appendTime(to: &signon, 0)
+
+        var unreadable = Data()
+        appendTime(to: &unreadable, 30)
+        unreadable.append(58) // svc_csqcentities, deliberately unsupported
+
+        var later = Data()
+        appendTime(to: &later, 61)
+
+        let data = demo(frames: [signon, unreadable, later])
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "dm.dem",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Map"], "dm4")
+        XCTAssertEqual(details["Duration"], "At least 1:01")
+    }
+
+    /// Quake parks -99 in a slot whose player left, so those names are not scores.
+    func testFormatInspectorExcludesVacatedSlotsFromDemoScores() {
+        var signon = Data()
+        appendServerInfo(
+            to: &signon,
+            protocolVersion: 15,
+            maxClients: 16,
+            gameType: 1,
+            levelName: "",
+            models: ["maps/ctf2m8.bsp"],
+            sounds: []
+        )
+        appendPlayer(to: &signon, slot: 0, name: "sa", frags: 3, colors: 0x44)
+        appendPlayer(to: &signon, slot: 1, name: "lilbro", frags: 1, colors: 0x33)
+        appendPlayer(to: &signon, slot: 2, name: "departed", frags: -99, colors: 0x00)
+        appendTime(to: &signon, 0)
+
+        let data = demo(frames: [signon])
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "ctf.dem",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Players"], "sa, lilbro, departed")
+        XCTAssertEqual(details["Scores"], "sa 3, lilbro 1")
+    }
+
+    func testFormatInspectorFallsBackToTextScanForUnparsableDemo() {
+        var data = Data("-1\n".utf8)
+        data.append(Data("noise maps/e1m5.bsp".utf8))
+
+        XCTAssertEqual(
+            PakFormatInspector.summary(fileName: "broken.dem", data: data, fileSize: data.count),
+            "Map: e1m5"
+        )
+    }
+
     func testFormatInspectorReadsBspWorldspawnDescription() {
         let entities = Data(#"{"classname" "worldspawn" "message" "The Slipgate Complex"}"#.utf8)
         var data = Data()
@@ -169,6 +495,14 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertEqual(
             PakFormatInspector.summary(fileName: "e1m1.bsp", data: data, fileSize: data.count),
             "Description: The Slipgate Complex"
+        )
+        XCTAssertEqual(
+            PakFormatInspector.detailsColumnSummary(
+                fileName: "e1m1.bsp",
+                data: data,
+                fileSize: data.count
+            ),
+            ""
         )
     }
 
@@ -564,6 +898,75 @@ final class PakArchiveCoreTests: XCTestCase {
         appendUInt32(0, to: &data)  // directory offset
         appendUInt16(0, to: &data)  // comment length
         return data
+    }
+
+    /// Wraps message payloads in the length-prefixed frames a recording is made of.
+    private func demo(frames: [Data]) -> Data {
+        var data = Data("-1\n".utf8)
+        for frame in frames {
+            appendInt32(frame.count, to: &data)
+            for _ in 0 ..< 3 {
+                appendFloat(0, to: &data)
+            }
+            data.append(frame)
+        }
+        return data
+    }
+
+    private func appendServerInfo(
+        to data: inout Data,
+        protocolVersion: Int,
+        maxClients: UInt8,
+        gameType: UInt8,
+        levelName: String,
+        models: [String],
+        sounds: [String]
+    ) {
+        data.append(11) // svc_serverinfo
+        appendInt32(protocolVersion, to: &data)
+        data.append(maxClients)
+        data.append(gameType)
+        appendCString(levelName, to: &data)
+        for model in models {
+            appendCString(model, to: &data)
+        }
+        data.append(0)
+        for sound in sounds {
+            appendCString(sound, to: &data)
+        }
+        data.append(0)
+    }
+
+    private func appendPlayer(
+        to data: inout Data,
+        slot: UInt8,
+        name: String,
+        frags: Int16,
+        colors: UInt8
+    ) {
+        data.append(13) // svc_updatename
+        data.append(slot)
+        appendCString(name, to: &data)
+        data.append(14) // svc_updatefrags
+        data.append(slot)
+        appendUInt16(UInt16(bitPattern: frags), to: &data)
+        data.append(17) // svc_updatecolors
+        data.append(slot)
+        data.append(colors)
+    }
+
+    private func appendTime(to data: inout Data, _ seconds: Float) {
+        data.append(7) // svc_time
+        appendFloat(seconds, to: &data)
+    }
+
+    private func appendCString(_ value: String, to data: inout Data) {
+        data.append(contentsOf: Array(value.utf8))
+        data.append(0)
+    }
+
+    private func appendFloat(_ value: Float, to data: inout Data) {
+        appendUInt32(value.bitPattern, to: &data)
     }
 
     private func appendUInt16(_ value: UInt16, to data: inout Data) {

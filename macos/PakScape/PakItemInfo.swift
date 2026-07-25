@@ -94,7 +94,8 @@ struct PakItemInfo: Identifiable {
 struct PakItemInfoView: View {
     let info: PakItemInfo
     @ObservedObject var viewModel: PakViewModel
-    @Environment(\.dismiss) private var dismiss
+    /// The window hosting this view owns closing it, so the button asks rather than dismisses.
+    let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -150,7 +151,12 @@ struct PakItemInfoView: View {
 
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
                     ForEach(info.formatDetails) { detail in
-                        infoRow("\(detail.label):", detail.value)
+                        /* Purpose is a sentence, so it wraps instead of being clipped. */
+                        infoRow(
+                            "\(detail.label):",
+                            detail.value,
+                            lineLimit: detail.label == "Purpose" ? 6 : 3
+                        )
                     }
                 }
             }
@@ -158,7 +164,7 @@ struct PakItemInfoView: View {
             HStack {
                 Spacer()
                 Button("Done") {
-                    dismiss()
+                    onClose()
                 }
                 .keyboardShortcut(.defaultAction)
             }
@@ -168,12 +174,12 @@ struct PakItemInfoView: View {
     }
 
     @ViewBuilder
-    private func infoRow(_ label: String, _ value: String) -> some View {
+    private func infoRow(_ label: String, _ value: String, lineLimit: Int = 3) -> some View {
         GridRow {
             Text(label)
                 .foregroundStyle(.secondary)
             Text(value)
-                .lineLimit(3)
+                .lineLimit(lineLimit)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
                 .help(value)

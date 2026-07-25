@@ -18,7 +18,10 @@ Each edition uses the platform's native desktop conventions while sharing the sa
 - Add, rename, move, copy, remove, and export files and folders, with native Undo and Redo on macOS.
 - Press Space to preview selected text, common images, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files.
 - Inspect QSS-M models — MDL, MD3, and MD5 — in an interactive viewer: drag to orbit, right-drag to pan, scroll or pinch to zoom, and leave it alone to watch it turn. Double-click a model to open it, and MD3 and MD5 skins are loaded from the archive.
+- Watch SPR and SPR32 sprites animate in the same viewer, frame by frame at the rate the file asks for, on a fullbright card you can still orbit.
+- Turn BSP brush models — ammo boxes, health kits, and prefab props — in the same viewer, textured from the file. PakScape spots them by their content, not their name, so a playable level keeps its flat overview instead.
 - Preview QSS-M audio consistently on every platform: WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX.
+- Find out what a file is for. `progs.dat` reports its progdefs CRC and how much code it holds, `end1.bin` is read as the DOS text screen it is, and `quake.rc`, `palette.lmp`, `gfx.wad`, and other well-known names each explain themselves in a line.
 - Read and write PAK and PK3 archives with traversal, duplicate-path, symlink, and size validation.
 - Integrate with platform file pickers, recent files, drag and drop, and native keyboard navigation.
 

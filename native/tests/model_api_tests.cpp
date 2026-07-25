@@ -109,6 +109,205 @@ std::vector<unsigned char> buildMdl() {
     return bytes;
 }
 
+/*
+ * A sprite whose frames differ in size, so the tests cover the flipbook and the
+ * union the camera is framed against. groupMembers of zero writes single frames.
+ */
+std::vector<unsigned char> buildSpr(int frames, int groupMembers, int version = 1) {
+    std::vector<unsigned char> bytes;
+
+    appendU32(bytes, 0x50534449);  // "IDSP"
+    appendI32(bytes, version);
+    appendI32(bytes, 2);         // view parallel
+    appendFloat(bytes, 32.0f);   // bounding radius
+    appendI32(bytes, 32);        // canvas width
+    appendI32(bytes, 32);        // canvas height
+    appendI32(bytes, frames);
+    appendFloat(bytes, 0.0f);  // beam length
+    appendI32(bytes, 0);       // sync type
+
+    const auto appendFrame = [&bytes, version](int size) {
+        appendI32(bytes, -size / 2);  // origin x
+        appendI32(bytes, size / 2);   // origin y
+        appendI32(bytes, size);
+        appendI32(bytes, size);
+        for (int index = 0; index < size * size; index++) {
+            if (version == 32) {
+                bytes.push_back(240);
+                bytes.push_back(230);
+                bytes.push_back(210);
+                bytes.push_back(255);
+            } else {
+                /* A bright palette entry, with a transparent border to test the cutout. */
+                const bool border = index < size || index >= size * (size - 1);
+                bytes.push_back(border ? 255 : 15);
+            }
+        }
+    };
+
+    for (int frame = 0; frame < frames; frame++) {
+        if (groupMembers <= 0) {
+            appendI32(bytes, 0);  // SPR_SINGLE
+            appendFrame(16 + frame * 8);
+            continue;
+        }
+
+        appendI32(bytes, 1);  // SPR_GROUP
+        appendI32(bytes, groupMembers);
+        for (int member = 0; member < groupMembers; member++) {
+            appendFloat(bytes, 0.05f);
+        }
+        for (int member = 0; member < groupMembers; member++) {
+            appendFrame(16 + member * 8);
+        }
+    }
+    return bytes;
+}
+
+/*
+ * A one-brush BSP: a textured cube built the way qbsp writes a brush model, so the
+ * tests cover the surfedge walk, the texture axes, and the brush-model check. Pass
+ * entities to make it look like a level instead.
+ */
+std::vector<unsigned char> buildBsp(const std::string &entities, bool visibility = false,
+                                    int modelCount = 1) {
+    constexpr int textureSize = 8;
+    constexpr int lumpCount = 15;
+
+    const float corners[8][3] = {
+        {-16.0f, -16.0f, 0.0f}, {16.0f, -16.0f, 0.0f}, {16.0f, 16.0f, 0.0f},
+        {-16.0f, 16.0f, 0.0f},  {-16.0f, -16.0f, 32.0f}, {16.0f, -16.0f, 32.0f},
+        {16.0f, 16.0f, 32.0f},  {-16.0f, 16.0f, 32.0f},
+    };
+    /* Six quads, each a loop of four edges, in the winding qbsp emits. */
+    const int quads[6][4] = {
+        {0, 1, 2, 3},  // bottom
+        {7, 6, 5, 4},  // top
+        {0, 4, 5, 1},  // -y
+        {2, 6, 7, 3},  // +y
+        {1, 5, 6, 2},  // +x
+        {3, 7, 4, 0},  // -x
+    };
+    const float normals[6][3] = {
+        {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, -1.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},  {1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f},
+    };
+
+    std::vector<unsigned char> planes;
+    for (const auto &normal : normals) {
+        appendFloat(planes, normal[0]);
+        appendFloat(planes, normal[1]);
+        appendFloat(planes, normal[2]);
+        appendFloat(planes, 16.0f);  // distance
+        appendI32(planes, 0);        // plane type
+    }
+
+    std::vector<unsigned char> vertexes;
+    for (const auto &corner : corners) {
+        appendFloat(vertexes, corner[0]);
+        appendFloat(vertexes, corner[1]);
+        appendFloat(vertexes, corner[2]);
+    }
+
+    /* One edge per quad corner, walked forwards through the surfedge list. */
+    std::vector<unsigned char> edges;
+    std::vector<unsigned char> surfedges;
+    appendI16(edges, 0);  // edge zero is unused, as in a real BSP
+    appendI16(edges, 0);
+    int nextEdge = 1;
+    for (const auto &quad : quads) {
+        for (int corner = 0; corner < 4; corner++) {
+            appendI16(edges, static_cast<std::int16_t>(quad[corner]));
+            appendI16(edges, static_cast<std::int16_t>(quad[(corner + 1) % 4]));
+            appendI32(surfedges, nextEdge++);
+        }
+    }
+
+    std::vector<unsigned char> texinfo;
+    appendFloat(texinfo, 1.0f);  // s axis
+    appendFloat(texinfo, 0.0f);
+    appendFloat(texinfo, 0.0f);
+    appendFloat(texinfo, 0.0f);
+    appendFloat(texinfo, 0.0f);  // t axis
+    appendFloat(texinfo, 0.0f);
+    appendFloat(texinfo, -1.0f);
+    appendFloat(texinfo, 0.0f);
+    appendI32(texinfo, 0);  // miptex
+    appendI32(texinfo, 0);  // flags
+
+    std::vector<unsigned char> faces;
+    for (int face = 0; face < 6; face++) {
+        appendI16(faces, static_cast<std::int16_t>(face));      // plane
+        appendI16(faces, 0);                                    // side
+        appendI32(faces, face * 4);                             // first surfedge
+        appendI16(faces, 4);                                    // edges
+        appendI16(faces, 0);                                    // texinfo
+        for (int style = 0; style < 4; style++) {
+            faces.push_back(255);
+        }
+        appendI32(faces, -1);  // no lightmap
+    }
+
+    std::vector<unsigned char> textures;
+    appendI32(textures, 1);
+    appendI32(textures, 8);  // offset of the one miptex, from the lump
+    appendPadded(textures, "crate_top", 16);
+    appendI32(textures, textureSize);
+    appendI32(textures, textureSize);
+    appendI32(textures, 40);  // pixels follow the four mip offsets
+    for (int mip = 1; mip < 4; mip++) {
+        appendI32(textures, 0);
+    }
+    for (int index = 0; index < textureSize * textureSize; index++) {
+        /* Includes index 255, which a BSP treats as an ordinary colour. */
+        textures.push_back(index == 0 ? 255 : 15);
+    }
+
+    std::vector<unsigned char> models;
+    for (int model = 0; model < modelCount; model++) {
+        for (int component = 0; component < 3; component++) {
+            appendFloat(models, -16.0f);  // mins
+        }
+        for (int component = 0; component < 3; component++) {
+            appendFloat(models, 32.0f);  // maxs
+        }
+        for (int component = 0; component < 3; component++) {
+            appendFloat(models, 0.0f);  // origin
+        }
+        for (int hull = 0; hull < 4; hull++) {
+            appendI32(models, 0);
+        }
+        appendI32(models, 1);  // visleafs
+        appendI32(models, 0);  // first face
+        appendI32(models, 6);  // faces
+    }
+
+    std::vector<unsigned char> entityBytes(entities.begin(), entities.end());
+    entityBytes.push_back(0);
+    const std::vector<unsigned char> visibilityBytes(visibility ? 64 : 0, 0);
+    const std::vector<unsigned char> empty;
+
+    /* Lumps in the order the header lists them. */
+    const std::vector<unsigned char> *lumps[lumpCount] = {
+        &entityBytes, &planes, &textures, &vertexes, &visibilityBytes, &empty, &texinfo,
+        &faces,       &empty,  &empty,    &empty,    &empty,           &edges, &surfedges,
+        &models,
+    };
+
+    std::vector<unsigned char> bytes;
+    appendI32(bytes, 29);
+    size_t cursor = 4 + lumpCount * 8;
+    for (const std::vector<unsigned char> *lump : lumps) {
+        appendI32(bytes, static_cast<std::int32_t>(cursor));
+        appendI32(bytes, static_cast<std::int32_t>(lump->size()));
+        cursor += lump->size();
+    }
+    for (const std::vector<unsigned char> *lump : lumps) {
+        bytes.insert(bytes.end(), lump->begin(), lump->end());
+    }
+    return bytes;
+}
+
 std::vector<unsigned char> buildMd3(const std::string &shader) {
     std::vector<unsigned char> bytes;
 
@@ -227,7 +426,11 @@ void testExtensions() {
     check(pkm_supports_extension("mdl") == 1, "mdl is supported");
     check(pkm_supports_extension(".MD3") == 1, "md3 is supported regardless of case");
     check(pkm_supports_extension("md5mesh") == 1, "md5mesh is supported");
-    check(pkm_supports_extension("bsp") == 0, "bsp is not a model format");
+    check(pkm_supports_extension("spr") == 1, "spr is supported");
+    check(pkm_supports_extension(".SPR32") == 1, "spr32 is supported regardless of case");
+    /* BSP covers both brush models and levels, so the data decides which is which. */
+    check(pkm_supports_extension("bsp") == 1, "bsp is supported");
+    check(pkm_supports_extension("wad") == 0, "wad is not a model format");
     check(pkm_supports_extension(nullptr) == 0, "a missing extension is rejected");
 }
 
@@ -410,6 +613,193 @@ void testMd5() {
     pkm_model_destroy(model);
 }
 
+void testSpr() {
+    const std::vector<unsigned char> bytes = buildSpr(3, 0);
+    char error[256]{};
+    pkm_model *model = pkm_model_create(bytes.data(), bytes.size(), "spr", error, sizeof(error));
+    check(model != nullptr, "a valid sprite parses");
+    if (model == nullptr) {
+        std::fprintf(stderr, "  spr error: %s\n", error);
+        return;
+    }
+
+    pkm_model_stats stats{};
+    pkm_model_get_stats(model, &stats);
+    check(stats.format == PKM_FORMAT_SPR, "the sprite format is reported");
+    check(stats.frame_count == 3, "every sprite frame is counted");
+    check(stats.surface_count == 1, "a sprite draws one quad at a time");
+    check(stats.triangle_count == 2, "the sprite quad is two triangles");
+    check(stats.skin_count == 0, "sprite frames are not offered as skins");
+    check(stats.texture_request_count == 0, "sprite frames need nothing from the archive");
+    check(stats.textured_surface_count == 1, "the playing frame is textured");
+    check(pkm_model_set_skin(model, 0) == PKM_ERROR_INVALID_ARGUMENT,
+          "a sprite has no skins to select");
+
+    pkm_view *view = pkm_view_create(model);
+    check(view != nullptr, "a sprite view is created");
+
+    check(brightPixelCount(renderFrame(view, 96, 96)) > 80, "the sprite frame renders");
+
+    /* Frames differ in size, so stepping the flipbook has to change the image. */
+    settle(view);
+    const std::vector<unsigned char> playing = renderFrame(view, 96, 96);
+    int redraws = 0;
+    for (int step = 0; step < 12; step++) {
+        redraws += pkm_view_advance(view, 1.0 / 60.0);
+    }
+    check(redraws > 0, "sprite playback asks for a redraw while the camera sits still");
+    const std::vector<unsigned char> stepped = renderFrame(view, 96, 96);
+    check(stepped != playing, "the next sprite frame is drawn");
+
+    /* Three frames at a tenth of a second each come back around. */
+    for (int step = 0; step < 36; step++) {
+        pkm_view_advance(view, 1.0 / 120.0);
+    }
+    check(renderFrame(view, 96, 96) == stepped, "sprite playback loops back around");
+
+    pkm_view_destroy(view);
+    pkm_model_destroy(model);
+
+    /* Groups carry their own intervals, and every member is one more frame. */
+    const std::vector<unsigned char> grouped = buildSpr(2, 4);
+    pkm_model *groupModel =
+        pkm_model_create(grouped.data(), grouped.size(), "spr", error, sizeof(error));
+    check(groupModel != nullptr, "a grouped sprite parses");
+    if (groupModel != nullptr) {
+        pkm_model_get_stats(groupModel, &stats);
+        check(stats.frame_count == 8, "group members are counted as frames");
+        pkm_model_destroy(groupModel);
+    }
+
+    /* A sprite with one frame has nothing to play, so it must idle like a mesh. */
+    const std::vector<unsigned char> still = buildSpr(1, 0);
+    pkm_model *stillModel =
+        pkm_model_create(still.data(), still.size(), "spr", error, sizeof(error));
+    check(stillModel != nullptr, "a one frame sprite parses");
+    if (stillModel != nullptr) {
+        pkm_view *stillView = pkm_view_create(stillModel);
+        settle(stillView);
+        renderFrame(stillView, 64, 64);
+        check(pkm_view_advance(stillView, 1.0 / 60.0) == 0,
+              "a one frame sprite asks for no redraw");
+        pkm_view_destroy(stillView);
+        pkm_model_destroy(stillModel);
+    }
+
+    const std::vector<unsigned char> spr32 = buildSpr(1, 0, 32);
+    pkm_model *rgbaModel =
+        pkm_model_create(spr32.data(), spr32.size(), "spr32", error, sizeof(error));
+    check(rgbaModel != nullptr, "an SPR32 sprite parses");
+    if (rgbaModel != nullptr) {
+        pkm_view *rgbaView = pkm_view_create(rgbaModel);
+        check(brightPixelCount(renderFrame(rgbaView, 96, 96)) > 80, "the RGBA sprite renders");
+        pkm_view_destroy(rgbaView);
+        pkm_model_destroy(rgbaModel);
+    }
+
+    std::vector<unsigned char> halfLife = bytes;
+    halfLife[4] = 2;
+    check(pkm_model_create(halfLife.data(), halfLife.size(), "spr", error, sizeof(error)) == nullptr,
+          "a Half-Life sprite is rejected");
+    check(std::string(error).find("Half-Life") != std::string::npos,
+          "the Half-Life sprite error names the format");
+
+    for (size_t size = 1; size < bytes.size(); size += 5) {
+        error[0] = '\0';
+        pkm_model *truncated =
+            pkm_model_create(bytes.data(), size, "spr", error, sizeof(error));
+        check(truncated == nullptr, "a truncated sprite is rejected");
+        check(error[0] != '\0', "a truncated sprite reports a reason");
+        pkm_model_destroy(truncated);
+    }
+
+    /* A frame count far past what the file holds must be caught before allocating. */
+    std::vector<unsigned char> hostile = bytes;
+    hostile[24] = 0xFF;
+    hostile[25] = 0xFF;
+    hostile[26] = 0xFF;
+    hostile[27] = 0x7F;
+    check(pkm_model_create(hostile.data(), hostile.size(), "spr", error, sizeof(error)) == nullptr,
+          "an oversized sprite frame count is rejected");
+}
+
+void testBsp() {
+    const std::string ammoBox = "{\n\"wad\" \"gfx/items.wad\"\n\"classname\" \"worldspawn\"\n}\n";
+    const std::vector<unsigned char> bytes = buildBsp(ammoBox);
+
+    check(pkm_bsp_is_brush_model(bytes.data(), bytes.size()) == 1,
+          "a hull with no spawn point and no vis is a brush model");
+    check(pkm_bsp_is_brush_model(nullptr, 0) == 0, "an empty buffer is not a brush model");
+    check(pkm_bsp_is_brush_model(bytes.data(), 16) == 0, "a truncated header is not a brush model");
+
+    /* The three things that tell a level apart from a prop. */
+    const std::vector<unsigned char> level = buildBsp(
+        ammoBox + "{\n\"classname\" \"info_player_start\"\n\"origin\" \"0 0 24\"\n}\n");
+    check(pkm_bsp_is_brush_model(level.data(), level.size()) == 0,
+          "a BSP with a player start is a level");
+    const std::vector<unsigned char> mixedCase =
+        buildBsp(ammoBox + "{\n\"classname\" \"Info_Player_Deathmatch\"\n}\n");
+    check(pkm_bsp_is_brush_model(mixedCase.data(), mixedCase.size()) == 0,
+          "the spawn point check ignores case");
+    const std::vector<unsigned char> vised = buildBsp(ammoBox, /*visibility=*/true);
+    check(pkm_bsp_is_brush_model(vised.data(), vised.size()) == 0,
+          "a BSP carrying visibility data is a level");
+    const std::vector<unsigned char> submodels = buildBsp(ammoBox, false, /*modelCount=*/3);
+    check(pkm_bsp_is_brush_model(submodels.data(), submodels.size()) == 0,
+          "a BSP with submodels is a level");
+
+    char error[256]{};
+    pkm_model *model = pkm_model_create(bytes.data(), bytes.size(), "bsp", error, sizeof(error));
+    check(model != nullptr, "a brush model parses");
+    if (model == nullptr) {
+        std::fprintf(stderr, "  bsp error: %s\n", error);
+        return;
+    }
+
+    pkm_model_stats stats{};
+    pkm_model_get_stats(model, &stats);
+    check(stats.format == PKM_FORMAT_BSP, "the BSP format is reported");
+    check(stats.surface_count == 1, "faces sharing a texture become one surface");
+    check(stats.triangle_count == 12, "each of the six quads becomes two triangles");
+    check(stats.vertex_count == 24, "each face keeps its own corners");
+    check(stats.frame_count == 1, "a brush model has one pose");
+    check(stats.skin_count == 0, "brush model textures are not offered as skins");
+    check(stats.texture_request_count == 0, "BSP textures come from the file itself");
+    check(stats.textured_surface_count == 1, "the embedded texture is applied");
+
+    pkm_view *view = pkm_view_create(model);
+    pkm_view_set_auto_rotate(view, 0);
+    settle(view);
+    const std::vector<unsigned char> framed = renderFrame(view, 96, 96);
+    check(brightPixelCount(framed) > 80, "the brush model renders");
+
+    /* Index 255 is a solid colour in a BSP, so no face may be punched through. */
+    pkm_view_begin_interaction(view);
+    pkm_view_orbit(view, 20.0f, 40.0f);
+    pkm_view_end_interaction(view);
+    settle(view);
+    check(brightPixelCount(renderFrame(view, 96, 96)) > 80, "the brush model renders from above");
+
+    pkm_view_destroy(view);
+    pkm_model_destroy(model);
+
+    for (size_t size = 1; size < bytes.size(); size += 37) {
+        error[0] = '\0';
+        pkm_model *truncated = pkm_model_create(bytes.data(), size, "bsp", error, sizeof(error));
+        check(truncated == nullptr, "a truncated BSP is rejected");
+        check(error[0] != '\0', "a truncated BSP reports a reason");
+        pkm_model_destroy(truncated);
+    }
+
+    std::vector<unsigned char> wrongVersion = bytes;
+    wrongVersion[0] = 30;
+    check(pkm_model_create(wrongVersion.data(), wrongVersion.size(), "bsp", error, sizeof(error)) ==
+              nullptr,
+          "a GoldSrc BSP is rejected");
+    check(pkm_bsp_is_brush_model(wrongVersion.data(), wrongVersion.size()) == 0,
+          "a GoldSrc BSP is not offered to the viewer");
+}
+
 void testAutoRotate() {
     const std::vector<unsigned char> bytes = buildMdl();
     pkm_model *model = pkm_model_create(bytes.data(), bytes.size(), "mdl", nullptr, 0);
@@ -448,6 +838,8 @@ int main() {
     testMdl();
     testMd3();
     testMd5();
+    testSpr();
+    testBsp();
     testAutoRotate();
 
     if (failures > 0) {

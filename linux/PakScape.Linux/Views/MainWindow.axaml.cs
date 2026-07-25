@@ -119,6 +119,11 @@ public partial class MainWindow : Window
             {
                 new MenuItem { Header = "Open", Command = viewModel.OpenSelectedCommand },
                 quickPreview,
+                new MenuItem
+                {
+                    Header = "Play Demo in Browser...",
+                    Command = viewModel.PlayDemoInBrowserCommand,
+                },
                 new Separator(),
                 cut,
                 copy,

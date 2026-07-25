@@ -221,10 +221,120 @@ public sealed class ModelPreviewTests
             ModelTextureResolver.FindCompanionThumbnail(animation)?.Name);
     }
 
+    [Fact]
+    public void SpritesOpenInTheInteractiveViewer()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(root, "progs/s_explod.spr", TestModels.CreateSpr(3));
+
+        var file = root.Folders[0].Files[0];
+        Assert.True(ArchivePreviewBuilder.OpensInQuickPreview(file));
+
+        var preview = ArchivePreviewBuilder.Build(file);
+        Assert.Equal(ArchivePreviewKind.Model, preview.Kind);
+
+        using var session = ModelPreviewSession.Create(preview.Model!, decodeEncodedImage: null);
+        Assert.Equal(ModelFormat.Spr, session.Statistics.Format);
+        Assert.Equal(3, session.Statistics.FrameCount);
+        Assert.Equal(0, session.SkinCount);
+        Assert.Equal("Quake sprite • 3 frames", session.StatusLine);
+    }
+
+    [Fact]
+    public void SpriteThumbnailsKeepTheFlatFirstFrame()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(root, "progs/s_explod.spr", TestModels.CreateSpr(2));
+
+        var preview = ArchivePreviewBuilder.Build(
+            root.Folders[0].Files[0],
+            includeInteractiveModels: false);
+
+        Assert.Equal(ArchivePreviewKind.Bitmap, preview.Kind);
+        Assert.Equal(16, preview.Bitmap?.Width);
+    }
+
+    [Fact]
+    public void SpritePlaybackRedrawsWhileTheCameraSitsStill()
+    {
+        using var viewer = NativeModelViewer.Create(TestModels.CreateSpr(3), ".spr");
+        Settle(viewer);
+        var playing = Render(viewer);
+
+        var redraws = 0;
+        for (var step = 0; step < 12; step++)
+        {
+            if (viewer.Advance(1.0 / 60.0))
+            {
+                redraws++;
+            }
+        }
+
+        Assert.True(redraws > 0, "sprite playback should keep asking for redraws");
+        Assert.NotEqual(playing, Render(viewer));
+    }
+
+    [Fact]
+    public void BrushModelBspsOpenInTheInteractiveViewer()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(
+            root,
+            "maps/b_shell0.bsp",
+            TestModels.CreateBsp(TestModels.BrushModelEntities));
+
+        var file = root.Folders[0].Files[0];
+        Assert.True(ArchivePreviewBuilder.SupportsInteractiveModel(file));
+        Assert.True(ArchivePreviewBuilder.OpensInQuickPreview(file));
+
+        var preview = ArchivePreviewBuilder.Build(file);
+        Assert.Equal(ArchivePreviewKind.Model, preview.Kind);
+
+        using var session = ModelPreviewSession.Create(preview.Model!, decodeEncodedImage: null);
+        Assert.Equal(ModelFormat.Bsp, session.Statistics.Format);
+        Assert.Equal(12, session.Statistics.TriangleCount);
+        Assert.Equal(1, session.Statistics.TexturedSurfaceCount);
+        Assert.Contains("Quake brush model", session.StatusLine);
+    }
+
+    [Fact]
+    public void LevelBspsKeepTheirFlatOverview()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(
+            root,
+            "maps/start.bsp",
+            TestModels.CreateBsp(TestModels.LevelEntities));
+
+        var file = root.Folders[0].Files[0];
+        Assert.False(ArchivePreviewBuilder.SupportsInteractiveModel(file));
+        Assert.False(ArchivePreviewBuilder.OpensInQuickPreview(file));
+        Assert.NotEqual(ArchivePreviewKind.Model, ArchivePreviewBuilder.Build(file).Kind);
+    }
+
+    [Fact]
+    public void BrushModelDetectionReadsTheFileRatherThanTheName()
+    {
+        Assert.True(NativeModelViewer.IsBspBrushModel(
+            TestModels.CreateBsp(TestModels.BrushModelEntities)));
+
+        /* Any spawn point, visibility data, or extra hull means it is a level. */
+        Assert.False(NativeModelViewer.IsBspBrushModel(
+            TestModels.CreateBsp(TestModels.LevelEntities)));
+        Assert.False(NativeModelViewer.IsBspBrushModel(
+            TestModels.CreateBsp(TestModels.BrushModelEntities, visibility: true)));
+        Assert.False(NativeModelViewer.IsBspBrushModel(
+            TestModels.CreateBsp(TestModels.BrushModelEntities, modelCount: 3)));
+        Assert.False(NativeModelViewer.IsBspBrushModel([1, 2, 3, 4]));
+        Assert.False(NativeModelViewer.IsBspBrushModel([]));
+    }
+
     [Theory]
     [InlineData(".mdl")]
     [InlineData(".md3")]
     [InlineData(".md5mesh")]
+    [InlineData(".spr")]
+    [InlineData(".bsp")]
     public void CorruptModelsAreRejectedWithAReason(string extension)
     {
         var exception = Assert.Throws<InvalidOperationException>(
@@ -325,6 +435,181 @@ internal static class TestModels
             bytes.Add((byte)position.Item2);
             bytes.Add((byte)position.Item3);
             bytes.Add(0);
+        }
+        return [.. bytes];
+    }
+
+    /// <summary>
+    /// A one-brush BSP: a textured cube written the way qbsp writes a brush model.
+    /// Passing entities with a spawn point makes it read as a level instead.
+    /// </summary>
+    public static byte[] CreateBsp(string entities, bool visibility = false, int modelCount = 1)
+    {
+        const int textureSize = 8;
+
+        var corners = new[]
+        {
+            (-16f, -16f, 0f), (16f, -16f, 0f), (16f, 16f, 0f), (-16f, 16f, 0f),
+            (-16f, -16f, 32f), (16f, -16f, 32f), (16f, 16f, 32f), (-16f, 16f, 32f),
+        };
+        var quads = new[]
+        {
+            new[] { 0, 1, 2, 3 }, new[] { 7, 6, 5, 4 }, new[] { 0, 4, 5, 1 },
+            new[] { 2, 6, 7, 3 }, new[] { 1, 5, 6, 2 }, new[] { 3, 7, 4, 0 },
+        };
+        var normals = new[]
+        {
+            (0f, 0f, -1f), (0f, 0f, 1f), (0f, -1f, 0f), (0f, 1f, 0f), (1f, 0f, 0f), (-1f, 0f, 0f),
+        };
+
+        var planes = new List<byte>();
+        foreach (var (x, y, z) in normals)
+        {
+            AddSingle(planes, x);
+            AddSingle(planes, y);
+            AddSingle(planes, z);
+            AddSingle(planes, 16);
+            AddInt32(planes, 0);
+        }
+
+        var vertexes = new List<byte>();
+        foreach (var (x, y, z) in corners)
+        {
+            AddSingle(vertexes, x);
+            AddSingle(vertexes, y);
+            AddSingle(vertexes, z);
+        }
+
+        var edges = new List<byte>();
+        var surfedges = new List<byte>();
+        AddInt16(edges, 0); // edge zero is unused, as in a real BSP
+        AddInt16(edges, 0);
+        var nextEdge = 1;
+        foreach (var quad in quads)
+        {
+            for (var corner = 0; corner < 4; corner++)
+            {
+                AddInt16(edges, (short)quad[corner]);
+                AddInt16(edges, (short)quad[(corner + 1) % 4]);
+                AddInt32(surfedges, nextEdge++);
+            }
+        }
+
+        var texinfo = new List<byte>();
+        foreach (var component in new[] { 1f, 0f, 0f, 0f, 0f, 0f, -1f, 0f })
+        {
+            AddSingle(texinfo, component);
+        }
+        AddInt32(texinfo, 0); // miptex
+        AddInt32(texinfo, 0); // flags
+
+        var faces = new List<byte>();
+        for (var face = 0; face < 6; face++)
+        {
+            AddInt16(faces, (short)face); // plane
+            AddInt16(faces, 0);           // side
+            AddInt32(faces, face * 4);    // first surfedge
+            AddInt16(faces, 4);           // edges
+            AddInt16(faces, 0);           // texinfo
+            faces.AddRange(Enumerable.Repeat((byte)255, 4));
+            AddInt32(faces, -1); // no lightmap
+        }
+
+        var textures = new List<byte>();
+        AddInt32(textures, 1);
+        AddInt32(textures, 8); // offset of the one miptex, from the lump
+        AddName(textures, "crate_top", 16);
+        AddInt32(textures, textureSize);
+        AddInt32(textures, textureSize);
+        AddInt32(textures, 40); // pixels follow the four mip offsets
+        for (var mip = 1; mip < 4; mip++)
+        {
+            AddInt32(textures, 0);
+        }
+        textures.AddRange(Enumerable.Repeat((byte)15, textureSize * textureSize));
+
+        var models = new List<byte>();
+        for (var model = 0; model < modelCount; model++)
+        {
+            for (var component = 0; component < 3; component++)
+            {
+                AddSingle(models, -16);
+            }
+            for (var component = 0; component < 3; component++)
+            {
+                AddSingle(models, 32);
+            }
+            for (var component = 0; component < 3; component++)
+            {
+                AddSingle(models, 0);
+            }
+            for (var hull = 0; hull < 4; hull++)
+            {
+                AddInt32(models, 0);
+            }
+            AddInt32(models, 1); // visleafs
+            AddInt32(models, 0); // first face
+            AddInt32(models, 6); // faces
+        }
+
+        var entityBytes = new List<byte>(System.Text.Encoding.ASCII.GetBytes(entities)) { 0 };
+        var visibilityBytes = new List<byte>(Enumerable.Repeat((byte)0, visibility ? 64 : 0));
+        var empty = new List<byte>();
+
+        /* Lumps in the order the header lists them. */
+        var lumps = new[]
+        {
+            entityBytes, planes, textures, vertexes, visibilityBytes, empty, texinfo,
+            faces, empty, empty, empty, empty, edges, surfedges, models,
+        };
+
+        var bytes = new List<byte>();
+        AddInt32(bytes, 29);
+        var cursor = 4 + lumps.Length * 8;
+        foreach (var lump in lumps)
+        {
+            AddInt32(bytes, cursor);
+            AddInt32(bytes, lump.Count);
+            cursor += lump.Count;
+        }
+        foreach (var lump in lumps)
+        {
+            bytes.AddRange(lump);
+        }
+        return [.. bytes];
+    }
+
+    public const string BrushModelEntities =
+        "{\n\"wad\" \"gfx/items.wad\"\n\"classname\" \"worldspawn\"\n}\n";
+
+    public const string LevelEntities =
+        "{\n\"wad\" \"gfx/base.wad\"\n\"classname\" \"worldspawn\"\n}\n" +
+        "{\n\"classname\" \"info_player_start\"\n\"origin\" \"0 0 24\"\n}\n";
+
+    /// A sprite whose frames differ in size, so playback shows up in a render.
+    public static byte[] CreateSpr(int frames)
+    {
+        var bytes = new List<byte>();
+
+        AddInt32(bytes, 0x50534449); // "IDSP"
+        AddInt32(bytes, 1);
+        AddInt32(bytes, 2); // view parallel
+        AddSingle(bytes, 32);
+        AddInt32(bytes, 32); // canvas width
+        AddInt32(bytes, 32); // canvas height
+        AddInt32(bytes, frames);
+        AddSingle(bytes, 0); // beam length
+        AddInt32(bytes, 0);  // sync type
+
+        for (var frame = 0; frame < frames; frame++)
+        {
+            var size = 16 + frame * 8;
+            AddInt32(bytes, 0); // a lone frame rather than a group
+            AddInt32(bytes, -size / 2);
+            AddInt32(bytes, size / 2);
+            AddInt32(bytes, size);
+            AddInt32(bytes, size);
+            bytes.AddRange(Enumerable.Repeat((byte)15, size * size));
         }
         return [.. bytes];
     }

@@ -32,7 +32,9 @@ enum pkm_format {
     PKM_FORMAT_UNKNOWN = 0,
     PKM_FORMAT_MDL = 1,
     PKM_FORMAT_MD3 = 2,
-    PKM_FORMAT_MD5 = 3
+    PKM_FORMAT_MD5 = 3,
+    PKM_FORMAT_SPR = 4,
+    PKM_FORMAT_BSP = 5
 };
 
 /* Keyboard nudges. Each one moves the camera goal by a fixed step. */
@@ -45,6 +47,10 @@ enum pkm_nudge {
     PKM_NUDGE_OUT = 5
 };
 
+/*
+ * Counts describe what is on screen at once, so a sprite reports the one quad it
+ * draws rather than the sum of its frames; frame_count still counts every frame.
+ */
 typedef struct pkm_model_stats {
     int format;
     int surface_count;
@@ -56,8 +62,19 @@ typedef struct pkm_model_stats {
     int textured_surface_count;
 } pkm_model_stats;
 
-/* The model formats QSS-M loads: MDL, MD3, and MD5. */
+/*
+ * The model formats QSS-M loads: MDL, MD3, MD5, SPR sprites, and the brush models
+ * stored as BSP. A .bsp holds either a brush model or a playable level, so the
+ * extension alone does not decide: ask pkm_bsp_is_brush_model as well.
+ */
 PKM_API int pkm_supports_extension(const char *extension);
+
+/*
+ * True when BSP data is a brush model — an ammo box or a health kit, with one hull,
+ * no visibility data, and nowhere for a player to spawn — rather than a level. A
+ * level has its own flat overview preview, so hosts route only brush models here.
+ */
+PKM_API int pkm_bsp_is_brush_model(const void *bsp_data, size_t bsp_size);
 
 /*
  * Parses model_data into an immutable mesh. The caller can release its buffer as
@@ -126,8 +143,10 @@ PKM_API void pkm_view_nudge(pkm_view *view, int nudge);
 PKM_API void pkm_view_reset(pkm_view *view);
 
 /*
- * Advances damping, inertia, and idle auto-rotation. Returns 1 when the next
- * frame differs from the one already on screen, so an idle viewer costs nothing.
+ * Advances damping, inertia, idle auto-rotation, and sprite playback. Returns 1
+ * when the next frame differs from the one already on screen, so an idle viewer
+ * costs nothing. A sprite with more than one frame is never idle: it loops at the
+ * intervals stored in the file, or ten frames a second when it stores none.
  */
 PKM_API int pkm_view_advance(pkm_view *view, double elapsed_seconds);
 

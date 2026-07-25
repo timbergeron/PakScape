@@ -24,7 +24,7 @@ dependencies.
 Keeping the parser, the orbit camera, and the rasterizer in one library means
 every edition shares the same interaction feel and the same picture: damped
 orbit with inertia, bounding-sphere framing, clamped pitch and zoom, pan, an
-idle turntable, camera-anchored studio lighting, and a baked contact shadow.
+idle turntable, and camera-anchored studio lighting.
 Each app only forwards input and blits the BGRA rows the renderer produces.
 
 Frames are rasterized in horizontal bands across worker threads, at screen
@@ -35,6 +35,21 @@ MDL skins are embedded, so those models preview on their own. MD3 and MD5 name
 their skins instead, so the library reports each request and the app resolves it
 against the open archive; surfaces with no skin fall back to a neutral studio
 material.
+
+BSP brush models are read from the first hull the way the engine draws it: edges
+walked through the surfedge list, a plane for each face normal, and the texinfo
+axes for coordinates, with the file's own miptextures at mip level zero. Faces
+are grouped per texture so one surface stands for one material. Because a `.bsp`
+holds either a brush model or a playable level, `pkm_bsp_is_brush_model` answers
+which from the content — one hull, no visibility data, no spawn point — and hosts
+route only brush models to the viewer. The parser itself is happy to read a
+level, so showing one would be a routing decision rather than new code.
+
+Sprites are a flipbook rather than a mesh: every frame becomes its own quad,
+sized and offset the way Quake hangs it off the sprite's origin, and the view
+plays them at the intervals in the file. The camera starts square to the card,
+skips the turntable, and draws the frames fullbright, because that is how the
+game draws a sprite.
 
 ## Building
 

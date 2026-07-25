@@ -11,9 +11,19 @@ public sealed record ArchiveMetadataDetail(string Label, string Value);
 
 public sealed record ArchiveMetadata(IReadOnlyList<ArchiveMetadataDetail> Details, string Summary)
 {
+    private static readonly string[] DetailsColumnLabelsToHide =
+        ["Duration:", "Description:", "Dimensions:"];
+
     public static ArchiveMetadata Empty { get; } = new([], string.Empty);
 
     public string SearchText => string.Join(" ", Details.Select(detail => detail.Value));
+
+    public string DetailsColumnText => string.Join(
+        "  •  ",
+        Summary
+            .Split("  •  ", StringSplitOptions.RemoveEmptyEntries)
+            .Where(part => !DetailsColumnLabelsToHide.Any(
+                label => part.StartsWith(label, StringComparison.Ordinal))));
 
     public string DisplayText => string.Join(
         Environment.NewLine,
@@ -28,13 +38,26 @@ public static partial class ArchiveMetadataInspector
 {
     public const int MaximumInspectionBytes = 1024 * 1024;
 
+    /// <summary>
+    /// Demos are read frame by frame rather than sampled, so the whole recording has to be
+    /// available for the duration and the closing scores to be right. Longer recordings than
+    /// this still describe themselves, but report their length as a lower bound.
+    /// </summary>
+    public const int MaximumDemoInspectionBytes = 16 * 1024 * 1024;
+
+    private const int MaximumListedPlayers = 8;
+
+    /// <summary>The frag count Quake parks in a player slot once that player disconnects.</summary>
+    private const int VacatedSlotFrags = -99;
+
     private static readonly ConditionalWeakTable<ArchiveFileNode, CacheEntry> Cache = new();
     private static readonly object CacheLock = new();
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".arena", ".cfg", ".csv", ".def", ".ent", ".ini", ".json", ".log", ".map",
-        ".md", ".menu", ".qc", ".rc", ".shader", ".txt", ".xml", ".yaml", ".yml",
+        ".arena", ".cfg", ".csv", ".def", ".ent", ".ini", ".json", ".loc", ".log",
+        ".map", ".md", ".menu", ".qc", ".rc", ".shader", ".src", ".txt", ".xml",
+        ".yaml", ".yml",
     };
 
     private static readonly HashSet<string> ExcludedBrushModels = new(StringComparer.OrdinalIgnoreCase)
@@ -69,8 +92,9 @@ public static partial class ArchiveMetadataInspector
 
     private static ArchiveMetadata InspectCore(ArchiveFileNode file)
     {
-        var data = file.Data.AsSpan(0, Math.Min(file.Data.Length, MaximumInspectionBytes));
         var extension = file.Extension.ToLowerInvariant();
+        var budget = extension == ".dem" ? MaximumDemoInspectionBytes : MaximumInspectionBytes;
+        var data = file.Data.AsSpan(0, Math.Min(file.Data.Length, budget));
         List<ArchiveMetadataDetail> details = extension switch
         {
             ".bsp" => InspectBsp(data),
@@ -87,12 +111,168 @@ public static partial class ArchiveMetadataInspector
             ".bmp" => InspectBitmap(data),
             ".wav" => InspectWave(data),
             ".mp3" => InspectMp3(data, file.Data.Length),
+            /* Neither extension is exclusively Quake's, so both fall back to the magic. */
+            ".dat" => OrMagic(InspectQuakeCProgram(data), data),
+            ".bin" => OrMagic(InspectDosTextScreen(data, file.Data.Length), data),
             _ when TextExtensions.Contains(extension) =>
                 InspectText(extension, data, file.Data.Length),
             _ => InspectMagic(data),
         };
 
+        /* What the file is for, which its header often cannot say on its own. */
+        if (DescribePurpose(file.Name, extension) is { } purpose)
+        {
+            details.Add(Detail("Purpose", purpose));
+        }
+
         return new ArchiveMetadata(details, BuildSummary(extension, details));
+    }
+
+    /// <summary>
+    /// Reads the header qcc writes at the front of a compiled QuakeC program. The CRC is
+    /// of the progdefs the code was built against, which is what an engine checks before
+    /// it agrees to run a mod.
+    /// </summary>
+    private static List<ArchiveMetadataDetail> InspectQuakeCProgram(ReadOnlySpan<byte> data)
+    {
+        if (!TryInt32(data, 0, out var version) || version is not (6 or 7) ||
+            !TryInt32(data, 4, out var crc) || crc < 0 ||
+            !TryInt32(data, 12, out var statements) || statements <= 0 ||
+            !TryInt32(data, 36, out var functions) || functions <= 0 ||
+            !TryInt32(data, 40, out var stringOffset) || stringOffset < 60 ||
+            !TryInt32(data, 44, out var stringBytes) || stringBytes < 0 ||
+            !TryInt32(data, 56, out var entityFields) || entityFields < 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            Detail("Format", "Compiled QuakeC program"),
+            Detail("Version", version == 7 ? "7 (extended)" : version.ToString(CultureInfo.InvariantCulture)),
+            Detail("Progdefs CRC", crc.ToString(CultureInfo.InvariantCulture)),
+            Detail("Functions", functions.ToString("N0", CultureInfo.CurrentCulture)),
+            Detail("Statements", statements.ToString("N0", CultureInfo.CurrentCulture)),
+            Detail("Entity Fields", entityFields.ToString("N0", CultureInfo.CurrentCulture)),
+            Detail("String Data", $"{stringBytes:N0} bytes"),
+        ];
+    }
+
+    /// <summary>
+    /// The 80 by 25 text-mode screens the DOS release printed as it exited, stored as a
+    /// character and a colour attribute per cell.
+    /// </summary>
+    private static List<ArchiveMetadataDetail> InspectDosTextScreen(
+        ReadOnlySpan<byte> data,
+        int fileLength)
+    {
+        const int columns = 80;
+        const int rows = 25;
+        if (fileLength != columns * rows * 2 || data.Length < fileLength)
+        {
+            return [];
+        }
+
+        var characters = new byte[columns * rows];
+        var plausible = 0;
+        for (var cell = 0; cell < characters.Length; cell++)
+        {
+            characters[cell] = data[cell * 2];
+            if (characters[cell] == 0 || characters[cell] >= 0x20)
+            {
+                plausible++;
+            }
+        }
+        /* Junk that happens to be this long is ruled out by its character cells. */
+        if (plausible * 100 < characters.Length * 95)
+        {
+            return [];
+        }
+
+        List<ArchiveMetadataDetail> details =
+        [
+            Detail("Format", "DOS text-mode screen"),
+            Detail("Screen Size", $"{columns} × {rows} characters"),
+        ];
+        if (DosTextScreenHeadline(characters, columns, rows) is { } headline)
+        {
+            details.Add(Detail("Description", headline));
+        }
+        return details;
+    }
+
+    /// <summary>The first line with words on it, which on these screens is the title.</summary>
+    private static string? DosTextScreenHeadline(byte[] characters, int columns, int rows)
+    {
+        var builder = new StringBuilder(columns);
+        for (var row = 0; row < rows; row++)
+        {
+            builder.Clear();
+            for (var column = 0; column < columns; column++)
+            {
+                var character = characters[row * columns + column];
+                builder.Append(character is >= 0x20 and < 0x7f ? (char)character : ' ');
+            }
+
+            var line = builder.ToString().Trim();
+            if (line.Length >= 8 && line.Count(char.IsLetter) >= 4)
+            {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    /*
+     * What a file is for, in one line. Names come first, because a name can mean
+     * something an extension cannot: palette.lmp is a palette, not just an image.
+     * Formats that already describe themselves are left alone.
+     */
+    private static readonly Dictionary<string, string> PurposesByName =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["progs.dat"] = "The compiled QuakeC program the engine runs: the rules, weapons, and monsters of the game or mod.",
+            ["qwprogs.dat"] = "The compiled QuakeC program a QuakeWorld server runs.",
+            ["spprogs.dat"] = "The compiled QuakeC program for single-player, where a mod ships a separate build.",
+            ["csprogs.dat"] = "Client-side QuakeC, run by the client for effects and HUD work the server cannot draw.",
+            ["menu.dat"] = "A QuakeC menu program, run by engines that replace the built-in menus.",
+            ["progs.src"] = "The list qcc compiles: the program to write first, then every QuakeC source file in order.",
+            ["quake.rc"] = "The startup script the engine runs at launch: it execs default.cfg, config.cfg, and autoexec.cfg, then starts the demo loop.",
+            ["default.cfg"] = "The bindings and settings the game ships with, exec'd before any saved configuration.",
+            ["config.cfg"] = "The bindings and settings the engine writes back when it quits.",
+            ["autoexec.cfg"] = "Commands run after the saved configuration, where a player keeps their own overrides.",
+            ["end1.bin"] = "The text screen the DOS release printed on exit from the shareware episode.",
+            ["end2.bin"] = "The text screen the DOS release printed on exit from the registered game.",
+            ["palette.lmp"] = "The 256 colours every paletted Quake image is drawn from.",
+            ["colormap.lmp"] = "The shading table the software renderer used to darken palette colours.",
+            ["pop.lmp"] = "The pattern QuakeWorld servers checked to tell a registered install from shareware.",
+            ["gfx.wad"] = "The 2D interface art: console font, status bar, and menu graphics.",
+            ["conchars.lmp"] = "The console character set, one 16 by 16 grid of glyphs.",
+        };
+
+    private static readonly Dictionary<string, string> PurposesByExtension =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".rc"] = "A console script the engine execs at startup.",
+            [".cfg"] = "A console script of settings and bindings, exec'd by the engine.",
+            [".src"] = "A qcc source list naming the QuakeC files to compile, in order.",
+            [".qc"] = "QuakeC source, compiled into a progs program by qcc.",
+            [".lit"] = "External coloured lighting for the level of the same name.",
+            [".ent"] = "An external entity list, loaded in place of the one inside the level.",
+            [".loc"] = "Location names a QuakeWorld client reports with %l.",
+            [".sav"] = "A Quake savegame.",
+            [".skin"] = "A Quake III skin file, mapping each surface of a model to a texture.",
+            [".shader"] = "A Quake III shader script describing how a texture is drawn.",
+        };
+
+    private static string? DescribePurpose(string fileName, string extension)
+    {
+        var leaf = Path.GetFileName(fileName);
+        if (leaf.Length > 0 && PurposesByName.TryGetValue(leaf, out var named))
+        {
+            return named;
+        }
+        return PurposesByExtension.TryGetValue(extension, out var byExtension) ? byExtension : null;
     }
 
     private static List<ArchiveMetadataDetail> InspectBsp(ReadOnlySpan<byte> data)
@@ -141,7 +321,92 @@ public static partial class ArchiveMetadataInspector
 
     private static List<ArchiveMetadataDetail> InspectDemo(ReadOnlySpan<byte> data)
     {
-        var text = QuakeText(data);
+        if (QuakeDemoInspector.Inspect(data) is { } demo && DescribeDemo(demo) is { Count: > 1 } parsed)
+        {
+            return parsed;
+        }
+        return ScanDemoMapNames(data);
+    }
+
+    private static List<ArchiveMetadataDetail> DescribeDemo(QuakeDemoSummary demo)
+    {
+        List<ArchiveMetadataDetail> details = [Detail("Format", "Quake demo")];
+
+        var maps = demo.Segments
+            .Select(segment => segment.Map)
+            .Where(map => map.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (maps.Count > 0)
+        {
+            details.Add(Detail(maps.Count == 1 ? "Map" : "Maps", string.Join(", ", maps)));
+        }
+
+        var levelName = demo.Segments.FirstOrDefault(segment => segment.LevelName.Length > 0)?.LevelName;
+        if (levelName is not null && !string.Equals(levelName, maps.FirstOrDefault(), StringComparison.OrdinalIgnoreCase))
+        {
+            details.Add(Detail("Level", levelName));
+        }
+
+        if (demo.Duration > 0)
+        {
+            var prefix = demo.Truncated || !demo.MessagesComplete ? "At least " : string.Empty;
+            details.Add(Detail("Duration", prefix + FormatDuration(demo.Duration)));
+        }
+
+        if (demo.MaxClients > 0)
+        {
+            details.Add(Detail(
+                "Mode",
+                demo.IsSinglePlayer ? "Single player" : demo.IsDeathmatch ? "Deathmatch" : "Cooperative"));
+        }
+
+        if (demo.GameDir.Length > 0 && !string.Equals(demo.GameDir, "id1", StringComparison.OrdinalIgnoreCase))
+        {
+            details.Add(Detail("Mod", demo.GameDir));
+        }
+
+        var players = demo.Players.Where(player => player.Name.Trim().Length > 0).ToList();
+        if (players.Count > 0)
+        {
+            details.Add(Detail(
+                players.Count == 1 ? "Player" : "Players",
+                string.Join(", ", players.Take(MaximumListedPlayers).Select(player => player.Name.Trim())) +
+                (players.Count > MaximumListedPlayers ? $", +{players.Count - MaximumListedPlayers} more" : string.Empty)));
+        }
+
+        // Frag counts only mean something once someone can score against someone else, and
+        // slots left by players who disconnected keep their name but score -99.
+        var scoring = players.Where(player => player.Frags != VacatedSlotFrags).ToList();
+        if (scoring.Count > 1 && scoring.Any(player => player.Frags != 0))
+        {
+            details.Add(Detail(
+                "Scores",
+                string.Join(
+                    ", ",
+                    scoring
+                        .OrderByDescending(player => player.Frags)
+                        .Take(MaximumListedPlayers)
+                        .Select(player => $"{player.Name.Trim()} {player.Frags.ToString(CultureInfo.CurrentCulture)}"))));
+        }
+
+        if (demo.ProtocolName.Length > 0 && demo.ProtocolName != "unknown")
+        {
+            details.Add(Detail("Protocol", demo.ProtocolName));
+        }
+
+        return details;
+    }
+
+    /// <summary>
+    /// Falls back to spotting map paths in the raw bytes, which still describes demos this
+    /// parser bails on and recordings wrapped in another container.
+    /// </summary>
+    private static List<ArchiveMetadataDetail> ScanDemoMapNames(ReadOnlySpan<byte> data)
+    {
+        // The scan builds a string of the whole span, so it keeps the ordinary header budget
+        // rather than the larger one the frame walk gets.
+        var text = QuakeText(data[..Math.Min(data.Length, MaximumInspectionBytes)]);
         var maps = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in DemoMapRegex().Matches(text))
@@ -501,6 +766,11 @@ public static partial class ArchiveMetadataInspector
         ];
     }
 
+    private static List<ArchiveMetadataDetail> OrMagic(
+        List<ArchiveMetadataDetail> details,
+        ReadOnlySpan<byte> data) =>
+        details.Count > 0 ? details : InspectMagic(data);
+
     private static List<ArchiveMetadataDetail> InspectMagic(ReadOnlySpan<byte> data)
     {
         if (HasAscii(data, 0, "IDPO")) return InspectMdl(data);
@@ -516,18 +786,16 @@ public static partial class ArchiveMetadataInspector
         {
             return string.Empty;
         }
-        if (extension == ".bsp" && Find(details, "Description") is { } description)
+        if (extension is ".bsp" or ".bin" && Find(details, "Description") is { } description)
         {
             return $"Description: {description}";
         }
-        if (extension == ".dem" && (Find(details, "Map") ?? Find(details, "Maps")) is { } maps)
-        {
-            return $"{(Find(details, "Map") is null ? "Maps" : "Map")}: {maps}";
-        }
-
         string[] preferred = extension switch
         {
             ".bsp" => ["Vertices", "Faces"],
+            ".dat" => ["Functions", "Entity Fields"],
+            ".bin" => ["Screen Size"],
+            ".dem" => ["Map", "Maps", "Duration"],
             ".mdl" or ".spr" => ["Skin Size", "Canvas Size", "Frames"],
             ".wav" or ".mp3" => ["Duration", "Channels", "Sample Rate", "Bit Rate"],
             ".wad" => ["Entries"],
@@ -542,8 +810,9 @@ public static partial class ArchiveMetadataInspector
             .ToList();
         if (selected.Count == 0)
         {
+            /* Purpose is a sentence, so it belongs in details rather than in a column. */
             selected = details
-                .Where(detail => detail.Label is not ("Format" or "Version"))
+                .Where(detail => detail.Label is not ("Format" or "Version" or "Purpose"))
                 .Take(2)
                 .ToList();
         }
@@ -608,6 +877,9 @@ public static partial class ArchiveMetadataInspector
     private static string TextFormat(string extension) => extension switch
     {
         ".cfg" => "Quake configuration",
+        ".rc" => "Quake console script",
+        ".src" => "qcc source list",
+        ".loc" => "QuakeWorld locations",
         ".ent" => "Quake entity definitions",
         ".map" => "Quake map source",
         ".qc" => "QuakeC source",

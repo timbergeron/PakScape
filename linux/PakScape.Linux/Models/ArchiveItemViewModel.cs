@@ -86,7 +86,7 @@ public sealed class ArchiveItemViewModel : ObservableObject
         _ => "Item",
     };
 
-    public string DetailsText => _metadata.Summary;
+    public string DetailsText => _metadata.DetailsColumnText;
 
     public string SearchableMetadata => _metadata.SearchText;
 

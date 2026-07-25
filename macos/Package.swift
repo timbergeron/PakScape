@@ -24,15 +24,21 @@ let package = Package(
                 "PakDocument.swift",
                 "PakExplorerApp.swift",
                 "PakIconView.swift",
-                "PakItemInfo.swift",
                 "PakListView.swift",
+                "PakItemInfoWindow.swift",
                 "PakQuickLook.swift",
                 "PakViewModel.swift",
                 "PakScape-Bridging-Header.h",
                 "PreferencesView.swift",
                 "QuakeModelViewer.swift",
             ],
-            sources: ["PakModels.swift", "PakFormatDetails.swift"]
+            sources: [
+                "PakModels.swift",
+                "PakFormatDetails.swift",
+                "PakItemInfoPlacement.swift",
+                "QuakeDemoInspector.swift",
+                "DemoPlaybackHandoff.swift",
+            ]
         ),
         .testTarget(
             name: "PakArchiveCoreTests",

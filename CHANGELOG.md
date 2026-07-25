@@ -22,13 +22,21 @@ Notable user-visible changes are documented here.
 - Finder-style Get Info details for macOS archive files and folders, available from menus and Command-I.
 - Standard Undo and Redo support for macOS archive edits.
 - Bundled cross-platform Quick Preview audio for the QSS-M WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX formats.
-- An interactive model viewer in Quick Preview for the QSS-M model formats — MDL, MD3, and MD5 — with an orbit camera, pan, wheel and pinch zoom, keyboard control, idle turntable, and studio lighting with a contact shadow, shared by all three editions.
+- An interactive model viewer in Quick Preview for the QSS-M model formats — MDL, MD3, and MD5 — with an orbit camera, pan, wheel and pinch zoom, keyboard control, idle turntable, and studio lighting, shared by all three editions.
 - MD3 and MD5 skins are resolved from the open archive, including Quake III `.skin` files, and surfaces without a skin fall back to a neutral material.
 - Double-clicking a model opens it in the viewer instead of handing it to another application.
 - Image context menus on macOS, Windows, and Linux can save `.lmp`, `.jpg`, `.png`, and `.tga` files in any of those four formats.
+- Demo details on macOS, Windows, and Linux now come from reading the recorded server messages, reporting the levels played, the level title, length, game mode, mod directory, players, closing scores, and network protocol.
+- "Play Demo in Browser…" hands a `.dem` to the q1tools web player, along with the open archive when it holds the demo's maps. The demo is not uploaded: PakScape publishes it on a loopback socket under an unguessable path that expires, and the browser fetches it back from this machine. Double-clicking a demo plays it too, instead of handing the file to an application that cannot open it.
+- Get Info on macOS opens in its own window instead of a centered sheet, so the archive stays usable behind it and several items can be compared side by side. Each window is placed off the top-left of its archive window and cascades from the last one, a second Get Info on the same item brings its window forward, and Escape, Return, or Command-W closes it. Windows for items deleted from the archive close themselves.
+- Get Info on macOS and the details pane on Windows and Linux now say what a file is for, not only what format it is. `progs.dat` and the other compiled QuakeC programs report their version, progdefs CRC, function and statement counts, entity field count, and string size; `end1.bin` and `end2.bin` are read as the 80 × 25 DOS text screens the DOS release printed on exit, headline included; and `quake.rc`, `default.cfg`, `config.cfg`, `autoexec.cfg`, `progs.src`, `palette.lmp`, `colormap.lmp`, `pop.lmp`, `gfx.wad`, and a dozen other well-known names and extensions each carry a line explaining what they do. The sentence stays out of the narrow details column, which keeps showing counts.
+- `.loc` and `.src` files preview as text, and `.rc` scripts are named as Quake console scripts.
+- BSP brush models — the ammo boxes, health kits, and prefab props Quake stores as `.bsp` — open in the model viewer on macOS, Windows, and Linux, textured from the faces and textures in the file itself. They are told apart from playable levels by content rather than by the `b_` naming habit: a brush model is a BSP with one hull, no visibility data, and no spawn point. Levels keep their flat overview preview.
+- `.spr` and `.spr32` sprites open in the model viewer on macOS, Windows, and Linux, playing every frame at the intervals stored in the file as a fullbright card the camera starts square to and can still be orbited. Frame groups and eight-way angled frames are unrolled into the same flipbook, and a sprite the viewer cannot read — a Half-Life sprite, for one — still falls back to its flat first frame.
 
 ### Changed
 
+- Model previews no longer draw a contact shadow beneath the model.
 - macOS 14 is now the minimum deployment target.
 - Save As now updates the active document location.
 - Archive and export writes use atomic replacement where appropriate.

@@ -1,4 +1,5 @@
 _pkm_supports_extension
+_pkm_bsp_is_brush_model
 _pkm_model_create
 _pkm_model_destroy
 _pkm_model_format

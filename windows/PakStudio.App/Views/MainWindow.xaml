@@ -852,6 +852,8 @@
                                 <MenuItem Header="Quick Preview"
                                           InputGestureText="Space"
                                           Click="QuickPreview_OnClick" />
+                                <MenuItem Header="Play Demo in Browser..."
+                                          Command="{Binding Data.PlayDemoInBrowserCommand, Source={StaticResource ViewModelProxy}}" />
                                 <Separator />
                                 <MenuItem Header="Cut"
                                           Command="{Binding Data.CutCommand, Source={StaticResource ViewModelProxy}}" />

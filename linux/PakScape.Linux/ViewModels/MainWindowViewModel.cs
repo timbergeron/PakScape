@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PakScape.Linux.Models;
@@ -7,6 +8,7 @@ using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
+using PakStudio.Core.Playback;
 using PakStudio.Core.Preview;
 
 namespace PakScape.Linux.ViewModels;
@@ -211,6 +213,7 @@ public partial class MainWindowViewModel : ObservableObject
             _ => $"{_selectedItems.Count} selected",
         };
         SaveImageAsCommand.NotifyCanExecuteChanged();
+        PlayDemoInBrowserCommand.NotifyCanExecuteChanged();
     }
 
     public IReadOnlyList<ArchiveNode> SelectedNodes =>
@@ -369,6 +372,13 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (item.Node is ArchiveFileNode file)
         {
+            // A demo has a better destination than whichever application claims .dem.
+            if (IsPlayableDemo(file))
+            {
+                await LaunchDemoInBrowserAsync(file);
+                return;
+            }
+
             try
             {
                 _fileTransferService.OpenWithDefaultApplication(file);
@@ -690,6 +700,102 @@ public partial class MainWindowViewModel : ObservableObject
                _selectedItems is [var item] &&
                item.Node is ArchiveFileNode file &&
                ImageFormatConverter.IsSupportedSource(file.Name);
+    }
+
+    private static bool IsPlayableDemo(ArchiveFileNode file) =>
+        file.Data.LongLength <= DemoPlaybackHandoff.MaximumSessionBytes &&
+        string.Equals(Path.GetExtension(file.Name), ".dem", StringComparison.OrdinalIgnoreCase);
+
+    private bool CanPlayDemoInBrowser()
+    {
+        return !IsBusy &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               IsPlayableDemo(file);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanPlayDemoInBrowser))]
+    private async Task PlayDemoInBrowserAsync()
+    {
+        if (_selectedItems is [var item] && item.Node is ArchiveFileNode file)
+        {
+            await LaunchDemoInBrowserAsync(file);
+        }
+    }
+
+    /// <summary>
+    /// Publishes the demo on a loopback socket and opens the web player on it. The demo is
+    /// never uploaded: the browser fetches it back from this machine.
+    /// </summary>
+    private async Task LaunchDemoInBrowserAsync(ArchiveFileNode file)
+    {
+        try
+        {
+            var summary = QuakeDemoInspector.Inspect(file.Data);
+            var uri = DemoPlaybackHandoff.BuildLaunchUri(
+                new DemoPlaybackAsset(file.Name, file.Data),
+                ArchivePackages(summary),
+                summary,
+                LoopbackAssetServer.Shared);
+
+            Process.Start(new ProcessStartInfo("xdg-open", uri.AbsoluteUri) { UseShellExecute = false });
+            StatusText = $"Opened {file.Name} in your browser.";
+        }
+        catch (Exception exception)
+        {
+            await ReportFailuresAsync("Play Demo Failed", [exception.Message]);
+        }
+    }
+
+    /// <summary>
+    /// Offers the open archive to the player only when it actually holds a map the demo
+    /// visits, so a large archive is not shipped across for a stock level.
+    /// </summary>
+    private IReadOnlyList<DemoPlaybackAsset> ArchivePackages(QuakeDemoSummary? summary)
+    {
+        if (summary is null || Document?.FilePath is not { Length: > 0 } path || !File.Exists(path))
+        {
+            return [];
+        }
+
+        var wanted = new HashSet<string>(
+            summary.Segments.Select(segment => segment.Map).Where(map => map.Length > 0),
+            StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0 || !ContainsAnyMap(Document.Root, wanted))
+        {
+            return [];
+        }
+
+        if (new FileInfo(path).Length > DemoPlaybackHandoff.MaximumSessionBytes)
+        {
+            return [];
+        }
+
+        try
+        {
+            return [new DemoPlaybackAsset(Path.GetFileName(path), File.ReadAllBytes(path))];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static bool ContainsAnyMap(ArchiveFolderNode folder, HashSet<string> wanted)
+    {
+        foreach (var file in folder.Files)
+        {
+            if (string.Equals(Path.GetExtension(file.Name), ".bsp", StringComparison.OrdinalIgnoreCase) &&
+                wanted.Contains(Path.GetFileNameWithoutExtension(file.Name)))
+            {
+                return true;
+            }
+        }
+        return folder.Folders.Any(child => ContainsAnyMap(child, wanted));
     }
 
     [RelayCommand]
@@ -1032,6 +1138,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
         SaveImageAsCommand.NotifyCanExecuteChanged();
+        PlayDemoInBrowserCommand.NotifyCanExecuteChanged();
     }
 
     private void SetViewMode(ArchiveViewMode mode)

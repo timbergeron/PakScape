@@ -6,12 +6,16 @@ enum QuakeModelFormat: Int32 {
     case mdl = 1
     case md3 = 2
     case md5 = 3
+    case spr = 4
+    case bsp = 5
 
     var displayName: String {
         switch self {
         case .mdl: return "Quake MDL"
         case .md3: return "Quake III MD3"
         case .md5: return "Doom 3 MD5"
+        case .spr: return "Quake sprite"
+        case .bsp: return "Quake brush model"
         case .unknown: return "Model"
         }
     }
@@ -37,12 +41,24 @@ enum QuakeModelViewerError: LocalizedError {
     }
 }
 
-/// The model formats QSS-M loads.
+/// The model formats QSS-M loads. Sprites join them as an animated billboard, and
+/// BSP covers the brush models Quake stores its ammo boxes and health kits as.
 enum QuakeModelFormats {
-    static let extensions: Set<String> = ["mdl", "md3", "md5mesh", "md5"]
+    static let extensions: Set<String> = [
+        "mdl", "md3", "md5mesh", "md5", "spr", "spr32", "bsp",
+    ]
 
     static func supports(fileExtension: String) -> Bool {
         extensions.contains(fileExtension.lowercased())
+    }
+
+    /// A `.bsp` holds either a brush model or a playable level. Only the first belongs
+    /// in the viewer, and the file's own content decides which it is: the `b_` prefix
+    /// is an id1 habit that mods do not keep.
+    static func isBrushModel(data: Data) -> Bool {
+        data.withUnsafeBytes { bytes in
+            pkm_bsp_is_brush_model(bytes.baseAddress, bytes.count) != 0
+        }
     }
 }
 
@@ -303,6 +319,13 @@ final class QuakeModelViewer {
     /// A short description of what is on screen, for the panel subtitle.
     var statusLine: String {
         var parts = [format.displayName]
+
+        /* A sprite is one quad, so its frame count is the only count worth showing. */
+        if format == .spr {
+            let frames = Int(statistics.frame_count)
+            parts.append("\(frames.formatted()) \(frames == 1 ? "frame" : "frames")")
+            return parts.joined(separator: " • ")
+        }
 
         let triangles = Int(statistics.triangle_count)
         parts.append("\(triangles.formatted()) \(triangles == 1 ? "triangle" : "triangles")")

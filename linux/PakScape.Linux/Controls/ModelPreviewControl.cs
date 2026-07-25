@@ -12,8 +12,9 @@ using PakStudio.Core.Preview;
 namespace PakScape.Linux.Controls;
 
 /// <summary>
-/// Interactive MDL, MD3, and MD5 preview: drag to orbit, right-drag to pan, wheel
-/// to zoom, and a turntable that starts on its own once the pane goes idle.
+/// Interactive MDL, MD3, MD5, sprite, and BSP brush model preview: drag to orbit,
+/// right-drag to pan, wheel to zoom, and a turntable that starts on its own once the
+/// pane goes idle. Sprites skip the turntable and play their frames instead.
 /// </summary>
 public sealed class ModelPreviewControl : UserControl, IDisposable
 {
@@ -48,8 +49,8 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
             Background = new SolidColorBrush(Color.FromArgb(0x99, 0x10, 0x12, 0x16)),
             CornerRadius = new CornerRadius(13),
             Padding = new Thickness(12, 6),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 18),
             IsHitTestVisible = false,
             Child = new TextBlock
@@ -62,8 +63,8 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
         _skinPicker = new ComboBox
         {
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
             Margin = new Thickness(12),
             MinWidth = 96,
             IsVisible = _session.SkinCount > 1,
@@ -84,8 +85,8 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         var resetButton = new Button
         {
             Content = "Reset view",
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
             Margin = new Thickness(12),
             Padding = new Thickness(10, 4),
         };
@@ -315,7 +316,7 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     }
 
     /// <summary>The backdrop follows the app theme, read from its panel colour.</summary>
-    private bool IsDarkTheme()
+    private static bool IsDarkTheme()
     {
         if (Application.Current?.ActualThemeVariant is { } variant)
         {

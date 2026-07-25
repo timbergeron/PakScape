@@ -104,7 +104,10 @@ jobs:
         run: dotnet build PakStudio.sln --configuration Release --no-restore --maxcpucount:1
 
       - name: Test
-        run: dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+        run: |
+          $nativeDirectory = (Resolve-Path ../native/build/windows/Release).Path
+          $env:PATH = "$nativeDirectory;$env:PATH"
+          dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
 
   linux:
     name: Build Ubuntu app (${{ matrix.architecture }})
