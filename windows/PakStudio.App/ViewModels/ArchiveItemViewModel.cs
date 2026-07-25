@@ -1,4 +1,5 @@
 using PakStudio.Core.Nodes;
+using PakStudio.Core.Preview;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -8,6 +9,7 @@ namespace PakStudio.App.ViewModels;
 public sealed class ArchiveItemViewModel : ViewModelBase
 {
     private readonly Func<ImageSource?>? _thumbnailFactory;
+    private readonly ArchiveMetadata _metadata;
     private ImageSource? _thumbnail;
     private int _thumbnailLoadStarted;
 
@@ -16,6 +18,7 @@ public sealed class ArchiveItemViewModel : ViewModelBase
         Node = node;
         IconGlyph = iconGlyph;
         _thumbnailFactory = thumbnailFactory;
+        _metadata = ArchiveMetadataInspector.Inspect(node);
     }
 
     public ArchiveNode Node { get; }
@@ -80,6 +83,10 @@ public sealed class ArchiveItemViewModel : ViewModelBase
             ArchiveFileNode file => $"{file.Extension.TrimStart('.').ToUpperInvariant()} File",
             _ => "Item",
         };
+
+    public string DetailsText => _metadata.Summary;
+
+    public string SearchableMetadata => _metadata.SearchText;
 
     public long SizeBytes => Node is ArchiveFileNode file ? file.Size : 0;
 

@@ -77,6 +77,9 @@ final class PakViewModel: NSObject, ObservableObject {
         "wav", "mp3", "flac", "ogg", "opus", "it", "s3m", "xm", "mod", "umx",
     ]
     private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
+    private static let companionThumbnailExtensions: Set<String> = [
+        "md5mesh", "md5anim", "mesh", "anim",
+    ]
     private static let textQuickLookExtensions: Set<String> = [
         "arena", "cfg", "csv", "def", "ent", "ini", "json", "log", "map", "md",
         "menu", "qc", "rc", "shader", "txt", "xml", "yaml", "yml",
@@ -100,6 +103,9 @@ final class PakViewModel: NSObject, ObservableObject {
     private var previewImageCache: [PakNode.ID: NSImage] = [:]
     private var previewImageMisses: Set<PakNode.ID> = []
     private var previewImageRequests: [PakNode.ID: Task<Void, Never>] = [:]
+    private var detailsTextCacheVersion: UUID?
+    private var detailsTextCache: [PakNode.ID: String] = [:]
+    private var searchableMetadataCache: [PakNode.ID: String] = [:]
 
     var canNavigateBack: Bool {
         !backStack.isEmpty
@@ -210,12 +216,22 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     func toggleQuickLook(for nodes: [PakNode]) {
+        if ModelPreviewPresenter.shared.isVisible {
+            ModelPreviewPresenter.shared.hide()
+            return
+        }
+
         if PakQuickLook.shared.isVisible {
             PakQuickLook.shared.hide()
             return
         }
 
         guard !nodes.isEmpty else { return }
+
+        /* Models get a live viewer; everything else stays with Quick Look. */
+        if showModelPreview(for: nodes) {
+            return
+        }
 
         do {
             let items = try prepareQuickLookItems(for: nodes)
@@ -227,6 +243,99 @@ final class PakViewModel: NSObject, ObservableObject {
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
+    }
+
+    /// Opens formats that PakScape previews better than external applications.
+    /// Models use the interactive viewer and LMP images use the rendered Quick Look path.
+    @discardableResult
+    func showQuickPreviewOnOpen(for node: PakNode) -> Bool {
+        if showModelPreview(for: [node]) {
+            return true
+        }
+
+        let fileExtension = (node.name as NSString).pathExtension.lowercased()
+        guard !node.isFolder,
+              node.fileSize <= Self.maximumPreviewFileSize,
+              fileExtension == "lmp" else {
+            return false
+        }
+
+        do {
+            let items = try prepareQuickLookItems(for: [node])
+            ModelPreviewPresenter.shared.hide()
+            PakQuickLook.shared.show(items: items)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Preview Selection"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+        return true
+    }
+
+    /// Opens the interactive viewer when every selected file is a model, which is
+    /// also what double-clicking a model does. Returns false for anything else.
+    @discardableResult
+    func showModelPreview(for nodes: [PakNode]) -> Bool {
+        guard let items = modelPreviewItems(for: nodes) else { return false }
+
+        if PakQuickLook.shared.isVisible {
+            PakQuickLook.shared.hide()
+        }
+        ModelPreviewPresenter.shared.show(items: items)
+        return true
+    }
+
+    /// Returns items only when every selected file is a model, so a mixed
+    /// selection keeps Quick Look's own navigation instead of being split up.
+    private func modelPreviewItems(for nodes: [PakNode]) -> [ModelPreviewItem]? {
+        let files = nodes.filter { !$0.isFolder }
+        guard !files.isEmpty, files.count == nodes.count else { return nil }
+
+        let extensions = files.map { ($0.name as NSString).pathExtension.lowercased() }
+        guard extensions.allSatisfy({ QuakeModelFormats.supports(fileExtension: $0) }),
+              files.allSatisfy({ $0.fileSize <= Self.maximumPreviewFileSize }) else {
+            return nil
+        }
+
+        let archiveFiles = pakFile.map { QuakeModelTextureResolver.archiveFiles(root: $0.root) } ?? [:]
+        var items: [ModelPreviewItem] = []
+        items.reserveCapacity(files.count)
+
+        for (node, fileExtension) in zip(files, extensions) {
+            guard let data = extractData(for: node) else { return nil }
+
+            let path = node.entry?.name ?? node.name
+            let resolver = QuakeModelTextureResolver(
+                files: archiveFiles,
+                folderPath: (path as NSString).deletingLastPathComponent,
+                baseName: (node.name as NSString).deletingPathExtension,
+                loadData: { [weak self] textureNode in self?.extractData(for: textureNode) },
+                decodeImage: { [weak self] name, textureData in
+                    self?.modelTextureImage(fileName: name, data: textureData)
+                }
+            )
+
+            items.append(
+                ModelPreviewItem(
+                    name: node.name,
+                    data: data,
+                    fileExtension: fileExtension,
+                    resolver: resolver,
+                    fallbackImage: { [weak self] in
+                        self?.renderPreviewImage(fileName: node.name, data: data)
+                    }
+                )
+            )
+        }
+
+        return items
+    }
+
+    /// Skins can be Quake images or ordinary ones, so both decoders are tried.
+    private func modelTextureImage(fileName: String, data: Data) -> NSImage? {
+        renderPreviewImage(fileName: fileName, data: data) ?? NSImage(data: data)
     }
 
     private func prepareQuickLookItems(for nodes: [PakNode]) throws -> [PakQuickLookItem] {
@@ -845,9 +954,99 @@ final class PakViewModel: NSObject, ObservableObject {
             }
         }
     }
+
+    func canSaveImageAs(_ node: PakNode) -> Bool {
+        guard !node.isFolder else { return false }
+        let sourceExtension = (node.name as NSString).pathExtension.lowercased()
+        return PakImageConverter.supportedSourceExtensions.contains(sourceExtension)
+    }
+
+    func saveImageAs(_ node: PakNode, format: PakImageFormat) {
+        do {
+            let sourceData = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let convertedData = try PakImageConverter.convert(
+                fileName: node.name,
+                data: sourceData,
+                to: format
+            )
+
+            let sourceName = node.name as NSString
+            let outputName = sourceName.deletingPathExtension + "." + format.pathExtension
+            let save = NSSavePanel()
+            save.nameFieldStringValue = outputName
+            if let contentType = UTType(filenameExtension: format.pathExtension) {
+                save.allowedContentTypes = [contentType]
+            }
+            save.canCreateDirectories = true
+
+            save.begin { response in
+                guard response == .OK, let outputURL = save.url else { return }
+                do {
+                    try convertedData.write(to: outputURL, options: .atomic)
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
     
     func extractData(for node: PakNode) -> Data? {
         try? PakNodeData.data(for: node, originalData: pakFile?.data)
+    }
+
+    func detailsText(for node: PakNode) -> String {
+        guard !node.isFolder else { return "" }
+
+        invalidateDetailsCacheIfNeeded()
+        if let cached = detailsTextCache[node.id] {
+            return cached
+        }
+
+        let data = try? PakNodeData.boundedSource(
+            for: node,
+            originalData: pakFile?.data,
+            maximumLength: PakFormatInspector.maximumInspectionBytes
+        ).materialize()
+        let summary = PakFormatInspector.summary(
+            fileName: node.name,
+            data: data,
+            fileSize: node.fileSize
+        )
+        detailsTextCache[node.id] = summary
+        return summary
+    }
+
+    func searchableMetadata(for node: PakNode) -> String {
+        guard !node.isFolder else { return "" }
+
+        invalidateDetailsCacheIfNeeded()
+        if let cached = searchableMetadataCache[node.id] {
+            return cached
+        }
+
+        let data = try? PakNodeData.boundedSource(
+            for: node,
+            originalData: pakFile?.data,
+            maximumLength: PakFormatInspector.maximumInspectionBytes
+        ).materialize()
+        let text = PakFormatInspector.searchableText(
+            fileName: node.name,
+            data: data,
+            fileSize: node.fileSize
+        )
+        searchableMetadataCache[node.id] = text
+        return text
+    }
+
+    private func invalidateDetailsCacheIfNeeded() {
+        let currentVersion = pakFile?.version
+        guard detailsTextCacheVersion != currentVersion else { return }
+
+        detailsTextCacheVersion = currentVersion
+        detailsTextCache.removeAll(keepingCapacity: true)
+        searchableMetadataCache.removeAll(keepingCapacity: true)
     }
 
     func previewImage(for node: PakNode) -> NSImage? {
@@ -869,6 +1068,14 @@ final class PakViewModel: NSObject, ObservableObject {
         }
 
         let ext = (node.name as NSString).pathExtension.lowercased()
+        if Self.companionThumbnailExtensions.contains(ext),
+           let textureNode = companionThumbnailNode(for: node),
+           let data = extractData(for: textureNode),
+           let preview = renderCompanionThumbnail(fileName: textureNode.name, data: data) {
+            previewImageCache[node.id] = preview
+            return preview
+        }
+
         let hasCustomRenderer = Self.renderedQuickLookExtensions.contains(ext)
         let nativeContentType = nativeThumbnailContentType(forExtension: ext)
         guard hasCustomRenderer || nativeContentType != nil else {
@@ -904,6 +1111,36 @@ final class PakViewModel: NSObject, ObservableObject {
 
         previewImageMisses.insert(node.id)
         return nil
+    }
+
+    private func companionThumbnailNode(for node: PakNode) -> PakNode? {
+        guard let root = pakFile?.root,
+              let folder = findParent(of: node, in: root) else {
+            return nil
+        }
+
+        let baseName = (node.name as NSString).deletingPathExtension
+        let names = [
+            "\(baseName)_00_00.png",
+            "\(baseName).png",
+            "\(baseName)_00_00.lmp",
+            "\(baseName).lmp",
+        ]
+        for name in names {
+            if let sibling = folder.children?.first(where: {
+                !$0.isFolder && $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }) {
+                return sibling
+            }
+        }
+        return nil
+    }
+
+    private func renderCompanionThumbnail(fileName: String, data: Data) -> NSImage? {
+        if (fileName as NSString).pathExtension.caseInsensitiveCompare("lmp") == .orderedSame {
+            return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
+        }
+        return NativeImagePreviewRenderer.renderImage(data: data)
     }
 
     func systemIcon(for node: PakNode) -> NSImage {
@@ -2273,7 +2510,7 @@ private enum PcxPreviewRenderer {
     }
 }
 
-private enum TgaPreviewRenderer {
+enum TgaPreviewRenderer {
     static func renderImage(data: Data) -> NSImage? {
         guard data.count >= 18 else { return nil }
 
@@ -2486,7 +2723,7 @@ private enum TgaPreviewRenderer {
     }
 }
 
-private enum LmpPreviewRenderer {
+enum LmpPreviewRenderer {
     private enum HeaderType {
         case none
         case simple

@@ -91,6 +91,35 @@ public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
         return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
     }
 
+    public async Task<string?> PickImageSavePathAsync(string suggestedFileName, string formatId)
+    {
+        var extension = formatId.Equals("jpeg", StringComparison.OrdinalIgnoreCase)
+            ? "jpg"
+            : formatId.ToLowerInvariant();
+        var description = extension switch
+        {
+            "lmp" => "Quake LMP image",
+            "jpg" => "JPEG image",
+            "png" => "PNG image",
+            "tga" => "TGA image",
+            _ => "Image",
+        };
+        var fileType = new FilePickerFileType(description)
+        {
+            Patterns = [$"*.{extension}"],
+        };
+        var file = await Owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save Image As",
+            SuggestedFileName = suggestedFileName,
+            DefaultExtension = extension,
+            FileTypeChoices = [fileType],
+            SuggestedFileType = fileType,
+            ShowOverwritePrompt = true,
+        });
+        return file?.TryGetLocalPath();
+    }
+
     public Task<string?> PromptAsync(
         string title,
         string message,

@@ -368,7 +368,11 @@ struct ContentView: View {
     private var archiveSearchResults: [PakSearchResult]? {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty, let root = model.pakFile?.root else { return nil }
-        return PakArchiveSearch.search(root: root, query: query)
+        return PakArchiveSearch.search(
+            root: root,
+            query: query,
+            metadataText: { model.searchableMetadata(for: $0) }
+        )
     }
 
     private func displayedNodes(in folder: PakNode) -> [PakNode] {
@@ -450,6 +454,15 @@ struct ContentView: View {
             Button("Export…") {
                 select(node)
                 model.exportSelectedFile()
+            }
+            if model.canSaveImageAs(node) {
+                Menu("Save As") {
+                    ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
+                        Button(format.menuTitle) {
+                            model.saveImageAs(node, format: format)
+                        }
+                    }
+                }
             }
         }
         

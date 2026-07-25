@@ -159,6 +159,10 @@ struct PakListView: NSViewRepresentable {
             ascending: true,
             selector: #selector(NSString.localizedStandardCompare(_:))
         )
+        let detailsColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("details"))
+        detailsColumn.title = "Details"
+        detailsColumn.minWidth = 220
+        detailsColumn.width = 280
         let pathColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("path"))
         pathColumn.title = "Path"
         pathColumn.minWidth = 220
@@ -168,6 +172,7 @@ struct PakListView: NSViewRepresentable {
         tableView.addTableColumn(pathColumn)
         tableView.addTableColumn(sizeColumn)
         tableView.addTableColumn(typeColumn)
+        tableView.addTableColumn(detailsColumn)
         tableView.headerView = NSTableHeaderView()
         tableView.onHandledKeyDown = { [weak coordinator = context.coordinator] event in
             coordinator?.handleKeyDown(event) ?? false
@@ -184,6 +189,7 @@ struct PakListView: NSViewRepresentable {
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
         scrollView.documentView = tableView
 
         context.coordinator.tableView = tableView
@@ -299,6 +305,11 @@ struct PakListView: NSViewRepresentable {
                 cell.textField?.stringValue = node.formattedFileSize
             } else if identifier == "type" {
                 cell.textField?.stringValue = node.fileType
+            } else if identifier == "details" {
+                let details = parent.viewModel.detailsText(for: node)
+                cell.textField?.stringValue = details
+                cell.textField?.lineBreakMode = .byTruncatingTail
+                cell.textField?.toolTip = details.isEmpty ? nil : details
             } else if identifier == "path" {
                 cell.textField?.stringValue = parent.searchPaths[node.id] ?? ""
                 cell.textField?.lineBreakMode = .byTruncatingMiddle
@@ -661,6 +672,23 @@ struct PakListView: NSViewRepresentable {
             infoItem.representedObject = node
             menu.addItem(infoItem)
 
+            if parent.viewModel.canSaveImageAs(node) {
+                let saveAsItem = NSMenuItem(title: "Save As", action: nil, keyEquivalent: "")
+                let saveAsMenu = NSMenu(title: "Save As")
+                for format in PakImageFormat.allCases {
+                    let formatItem = NSMenuItem(
+                        title: format.menuTitle,
+                        action: #selector(saveImageAs(_:)),
+                        keyEquivalent: ""
+                    )
+                    formatItem.target = self
+                    formatItem.representedObject = PakImageSaveRequest(node: node, format: format)
+                    saveAsMenu.addItem(formatItem)
+                }
+                saveAsItem.submenu = saveAsMenu
+                menu.addItem(saveAsItem)
+            }
+
             menu.addItem(.separator())
 
             let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
@@ -713,6 +741,11 @@ struct PakListView: NSViewRepresentable {
         @objc private func getInfo(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? PakNode else { return }
             parent.onGetInfo(node)
+        }
+
+        @objc private func saveImageAs(_ sender: NSMenuItem) {
+            guard let request = sender.representedObject as? PakImageSaveRequest else { return }
+            parent.viewModel.saveImageAs(request.node, format: request.format)
         }
 
         @objc private func cutSelection(_ sender: NSMenuItem) {
@@ -774,7 +807,8 @@ struct PakListView: NSViewRepresentable {
         private func open(node: PakNode) {
             if node.isFolder {
                 parent.onOpenFolder(node)
-            } else {
+            } else if !parent.viewModel.showQuickPreviewOnOpen(for: node) {
+                /* Preview-native assets stay in PakScape; anything else goes to its own app. */
                 parent.viewModel.openInDefaultApp(node: node)
             }
         }

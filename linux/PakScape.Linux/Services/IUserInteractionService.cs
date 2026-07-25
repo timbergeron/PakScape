@@ -16,6 +16,8 @@ public interface IUserInteractionService
 
     Task<string?> PickExportDirectoryAsync();
 
+    Task<string?> PickImageSavePathAsync(string suggestedFileName, string formatId);
+
     Task<string?> PromptAsync(string title, string message, string initialValue);
 
     Task ShowInfoAsync(string title, string message);

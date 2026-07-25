@@ -37,13 +37,11 @@ public sealed class ArchiveThumbnailService : IDisposable
         GenerationSlots.Wait();
         try
         {
-            if (node is ArchiveFileNode file &&
-                file.Size <= MaximumThumbnailSourceSize &&
-                ThumbnailExtensions.Contains(file.Extension))
+            if (FindThumbnailSource(node) is { } file)
             {
                 try
                 {
-                    var preview = ArchivePreviewBuilder.Build(file);
+                    var preview = ArchivePreviewBuilder.Build(file, includeInteractiveModels: false);
                     if (PreviewImageFactory.TryCreate(preview, ThumbnailDimension, out var generated))
                     {
                         thumbnail = generated;
@@ -82,9 +80,20 @@ public sealed class ArchiveThumbnailService : IDisposable
     public static bool CanCreateThumbnail(ArchiveNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        return node is ArchiveFileNode file &&
-               file.Size <= MaximumThumbnailSourceSize &&
-               ThumbnailExtensions.Contains(file.Extension);
+        return FindThumbnailSource(node) is not null;
+    }
+
+    private static ArchiveFileNode? FindThumbnailSource(ArchiveNode node)
+    {
+        if (node is not ArchiveFileNode file)
+        {
+            return null;
+        }
+
+        var source = ThumbnailExtensions.Contains(file.Extension)
+            ? file
+            : ModelTextureResolver.FindCompanionThumbnail(file);
+        return source is { Size: <= MaximumThumbnailSourceSize } ? source : null;
     }
 
     public void Reset()

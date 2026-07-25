@@ -28,5 +28,13 @@
           Link="pakscape_audio.dll"
           CopyToOutputDirectory="PreserveNewest"
           Condition="Exists('../../native/build/windows/Release/pakscape_audio.dll')" />
+    <None Include="../../native/build/linux/libpakscape_model.so"
+          Link="libpakscape_model.so"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/linux/libpakscape_model.so')" />
+    <None Include="../../native/build/windows/Release/pakscape_model.dll"
+          Link="pakscape_model.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/windows/Release/pakscape_model.dll')" />
   </ItemGroup>
 </Project>

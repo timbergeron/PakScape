@@ -29,11 +29,12 @@ if ! command -v "${dotnet_command}" >/dev/null 2>&1; then
     echo "Required .NET command not found: ${dotnet_command}" >&2
     exit 1
 fi
-native_audio_library="${repository_root}/native/build/linux/libpakscape_audio.so"
-if [[ ! -f "${native_audio_library}" ]]; then
-    echo "Native audio library not found. Run native/scripts/build-linux.sh first." >&2
-    exit 1
-fi
+for native_library in libpakscape_audio.so libpakscape_model.so; do
+    if [[ ! -f "${repository_root}/native/build/linux/${native_library}" ]]; then
+        echo "Native library ${native_library} not found. Run native/scripts/build-linux.sh first." >&2
+        exit 1
+    fi
+done
 for command_name in dpkg-deb find install sed tar; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Required command not found: ${command_name}" >&2

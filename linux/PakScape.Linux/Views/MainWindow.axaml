@@ -469,6 +469,7 @@
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Type" Binding="{Binding TypeText}" SortMemberPath="TypeText" Width="180" />
+                <DataGridTextColumn Header="Details" Binding="{Binding DetailsText}" SortMemberPath="DetailsText" Width="2*" MinWidth="220" />
                 <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" SortMemberPath="SizeBytes" Width="110" />
                 <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedText}" SortMemberPath="ModifiedSortValue" Width="160" />
               </DataGrid.Columns>

@@ -11,4 +11,6 @@ public interface IFileDialogService
     string? PickFolderToAdd();
 
     string? PickExportDirectory();
+
+    string? PickImageSavePath(string suggestedFileName, string formatId);
 }

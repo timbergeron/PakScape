@@ -167,7 +167,44 @@ install(TARGETS pakscape_audio
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES include/pakscape_audio.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
+# The model viewer is dependency free: it parses MDL, MD3, and MD5 meshes and
+# software renders them so every edition shares one orbit camera and one look.
+add_library(pakscape_model SHARED src/pakscape_model.cpp)
+target_compile_features(pakscape_model PRIVATE cxx_std_17)
+target_compile_definitions(pakscape_model PRIVATE PAKSCAPE_MODEL_BUILD)
+target_include_directories(pakscape_model
+    PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
+
+if(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(pakscape_model PRIVATE Threads::Threads m)
+endif()
+if(APPLE)
+    set_target_properties(pakscape_model PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_NAME_DIR "@rpath")
+    target_link_options(pakscape_model PRIVATE
+        "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports-model-macos.txt")
+elseif(UNIX)
+    target_link_options(pakscape_model PRIVATE
+        "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports-model-linux.map")
+endif()
+
+set_target_properties(pakscape_model PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+    OUTPUT_NAME pakscape_model)
+
+install(TARGETS pakscape_model
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES include/pakscape_model.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
 enable_testing()
 add_executable(pakscape_audio_api_tests tests/api_tests.cpp)
 target_link_libraries(pakscape_audio_api_tests PRIVATE pakscape_audio)
 add_test(NAME pakscape_audio_api_tests COMMAND pakscape_audio_api_tests)
+
+add_executable(pakscape_model_api_tests tests/model_api_tests.cpp)
+target_link_libraries(pakscape_model_api_tests PRIVATE pakscape_model)
+add_test(NAME pakscape_model_api_tests COMMAND pakscape_model_api_tests)

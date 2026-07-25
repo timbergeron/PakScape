@@ -8,6 +8,8 @@ using Avalonia.VisualTree;
 using PakScape.Linux.Models;
 using PakScape.Linux.ViewModels;
 using PakStudio.Core.Interfaces;
+using PakStudio.Core.Nodes;
+using PakStudio.Core.Preview;
 
 namespace PakScape.Linux.Views;
 
@@ -71,6 +73,7 @@ public partial class MainWindow : Window
         _fileTransferService = fileTransferService;
         _startupPath = startupPath;
         DataContext = viewModel;
+        AttachArchiveContextMenus(viewModel);
 
         Opened += OnOpened;
         Closing += OnClosing;
@@ -78,6 +81,67 @@ public partial class MainWindow : Window
         viewModel.RecentFiles.CollectionChanged += OnRecentFilesChanged;
         RebuildRecentFilesMenu();
     }
+
+    private void AttachArchiveContextMenus(MainWindowViewModel viewModel)
+    {
+        LargeIconsList.ContextMenu = CreateArchiveContextMenu(viewModel);
+        SmallIconsList.ContextMenu = CreateArchiveContextMenu(viewModel);
+        ArchiveList.ContextMenu = CreateArchiveContextMenu(viewModel);
+        ArchiveGrid.ContextMenu = CreateArchiveContextMenu(viewModel);
+    }
+
+    private ContextMenu CreateArchiveContextMenu(MainWindowViewModel viewModel)
+    {
+        var quickPreview = new MenuItem { Header = "Quick Preview" };
+        quickPreview.Click += OnQuickPreviewClick;
+        var cut = new MenuItem { Header = "Cut" };
+        cut.Click += OnCutClick;
+        var copy = new MenuItem { Header = "Copy" };
+        copy.Click += OnCopyClick;
+        var paste = new MenuItem { Header = "Paste" };
+        paste.Click += OnPasteClick;
+
+        var saveAs = new MenuItem
+        {
+            Header = "Save As",
+            ItemsSource = new[]
+            {
+                SaveImageMenuItem("LMP...", "lmp", viewModel),
+                SaveImageMenuItem("JPEG...", "jpg", viewModel),
+                SaveImageMenuItem("PNG...", "png", viewModel),
+                SaveImageMenuItem("TGA...", "tga", viewModel),
+            },
+        };
+
+        return new ContextMenu
+        {
+            ItemsSource = new object[]
+            {
+                new MenuItem { Header = "Open", Command = viewModel.OpenSelectedCommand },
+                quickPreview,
+                new Separator(),
+                cut,
+                copy,
+                paste,
+                new Separator(),
+                new MenuItem { Header = "Export...", Command = viewModel.ExportCommand },
+                saveAs,
+                new MenuItem { Header = "Rename...", Command = viewModel.RenameCommand },
+                new MenuItem { Header = "Delete", Command = viewModel.DeleteCommand },
+            },
+        };
+    }
+
+    private static MenuItem SaveImageMenuItem(
+        string header,
+        string formatId,
+        MainWindowViewModel viewModel) =>
+        new()
+        {
+            Header = header,
+            Command = viewModel.SaveImageAsCommand,
+            CommandParameter = formatId,
+        };
 
     private async void OnOpened(object? sender, EventArgs e)
     {
@@ -291,7 +355,7 @@ public partial class MainWindow : Window
     {
         if (ArchiveGrid.SelectedItem is ArchiveItemViewModel item)
         {
-            await ViewModel.OpenItemAsync(item);
+            await OpenOrPreviewAsync(item);
             e.Handled = true;
         }
     }
@@ -300,9 +364,23 @@ public partial class MainWindow : Window
     {
         if (sender is ListBox { SelectedItem: ArchiveItemViewModel item })
         {
-            await ViewModel.OpenItemAsync(item);
+            await OpenOrPreviewAsync(item);
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Preview-native assets stay in PakScape; anything else goes to its own app.
+    /// </summary>
+    private async Task OpenOrPreviewAsync(ArchiveItemViewModel item)
+    {
+        if (ArchivePreviewBuilder.OpensInQuickPreview(item.Node))
+        {
+            ShowQuickPreview([item.Node]);
+            return;
+        }
+
+        await ViewModel.OpenItemAsync(item);
     }
 
     private async void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
@@ -430,6 +508,28 @@ public partial class MainWindow : Window
 
     private void OnArchiveGridPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (sender is Control selectionSource &&
+            e.Source is Visual selectionVisual &&
+            e.GetCurrentPoint(selectionSource).Properties.IsRightButtonPressed)
+        {
+            var dataGridRow = selectionVisual as DataGridRow ??
+                selectionVisual.FindAncestorOfType<DataGridRow>();
+            var listBoxItem = selectionVisual as ListBoxItem ??
+                selectionVisual.FindAncestorOfType<ListBoxItem>();
+
+            if (dataGridRow is { IsSelected: false } && selectionSource is DataGrid dataGrid)
+            {
+                dataGrid.SelectedItems.Clear();
+                dataGridRow.IsSelected = true;
+            }
+            else if (listBoxItem is { IsSelected: false } && selectionSource is ListBox listBox)
+            {
+                listBox.SelectedItems?.Clear();
+                listBoxItem.IsSelected = true;
+            }
+            return;
+        }
+
         if (sender is Control source &&
             e.Source is Visual visual &&
             (visual is DataGridRow or ListBoxItem ||
@@ -575,10 +675,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nodes = ViewModel.SelectedNodes;
+        ShowQuickPreview(ViewModel.SelectedNodes);
+    }
+
+    private void ShowQuickPreview(IReadOnlyList<ArchiveNode> nodes)
+    {
         if (nodes.Count == 0)
         {
             return;
+        }
+
+        /* Replace whatever is already being previewed. */
+        if (_previewWindow is { IsVisible: true })
+        {
+            _previewWindow.Close();
         }
 
         try

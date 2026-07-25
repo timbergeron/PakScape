@@ -7,12 +7,22 @@ public enum ArchivePreviewKind
     Audio,
     EncodedImage,
     Bitmap,
+    Model,
 }
 
 public sealed record PreviewBitmap(int Width, int Height, byte[] BgraPixels)
 {
     public int Stride => checked(Width * 4);
 }
+
+/// <summary>
+/// A model the viewer renders interactively. MD3 and MD5 name their skins, so the
+/// resolver finds those entries in the same archive.
+/// </summary>
+public sealed record PreviewModel(
+    byte[] Data,
+    string Extension,
+    ModelTextureResolver Textures);
 
 public sealed record ArchivePreview(
     string Title,
@@ -25,7 +35,8 @@ public sealed record ArchivePreview(
     int ImageWidth = 0,
     int ImageHeight = 0,
     PreviewBitmap? Bitmap = null,
-    string? Message = null);
+    string? Message = null,
+    PreviewModel? Model = null);
 
 public sealed class ArchivePreviewException : Exception
 {

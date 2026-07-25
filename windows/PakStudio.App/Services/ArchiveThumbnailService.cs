@@ -28,16 +28,12 @@ public sealed class ArchiveThumbnailService
     public static bool CanCreateThumbnail(ArchiveNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        return node is ArchiveFileNode file &&
-               file.Size <= MaximumThumbnailSourceSize &&
-               ThumbnailExtensions.Contains(file.Extension);
+        return FindThumbnailSource(node) is not null;
     }
 
     private static CacheEntry CreateCacheEntry(ArchiveNode node)
     {
-        if (node is not ArchiveFileNode file ||
-            file.Size > MaximumThumbnailSourceSize ||
-            !ThumbnailExtensions.Contains(file.Extension))
+        if (FindThumbnailSource(node) is not { } file)
         {
             return new CacheEntry(null);
         }
@@ -45,7 +41,7 @@ public sealed class ArchiveThumbnailService
         GenerationSlots.Wait();
         try
         {
-            var preview = ArchivePreviewBuilder.Build(file);
+            var preview = ArchivePreviewBuilder.Build(file, includeInteractiveModels: false);
             return PreviewImageFactory.TryCreate(preview, ThumbnailDimension, out var image)
                 ? new CacheEntry(image)
                 : new CacheEntry(null);
@@ -58,6 +54,19 @@ public sealed class ArchiveThumbnailService
         {
             GenerationSlots.Release();
         }
+    }
+
+    private static ArchiveFileNode? FindThumbnailSource(ArchiveNode node)
+    {
+        if (node is not ArchiveFileNode file)
+        {
+            return null;
+        }
+
+        var source = ThumbnailExtensions.Contains(file.Extension)
+            ? file
+            : ModelTextureResolver.FindCompanionThumbnail(file);
+        return source is { Size: <= MaximumThumbnailSourceSize } ? source : null;
     }
 
     private sealed record CacheEntry(ImageSource? Image);

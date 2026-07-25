@@ -8,6 +8,7 @@ using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
+using PakStudio.Core.Preview;
 
 namespace PakStudio.App.ViewModels;
 
@@ -79,6 +80,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         RenameCommand = new RelayCommand(RenameSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
         DeleteCommand = new RelayCommand(DeleteSelectedItems, CanModifySelectedItems);
         ExportCommand = new AsyncRelayCommand(ExportSelectedItemsAsync, CanModifySelectedItems);
+        SaveImageAsCommand = new AsyncRelayCommand<string>(
+            SaveSelectedImageAsAsync,
+            CanSaveSelectedImageAs);
         OpenSelectedCommand = new RelayCommand(OpenSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
         UpCommand = new RelayCommand(NavigateUp, () => _currentFolder?.Parent is not null && !IsBusy);
         BackCommand = new RelayCommand(NavigateBack, CanNavigateBack);
@@ -206,6 +210,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string TypeSortHeader => SortHeader("Type", ArchiveSortColumn.Type);
 
+    public string DetailsSortHeader => SortHeader("Details", ArchiveSortColumn.Details);
+
     public string SizeSortHeader => SortHeader("Size", ArchiveSortColumn.Size);
 
     public string ModifiedSortHeader => SortHeader("Modified", ArchiveSortColumn.Modified);
@@ -239,6 +245,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public RelayCommand DeleteCommand { get; }
 
     public AsyncRelayCommand ExportCommand { get; }
+
+    public AsyncRelayCommand<string> SaveImageAsCommand { get; }
 
     public RelayCommand OpenSelectedCommand { get; }
 
@@ -382,6 +390,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(NameSortHeader));
         OnPropertyChanged(nameof(TypeSortHeader));
+        OnPropertyChanged(nameof(DetailsSortHeader));
         OnPropertyChanged(nameof(SizeSortHeader));
         OnPropertyChanged(nameof(ModifiedSortHeader));
         RebuildCurrentItems(_selectedItems.FirstOrDefault()?.Node);
@@ -708,6 +717,46 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private async Task SaveSelectedImageAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            _selectedItems is not [var item] ||
+            item.Node is not ArchiveFileNode file ||
+            !ImageFormatConverter.IsSupportedSource(file.Name))
+        {
+            return;
+        }
+
+        var extension = ImageFormatConverter.ExtensionFor(format);
+        var suggestedName = Path.GetFileNameWithoutExtension(file.Name) + extension;
+        var outputPath = _fileDialogService.PickImageSavePath(
+            suggestedName,
+            extension.TrimStart('.'));
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Converting {file.Name}...";
+            var converted = await Task.Run(() =>
+                ImageFormatConverter.Convert(file.Name, file.Data, format)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(outputPath, converted).ConfigureAwait(true);
+            StatusText = $"Saved {Path.GetFileName(outputPath)}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Image conversion failed.";
+            _messageBoxService.ShowError("Save Image As Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private void OpenSelectedItem()
     {
         OpenItem(SelectedItem);
@@ -991,6 +1040,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         return _selectedItems.Count > 0 && !IsBusy;
     }
 
+    private bool CanSaveSelectedImageAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               ImageFormatConverter.IsSupportedSource(file.Name);
+    }
+
     private void RefreshCurrentFolder()
     {
         RebuildFolderTree(_currentFolder ?? Document?.Root);
@@ -1065,19 +1123,22 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var children = _currentFolder.Children
-            .Where(child => string.IsNullOrWhiteSpace(SearchText)
-                || child.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(child => child is ArchiveFolderNode)
-            .ThenBy(child => child, Comparer<ArchiveNode>.Create(CompareNodes));
-        foreach (var child in children)
-        {
-            CurrentItems.Add(new ArchiveItemViewModel(
+        var items = _currentFolder.Children
+            .Select(child => new ArchiveItemViewModel(
                 child,
                 _iconService.GetGlyphForNode(child),
                 ArchiveThumbnailService.CanCreateThumbnail(child)
                     ? () => _thumbnailService.GetThumbnail(child)
-                    : null));
+                    : null))
+            .Where(item => string.IsNullOrWhiteSpace(SearchText) ||
+                           item.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
+                           item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
+                           item.SearchableMetadata.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.IsFolder)
+            .ThenBy(item => item.Node, Comparer<ArchiveNode>.Create(CompareNodes));
+        foreach (var item in items)
+        {
+            CurrentItems.Add(item);
         }
 
         OnPropertyChanged(nameof(SearchResultText));
@@ -1094,6 +1155,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         var comparison = _sortColumn switch
         {
             ArchiveSortColumn.Type => CompareText(GetTypeText(left), GetTypeText(right)),
+            ArchiveSortColumn.Details => CompareText(
+                ArchiveMetadataInspector.Inspect(left).Summary,
+                ArchiveMetadataInspector.Inspect(right).Summary),
             ArchiveSortColumn.Size => CompareValues(GetSize(left), GetSize(right)),
             ArchiveSortColumn.Modified => CompareValues(GetModified(left), GetModified(right)),
             _ => CompareText(left.Name, right.Name),
@@ -1237,6 +1301,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         Name,
         Type,
+        Details,
         Size,
         Modified,
     }

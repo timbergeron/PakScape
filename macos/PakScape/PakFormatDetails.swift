@@ -24,6 +24,8 @@ enum PakFormatInspector {
         switch ext {
         case "bsp":
             return bspDetails(data)
+        case "dem":
+            return demoDetails(data)
         case "mdl":
             return mdlDetails(data)
         case "spr":
@@ -78,6 +80,9 @@ enum PakFormatInspector {
             detail("Version", String(version)),
         ]
 
+        if let description = bspWorldspawnMessage(data) {
+            details.append(detail("Description", description))
+        }
         if let vertices = bspLumpCount(data, index: 3, recordSize: 12) {
             details.append(detail("Vertices", formatted(vertices)))
         }
@@ -93,6 +98,110 @@ enum PakFormatInspector {
             details.append(detail("Textures", formatted(textures)))
         }
         return details
+    }
+
+    private static func bspWorldspawnMessage(_ data: Data) -> String? {
+        guard let entities = bspLump(data, index: 0),
+              entities.offset <= data.count,
+              entities.length <= data.count - entities.offset else { return nil }
+
+        let bytes = data[entities.offset ..< entities.offset + entities.length]
+        guard let text = String(bytes: bytes.map { $0 & 0x7f }, encoding: .isoLatin1),
+              let worldspawnEnd = text.firstIndex(of: "}") else { return nil }
+
+        let worldspawn = text[..<worldspawnEnd]
+        let pattern = #""message"\s+"((?:\\.|[^"])*)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: String(worldspawn),
+                range: NSRange(worldspawn.startIndex..., in: worldspawn)
+              ),
+              let valueRange = Range(match.range(at: 1), in: worldspawn) else { return nil }
+
+        let value = worldspawn[valueRange]
+            .replacingOccurrences(of: #"\""#, with: #"""#)
+            .replacingOccurrences(of: #"\\"#, with: #"\"#)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func demoDetails(_ data: Data) -> [PakFormatDetail] {
+        let text = String(bytes: data.map { $0 & 0x7f }, encoding: .isoLatin1) ?? ""
+        let pattern = #"(?i)maps/([a-z0-9_+\-.]+)\.bsp"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
+        let excludedBrushModels: Set<String> = [
+            "b_batt0", "b_batt1", "b_bh10", "b_bh100", "b_bh25",
+            "b_lnail0", "b_lnail1", "b_mrock0", "b_mrock1", "b_nail0",
+            "b_nail1", "b_plas0", "b_plas1", "b_rock0", "b_rock1",
+            "b_shell0", "b_shell1",
+        ]
+        var maps: [String] = []
+        var seen = Set<String>()
+
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(match.range(at: 1), in: text) else { continue }
+            let map = String(text[range])
+            let key = map.lowercased()
+            guard !excludedBrushModels.contains(key), seen.insert(key).inserted else { continue }
+            maps.append(map)
+        }
+
+        guard !maps.isEmpty else { return [detail("Format", "Quake demo")] }
+        return [
+            detail("Format", "Quake demo"),
+            detail(maps.count == 1 ? "Map" : "Maps", maps.joined(separator: ", ")),
+        ]
+    }
+
+    static func summary(fileName: String, data: Data?, fileSize: Int) -> String {
+        let details = details(fileName: fileName, data: data, fileSize: fileSize)
+        guard !details.isEmpty else { return "" }
+
+        let ext = (fileName.lowercased() as NSString).pathExtension
+        if ext == "bsp", let description = details.first(where: { $0.label == "Description" }) {
+            return "Description: \(description.value)"
+        }
+        if ext == "dem", let maps = details.first(where: { $0.label == "Map" || $0.label == "Maps" }) {
+            return "\(maps.label): \(maps.value)"
+        }
+
+        let preferredLabels: [String]
+        switch ext {
+        case "bsp":
+            preferredLabels = ["Vertices", "Faces"]
+        case "dem":
+            preferredLabels = []
+        case "mdl", "spr":
+            preferredLabels = ["Skin Size", "Canvas Size", "Frames"]
+        case "wav", "mp3":
+            preferredLabels = ["Duration", "Channels", "Sample Rate", "Bit Rate"]
+        case "wad":
+            preferredLabels = ["Entries"]
+        case "cfg", "csv", "def", "ent", "ini", "json", "log", "map", "md",
+             "menu", "qc", "rc", "shader", "txt", "xml", "yaml", "yml":
+            preferredLabels = ["Lines", "Encoding"]
+        default:
+            preferredLabels = ["Dimensions", "Canvas Size", "Color Depth", "Bit Depth", "Frames"]
+        }
+
+        let selected = preferredLabels.compactMap { label in
+            details.first(where: { $0.label == label })
+        }
+        let visible = selected.isEmpty
+            ? Array(details.filter { $0.label != "Format" && $0.label != "Version" }.prefix(2))
+            : Array(selected.prefix(2))
+
+        if visible.isEmpty {
+            return details.first(where: { $0.label == "Format" })?.value ?? ""
+        }
+        return visible.map { "\($0.label): \($0.value)" }.joined(separator: "  •  ")
+    }
+
+    static func searchableText(fileName: String, data: Data?, fileSize: Int) -> String {
+        details(fileName: fileName, data: data, fileSize: fileSize)
+            .map(\.value)
+            .joined(separator: " ")
     }
 
     private static func bspLump(_ data: Data, index: Int) -> (offset: Int, length: Int)? {

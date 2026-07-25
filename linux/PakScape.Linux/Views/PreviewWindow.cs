@@ -10,6 +10,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using PakScape.Linux.Controls;
 using PakStudio.Core.Audio;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
@@ -31,6 +32,7 @@ public sealed class PreviewWindow : Window, IDisposable
     private readonly TextBlock _audioTimeText;
     private readonly TextBlock _audioStatusText;
     private readonly Grid _metadataPanel;
+    private readonly Grid _modelPanel;
     private readonly TextBlock _metadataTypeText;
     private readonly TextBlock _metadataSizeText;
     private readonly TextBlock _metadataMessageText;
@@ -38,6 +40,7 @@ public sealed class PreviewWindow : Window, IDisposable
     private readonly Button _previousButton;
     private readonly Button _nextButton;
     private NativeAudioPlayer? _audioPlayer;
+    private ModelPreviewControl? _modelPreview;
     private CancellationTokenSource? _previewCancellationSource;
     private ArchivePreview? _activePreview;
     private Bitmap? _currentImage;
@@ -288,9 +291,14 @@ public sealed class PreviewWindow : Window, IDisposable
             },
         };
 
+        _modelPanel = new Grid
+        {
+            IsVisible = false,
+        };
+
         var contentGrid = new Grid
         {
-            Children = { _imagePanel, _textPreview, _audioPanel, _metadataPanel },
+            Children = { _imagePanel, _modelPanel, _textPreview, _audioPanel, _metadataPanel },
         };
         var contentBorder = new Border
         {
@@ -397,6 +405,11 @@ public sealed class PreviewWindow : Window, IDisposable
         Title = $"{preview.Title} — Quick Preview";
         _titleText.Text = preview.Title;
         _subtitleText.Text = $"{preview.TypeDescription} • {ArchivePreviewBuilder.FormatSize(preview.Size)}";
+        var metadata = ArchiveMetadataInspector.Inspect(_nodes[_index]);
+        if (!string.IsNullOrWhiteSpace(metadata.Summary))
+        {
+            _subtitleText.Text += $" • {metadata.Summary}";
+        }
         _positionText.Text = _nodes.Count == 1 ? "1 of 1" : $"{_index + 1:N0} of {_nodes.Count:N0}";
         _previousButton.IsEnabled = _nodes.Count > 1;
         _nextButton.IsEnabled = _nodes.Count > 1;
@@ -430,6 +443,9 @@ public sealed class PreviewWindow : Window, IDisposable
                 break;
             case ArchivePreviewKind.Bitmap when preview.Bitmap is { } bitmap:
                 SetImage(CreateBitmap(bitmap));
+                break;
+            case ArchivePreviewKind.Model when preview.Model is { } model:
+                ShowModel(preview, model);
                 break;
             default:
                 ShowMetadata(preview);
@@ -479,17 +495,62 @@ public sealed class PreviewWindow : Window, IDisposable
         }
     }
 
+    private void ShowModel(ArchivePreview preview, PreviewModel model)
+    {
+        try
+        {
+            var control = ModelPreviewControl.Create(model);
+            _modelPreview = control;
+            _modelPanel.Children.Add(control);
+            _modelPanel.IsVisible = true;
+            _subtitleText.Text += $" • {control.StatusLine}";
+            control.Focus();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ResetModelPreview();
+
+            /* Fall back to whatever flat preview the file can still produce. */
+            var fallback = ArchivePreviewBuilder.Build(_nodes[_index], includeInteractiveModels: false);
+            if (fallback.Kind == ArchivePreviewKind.Bitmap && fallback.Bitmap is { } bitmap)
+            {
+                SetImage(CreateBitmap(bitmap));
+                _subtitleText.Text += $" • {exception.Message}";
+                return;
+            }
+
+            ShowMetadata(preview with { Message = exception.Message });
+        }
+    }
+
+    private void ResetModelPreview()
+    {
+        var control = _modelPreview;
+        _modelPreview = null;
+        _modelPanel.Children.Clear();
+        _modelPanel.IsVisible = false;
+        control?.Dispose();
+    }
+
     private void ShowMetadata(ArchivePreview preview)
     {
+        var metadata = ArchiveMetadataInspector.Inspect(_nodes[_index]);
         _metadataTypeText.Text = preview.TypeDescription;
         _metadataSizeText.Text = ArchivePreviewBuilder.FormatSize(preview.Size);
-        _metadataMessageText.Text = preview.Message ?? string.Empty;
+        var message = preview.Message == "No rich preview is available for this file type."
+            ? null
+            : preview.Message;
+        _metadataMessageText.Text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            new[] { metadata.DisplayText, message }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
         _metadataPanel.IsVisible = true;
     }
 
     private void ResetContent()
     {
         ResetAudioPlayback();
+        ResetModelPreview();
         DisposeCurrentImage();
         _textPreview.Text = string.Empty;
         _imagePanel.IsVisible = false;
@@ -751,6 +812,7 @@ public sealed class PreviewWindow : Window, IDisposable
         _previewCancellationSource = null;
         _previewGeneration++;
         ResetAudioPlayback();
+        ResetModelPreview();
         DisposeCurrentImage();
         _isDisposed = true;
         GC.SuppressFinalize(this);
@@ -758,6 +820,14 @@ public sealed class PreviewWindow : Window, IDisposable
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        /* The model viewer steers with the arrow keys, so it gets first refusal. */
+        if (e.Key is not (Key.Space or Key.Escape) &&
+            _modelPreview?.HandleKey(e.Key) == true)
+        {
+            e.Handled = true;
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Space:

@@ -76,4 +76,29 @@ public sealed class FileDialogService : IFileDialogService
 
         return dialog.ShowDialog() == true ? dialog.FolderName : null;
     }
+
+    public string? PickImageSavePath(string suggestedFileName, string formatId)
+    {
+        var extension = formatId.Equals("jpeg", StringComparison.OrdinalIgnoreCase)
+            ? "jpg"
+            : formatId.ToLowerInvariant();
+        var description = extension switch
+        {
+            "lmp" => "Quake LMP image",
+            "jpg" => "JPEG image",
+            "png" => "PNG image",
+            "tga" => "TGA image",
+            _ => "Image",
+        };
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save Image As",
+            Filter = $"{description} (*.{extension})|*.{extension}",
+            FileName = suggestedFileName,
+            OverwritePrompt = true,
+            AddExtension = true,
+            DefaultExt = $".{extension}",
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
 }

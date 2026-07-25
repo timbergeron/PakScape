@@ -324,6 +324,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="1.3*" />
+                    <ColumnDefinition Width="2*" />
                     <ColumnDefinition Width="1*" />
                     <ColumnDefinition Width="1.5*" />
                 </Grid.ColumnDefinitions>
@@ -355,9 +356,14 @@
                            Foreground="{DynamicResource MutedForegroundBrush}"
                            Text="{Binding TypeText}" />
                 <TextBlock Grid.Column="2"
+                           Foreground="{DynamicResource MutedForegroundBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding DetailsText}"
+                           Text="{Binding DetailsText}" />
+                <TextBlock Grid.Column="3"
                            HorizontalAlignment="Right"
                            Text="{Binding SizeText}" />
-                <TextBlock Grid.Column="3"
+                <TextBlock Grid.Column="4"
                            HorizontalAlignment="Right"
                            Text="{Binding ModifiedText}" />
             </Grid>
@@ -759,6 +765,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="3*" />
                             <ColumnDefinition Width="1.3*" />
+                            <ColumnDefinition Width="2*" />
                             <ColumnDefinition Width="1*" />
                             <ColumnDefinition Width="1.5*" />
                         </Grid.ColumnDefinitions>
@@ -786,6 +793,17 @@
                                 Foreground="{DynamicResource MutedForegroundBrush}"
                                 Content="{Binding TypeSortHeader}" />
                         <Button Grid.Column="2"
+                                Tag="Details"
+                                Click="SortHeader_OnClick"
+                                Margin="0"
+                                Padding="0"
+                                BorderThickness="0"
+                                Background="Transparent"
+                                HorizontalContentAlignment="Left"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource MutedForegroundBrush}"
+                                Content="{Binding DetailsSortHeader}" />
+                        <Button Grid.Column="3"
                                 Tag="Size"
                                 Click="SortHeader_OnClick"
                                 Margin="0"
@@ -796,7 +814,7 @@
                                 FontWeight="SemiBold"
                                 Foreground="{DynamicResource MutedForegroundBrush}"
                                 Content="{Binding SizeSortHeader}" />
-                        <Button Grid.Column="3"
+                        <Button Grid.Column="4"
                                 Tag="Modified"
                                 Click="SortHeader_OnClick"
                                 Margin="0"
@@ -844,6 +862,20 @@
                                 <Separator />
                                 <MenuItem Header="Export..."
                                           Command="{Binding Data.ExportCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Save As">
+                                    <MenuItem Header="LMP..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="lmp" />
+                                    <MenuItem Header="JPEG..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="jpg" />
+                                    <MenuItem Header="PNG..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="png" />
+                                    <MenuItem Header="TGA..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="tga" />
+                                </MenuItem>
                                 <MenuItem Header="Rename..."
                                           Command="{Binding Data.RenameCommand, Source={StaticResource ViewModelProxy}}" />
                                 <MenuItem Header="Delete"

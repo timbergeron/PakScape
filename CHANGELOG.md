@@ -22,6 +22,10 @@ Notable user-visible changes are documented here.
 - Finder-style Get Info details for macOS archive files and folders, available from menus and Command-I.
 - Standard Undo and Redo support for macOS archive edits.
 - Bundled cross-platform Quick Preview audio for the QSS-M WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX formats.
+- An interactive model viewer in Quick Preview for the QSS-M model formats — MDL, MD3, and MD5 — with an orbit camera, pan, wheel and pinch zoom, keyboard control, idle turntable, and studio lighting with a contact shadow, shared by all three editions.
+- MD3 and MD5 skins are resolved from the open archive, including Quake III `.skin` files, and surfaces without a skin fall back to a neutral material.
+- Double-clicking a model opens it in the viewer instead of handing it to another application.
+- Image context menus on macOS, Windows, and Linux can save `.lmp`, `.jpg`, `.png`, and `.tga` files in any of those four formats.
 
 ### Changed
 

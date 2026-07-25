@@ -1,4 +1,5 @@
 using System.Text;
+using PakStudio.Core.Models;
 using PakStudio.Core.Nodes;
 
 namespace PakStudio.Core.Preview;
@@ -27,6 +28,18 @@ public static class ArchivePreviewBuilder
         ".wav", ".mp3", ".flac", ".ogg", ".opus",
         ".it", ".s3m", ".xm", ".mod", ".umx",
     };
+
+    /* The model formats QSS-M loads. MDL keeps its flat skin preview as a fallback. */
+    private static readonly HashSet<string> ModelExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mdl", ".md3", ".md5mesh", ".md5",
+    };
+
+    private static readonly HashSet<string> QuickPreviewOnOpenExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".lmp",
+        };
 
     public static void ValidateSelection(IReadOnlyCollection<ArchiveNode> nodes)
     {
@@ -58,7 +71,35 @@ public static class ArchivePreviewBuilder
     public static bool SupportsAudioExtension(string extension) =>
         !string.IsNullOrWhiteSpace(extension) && AudioExtensions.Contains(extension);
 
-    public static ArchivePreview Build(ArchiveNode node)
+    public static bool SupportsModelExtension(string extension) =>
+        !string.IsNullOrWhiteSpace(extension) && ModelExtensions.Contains(extension);
+
+    /// <summary>
+    /// True when a node opens in the interactive model viewer, which is what
+    /// double-clicking it does instead of handing it to another application.
+    /// </summary>
+    public static bool SupportsInteractiveModel(ArchiveNode? node) =>
+        node is ArchiveFileNode file &&
+        file.Size > 0 &&
+        file.Size <= MaximumFileSize &&
+        SupportsModelExtension(file.Extension) &&
+        NativeModelViewer.SupportsExtension(file.Extension);
+
+    /// <summary>
+    /// True when opening a node should keep it inside Quick Preview instead of
+    /// handing it to an external application.
+    /// </summary>
+    public static bool OpensInQuickPreview(ArchiveNode? node) =>
+        SupportsInteractiveModel(node) ||
+        node is ArchiveFileNode { Size: <= MaximumFileSize } file &&
+        QuickPreviewOnOpenExtensions.Contains(file.Extension);
+
+    /// <summary>
+    /// Builds a preview. Thumbnails and the fallback path pass
+    /// <paramref name="includeInteractiveModels"/> as false so that a model is
+    /// decoded to its flat skin instead of the interactive viewer.
+    /// </summary>
+    public static ArchivePreview Build(ArchiveNode node, bool includeInteractiveModels = true)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -108,6 +149,16 @@ public static class ArchivePreviewBuilder
                 file.Size,
                 ArchivePreviewKind.Audio,
                 EncodedAudio: file.Data);
+        }
+
+        if (includeInteractiveModels && SupportsInteractiveModel(file))
+        {
+            return new ArchivePreview(
+                file.Name,
+                typeDescription,
+                file.Size,
+                ArchivePreviewKind.Model,
+                Model: new PreviewModel(file.Data, extension, new ModelTextureResolver(file)));
         }
 
         if (QuakePreviewDecoder.TryDecode(file.Name, file.Data, out var bitmap))

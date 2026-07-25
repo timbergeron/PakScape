@@ -11,6 +11,7 @@ namespace PakScape.Linux.Models;
 public sealed class ArchiveItemViewModel : ObservableObject
 {
     private readonly Func<Bitmap?>? _thumbnailFactory;
+    private readonly ArchiveMetadata _metadata;
     private Bitmap? _thumbnail;
     private int _thumbnailLoadStarted;
 
@@ -18,6 +19,7 @@ public sealed class ArchiveItemViewModel : ObservableObject
     {
         Node = node;
         _thumbnailFactory = thumbnailFactory;
+        _metadata = ArchiveMetadataInspector.Inspect(node);
     }
 
     public ArchiveNode Node { get; }
@@ -83,6 +85,10 @@ public sealed class ArchiveItemViewModel : ObservableObject
         ArchiveFileNode file => $"{file.Extension.TrimStart('.').ToUpperInvariant()} file",
         _ => "Item",
     };
+
+    public string DetailsText => _metadata.Summary;
+
+    public string SearchableMetadata => _metadata.SearchText;
 
     public string SizeText => Node is ArchiveFileNode file ? FormatSize(file.Size) : "—";
 

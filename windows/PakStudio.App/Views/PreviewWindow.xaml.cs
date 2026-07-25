@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using PakStudio.App.Controls;
 using PakStudio.App.Services;
 using PakStudio.Core.Audio;
 using PakStudio.Core.Nodes;
@@ -14,6 +15,7 @@ public partial class PreviewWindow : Window
     private readonly IReadOnlyList<ArchiveNode> _nodes;
     private readonly DispatcherTimer _audioProgressTimer;
     private NativeAudioPlayer? _audioPlayer;
+    private ModelPreviewControl? _modelPreview;
     private ArchivePreview? _activePreview;
     private int _index;
     private bool _isAudioPlaying;
@@ -60,6 +62,11 @@ public partial class PreviewWindow : Window
         _activePreview = preview;
         TitleText.Text = preview.Title;
         SubtitleText.Text = $"{preview.TypeDescription} • {ArchivePreviewBuilder.FormatSize(preview.Size)}";
+        var metadata = ArchiveMetadataInspector.Inspect(_nodes[_index]);
+        if (!string.IsNullOrWhiteSpace(metadata.Summary))
+        {
+            SubtitleText.Text += $" • {metadata.Summary}";
+        }
         PositionText.Text = _nodes.Count == 1 ? "1 of 1" : $"{_index + 1:N0} of {_nodes.Count:N0}";
         PreviousButton.IsEnabled = _nodes.Count > 1;
         NextButton.IsEnabled = _nodes.Count > 1;
@@ -76,6 +83,9 @@ public partial class PreviewWindow : Window
                 break;
             case ArchivePreviewKind.Audio:
                 ShowAudio(preview);
+                break;
+            case ArchivePreviewKind.Model when preview.Model is { } model:
+                ShowModel(preview, model);
                 break;
             case ArchivePreviewKind.EncodedImage:
             case ArchivePreviewKind.Bitmap:
@@ -98,11 +108,60 @@ public partial class PreviewWindow : Window
         }
     }
 
+    private void ShowModel(ArchivePreview preview, PreviewModel model)
+    {
+        try
+        {
+            var control = ModelPreviewControl.Create(model);
+            _modelPreview = control;
+            ModelPanel.Content = control;
+            ModelPanel.Visibility = Visibility.Visible;
+            SubtitleText.Text += $" • {control.StatusLine}";
+            control.Focus();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ResetModelPreview();
+
+            /* Fall back to whatever flat preview the file can still produce. */
+            var fallback = ArchivePreviewBuilder.Build(_nodes[_index], includeInteractiveModels: false);
+            if (fallback.Kind == ArchivePreviewKind.Bitmap &&
+                PreviewImageFactory.TryCreate(
+                    fallback,
+                    EncodedImageInspector.MaximumRenderedDimension,
+                    out var fallbackImage))
+            {
+                ImagePreview.Source = fallbackImage;
+                ImagePanel.Visibility = Visibility.Visible;
+                SubtitleText.Text += $" • {exception.Message}";
+                return;
+            }
+
+            ShowMetadata(preview with { Message = exception.Message });
+        }
+    }
+
+    private void ResetModelPreview()
+    {
+        var control = _modelPreview;
+        _modelPreview = null;
+        ModelPanel.Content = null;
+        ModelPanel.Visibility = Visibility.Collapsed;
+        control?.Dispose();
+    }
+
     private void ShowMetadata(ArchivePreview preview)
     {
+        var metadata = ArchiveMetadataInspector.Inspect(_nodes[_index]);
         MetadataTypeText.Text = preview.TypeDescription;
         MetadataSizeText.Text = ArchivePreviewBuilder.FormatSize(preview.Size);
-        MetadataMessageText.Text = preview.Message ?? string.Empty;
+        var message = preview.Message == "No rich preview is available for this file type."
+            ? null
+            : preview.Message;
+        MetadataMessageText.Text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            new[] { metadata.DisplayText, message }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
         MetadataPanel.Visibility = Visibility.Visible;
     }
 
@@ -132,6 +191,7 @@ public partial class PreviewWindow : Window
     private void ResetContent()
     {
         ResetAudioPlayback();
+        ResetModelPreview();
         ImagePreview.Source = null;
         TextPreview.Text = string.Empty;
         ImagePanel.Visibility = Visibility.Collapsed;
@@ -210,6 +270,14 @@ public partial class PreviewWindow : Window
 
     private void Window_OnKeyDown(object sender, KeyEventArgs e)
     {
+        /* The model viewer steers with the arrow keys, so it gets first refusal. */
+        if (e.Key is not (Key.Space or Key.Escape) &&
+            _modelPreview?.HandleKey(e.Key) == true)
+        {
+            e.Handled = true;
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Space:
@@ -313,6 +381,7 @@ public partial class PreviewWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         ResetAudioPlayback();
+        ResetModelPreview();
         base.OnClosed(e);
     }
 }

@@ -154,6 +154,8 @@
                            SnapsToDevicePixels="True" />
                 </Border>
 
+                <ContentControl x:Name="ModelPanel" Visibility="Collapsed" />
+
                 <TextBox x:Name="TextPreview"
                          Visibility="Collapsed"
                          Padding="14"

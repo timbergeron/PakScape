@@ -31,6 +31,11 @@
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           Condition="Exists('../../native/build/linux/libpakscape_audio.so')" />
+    <None Include="../../native/build/linux/libpakscape_model.so"
+          Link="libpakscape_model.so"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Condition="Exists('../../native/build/linux/libpakscape_model.so')" />
     <None Include="../../native/THIRD_PARTY_NOTICES.md"
           Link="THIRD_PARTY_NOTICES.md"
           CopyToOutputDirectory="PreserveNewest"

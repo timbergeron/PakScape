@@ -564,6 +564,23 @@ struct PakIconView: NSViewRepresentable {
             infoItem.representedObject = node
             menu.addItem(infoItem)
 
+            if parent.viewModel.canSaveImageAs(node) {
+                let saveAsItem = NSMenuItem(title: "Save As", action: nil, keyEquivalent: "")
+                let saveAsMenu = NSMenu(title: "Save As")
+                for format in PakImageFormat.allCases {
+                    let formatItem = NSMenuItem(
+                        title: format.menuTitle,
+                        action: #selector(saveImageAs(_:)),
+                        keyEquivalent: ""
+                    )
+                    formatItem.target = self
+                    formatItem.representedObject = PakImageSaveRequest(node: node, format: format)
+                    saveAsMenu.addItem(formatItem)
+                }
+                saveAsItem.submenu = saveAsMenu
+                menu.addItem(saveAsItem)
+            }
+
             menu.addItem(.separator())
 
             let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
@@ -618,6 +635,11 @@ struct PakIconView: NSViewRepresentable {
             parent.onGetInfo(node)
         }
 
+        @objc private func saveImageAs(_ sender: NSMenuItem) {
+            guard let request = sender.representedObject as? PakImageSaveRequest else { return }
+            parent.viewModel.saveImageAs(request.node, format: request.format)
+        }
+
         @objc private func cutSelection(_ sender: NSMenuItem) {
             parent.onCut()
         }
@@ -667,7 +689,8 @@ struct PakIconView: NSViewRepresentable {
         private func open(node: PakNode) {
             if node.isFolder {
                 parent.onOpenFolder(node)
-            } else {
+            } else if !parent.viewModel.showQuickPreviewOnOpen(for: node) {
+                /* Preview-native assets stay in PakScape; anything else goes to its own app. */
                 parent.viewModel.openInDefaultApp(node: node)
             }
         }

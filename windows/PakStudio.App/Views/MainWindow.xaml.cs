@@ -5,6 +5,8 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
+using PakStudio.Core.Nodes;
+using PakStudio.Core.Preview;
 
 namespace PakStudio.App.Views;
 
@@ -134,6 +136,13 @@ public partial class MainWindow : Window
         if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is ListViewItem item &&
             item.DataContext is ArchiveItemViewModel archiveItem)
         {
+            /* Preview-native assets stay in PakScape; anything else goes to its own app. */
+            if (ArchivePreviewBuilder.OpensInQuickPreview(archiveItem.Node))
+            {
+                ShowQuickPreview([archiveItem.Node]);
+                return;
+            }
+
             _viewModel.OpenItem(archiveItem);
         }
     }
@@ -165,13 +174,23 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nodes = ItemList.SelectedItems
+        ShowQuickPreview(ItemList.SelectedItems
             .Cast<ArchiveItemViewModel>()
             .Select(item => item.Node)
-            .ToList();
+            .ToList());
+    }
+
+    private void ShowQuickPreview(IReadOnlyList<ArchiveNode> nodes)
+    {
         if (nodes.Count == 0)
         {
             return;
+        }
+
+        /* Replace whatever is already being previewed. */
+        if (_previewWindow is { IsVisible: true })
+        {
+            _previewWindow.Close();
         }
 
         try

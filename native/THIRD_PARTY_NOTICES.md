@@ -1,7 +1,12 @@
-# Native audio third-party notices
+# Third-party notices
 
 PakScape's native audio component incorporates the following software. These
 notices apply only to the named third-party components.
+
+PakScape's Windows and Linux image conversion feature also uses
+StbImageSharp 2.30.15 and StbImageWriteSharp 1.16.7. Both projects are C#
+ports of Sean Barrett's `stb_image.h` and `stb_image_write.h` and are released
+into the public domain.
 
 ## miniaudio 0.11.25 — MIT No Attribution
 

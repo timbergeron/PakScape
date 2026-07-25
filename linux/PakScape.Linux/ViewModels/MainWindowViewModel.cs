@@ -7,6 +7,7 @@ using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
+using PakStudio.Core.Preview;
 
 namespace PakScape.Linux.ViewModels;
 
@@ -209,6 +210,7 @@ public partial class MainWindowViewModel : ObservableObject
             1 => $"1 selected: {_selectedItems[0].Name}",
             _ => $"{_selectedItems.Count} selected",
         };
+        SaveImageAsCommand.NotifyCanExecuteChanged();
     }
 
     public IReadOnlyList<ArchiveNode> SelectedNodes =>
@@ -640,6 +642,56 @@ public partial class MainWindowViewModel : ObservableObject
         await ReportFailuresAsync("Some items were not exported", failures);
     }
 
+    [RelayCommand(CanExecute = nameof(CanSaveImageAs))]
+    private async Task SaveImageAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            _selectedItems is not [var item] ||
+            item.Node is not ArchiveFileNode file ||
+            !ImageFormatConverter.IsSupportedSource(file.Name))
+        {
+            return;
+        }
+
+        var extension = ImageFormatConverter.ExtensionFor(format);
+        var suggestedName = Path.GetFileNameWithoutExtension(file.Name) + extension;
+        var outputPath = await _interactionService.PickImageSavePathAsync(
+            suggestedName,
+            extension.TrimStart('.'));
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Converting {file.Name}...";
+            var converted = await Task.Run(() =>
+                ImageFormatConverter.Convert(file.Name, file.Data, format));
+            await File.WriteAllBytesAsync(outputPath, converted);
+            StatusText = $"Saved {Path.GetFileName(outputPath)}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Image conversion failed.";
+            await _interactionService.ShowErrorAsync("Save Image As failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private bool CanSaveImageAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               ImageFormatConverter.IsSupportedSource(file.Name);
+    }
+
     [RelayCommand]
     private async Task OpenSelectedAsync()
     {
@@ -910,7 +962,8 @@ public partial class MainWindowViewModel : ObservableObject
                     : null))
             .Where(item => string.IsNullOrWhiteSpace(SearchText) ||
                            item.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                           item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+                           item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
+                           item.SearchableMetadata.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(item => item.IsFolder)
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase);
         foreach (var item in items)
@@ -978,6 +1031,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(CanGoForward));
+        SaveImageAsCommand.NotifyCanExecuteChanged();
     }
 
     private void SetViewMode(ArchiveViewMode mode)

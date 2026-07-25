@@ -24,6 +24,10 @@
           Link="pakscape_audio.dll"
           CopyToOutputDirectory="PreserveNewest"
           Condition="Exists('..\..\native\build\windows\Release\pakscape_audio.dll')" />
+    <None Include="..\..\native\build\windows\Release\pakscape_model.dll"
+          Link="pakscape_model.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\..\native\build\windows\Release\pakscape_model.dll')" />
     <None Include="..\..\native\THIRD_PARTY_NOTICES.md"
           Link="THIRD_PARTY_NOTICES.md"
           CopyToOutputDirectory="PreserveNewest" />

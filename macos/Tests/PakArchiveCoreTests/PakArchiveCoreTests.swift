@@ -139,6 +139,39 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertEqual(details["Lines"], "3")
     }
 
+    func testFormatInspectorFindsMapNamesInDemo() {
+        let data = Data(
+            "noise maps/b_shell0.bsp more maps/e1m3.bsp duplicate maps/E1M3.bsp".utf8
+        )
+
+        XCTAssertEqual(
+            PakFormatInspector.summary(fileName: "run.dem", data: data, fileSize: data.count),
+            "Map: e1m3"
+        )
+    }
+
+    func testFormatInspectorReadsBspWorldspawnDescription() {
+        let entities = Data(#"{"classname" "worldspawn" "message" "The Slipgate Complex"}"#.utf8)
+        var data = Data()
+        appendInt32(29, to: &data)
+        appendInt32(124, to: &data)
+        appendInt32(entities.count, to: &data)
+        data.append(Data(repeating: 0, count: 112))
+        data.append(entities)
+
+        let details = Dictionary(uniqueKeysWithValues: PakFormatInspector.details(
+            fileName: "e1m1.bsp",
+            data: data,
+            fileSize: data.count
+        ).map { ($0.label, $0.value) })
+
+        XCTAssertEqual(details["Description"], "The Slipgate Complex")
+        XCTAssertEqual(
+            PakFormatInspector.summary(fileName: "e1m1.bsp", data: data, fileSize: data.count),
+            "Description: The Slipgate Complex"
+        )
+    }
+
     func testWriterDoesNotMutateDocumentUntilOutputIsCommitted() throws {
         let root = PakNode(name: "/")
         let file = PakNode(name: "readme.txt")
@@ -418,6 +451,44 @@ final class PakArchiveCoreTests: XCTestCase {
         let results = PakArchiveSearch.search(root: fixture.root, query: "shotgn")
 
         XCTAssertEqual(results.map(\.node), [strict])
+    }
+
+    func testArchiveSearchMatchesInspectedMetadata() {
+        let root = PakNode(name: "/")
+        let demo = PakNode(name: "speedrun.dem")
+        demo.localData = Data("noise maps/e1m3.bsp".utf8)
+
+        let entities = Data(#"{"classname" "worldspawn" "message" "The Slipgate Complex"}"#.utf8)
+        let bsp = PakNode(name: "level.bsp")
+        var bspData = Data()
+        appendInt32(29, to: &bspData)
+        appendInt32(124, to: &bspData)
+        appendInt32(entities.count, to: &bspData)
+        bspData.append(Data(repeating: 0, count: 112))
+        bspData.append(entities)
+        bsp.localData = bspData
+        root.children?.append(contentsOf: [demo, bsp])
+
+        let metadata: (PakNode) -> String = { node in
+            PakFormatInspector.searchableText(
+                fileName: node.name,
+                data: node.localData,
+                fileSize: node.fileSize
+            )
+        }
+
+        XCTAssertEqual(
+            PakArchiveSearch.search(root: root, query: "e1m3", metadataText: metadata).map(\.node),
+            [demo]
+        )
+        XCTAssertEqual(
+            PakArchiveSearch.search(
+                root: root,
+                query: "Slipgate Complex",
+                metadataText: metadata
+            ).map(\.node),
+            [bsp]
+        )
     }
 
     private func makeSearchFixture() -> (root: PakNode, start: PakNode, viewModel: PakNode) {

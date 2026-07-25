@@ -146,7 +146,11 @@ struct PakSearchResult {
 /// subsequences, and small typing mistakes. Every query term must match, which
 /// keeps multi-word searches useful even in large archives.
 enum PakArchiveSearch {
-    static func search(root: PakNode, query: String) -> [PakSearchResult] {
+    static func search(
+        root: PakNode,
+        query: String,
+        metadataText: (PakNode) -> String = { _ in "" }
+    ) -> [PakSearchResult] {
         let rawQuery = normalize(query).trimmingCharacters(in: .whitespacesAndNewlines)
         let isPathQuery = rawQuery.contains("/")
         let normalizedQuery = rawQuery
@@ -167,6 +171,7 @@ enum PakArchiveSearch {
             terms: terms,
             isPathQuery: isPathQuery,
             allowsFuzzyMatching: false,
+            metadataText: metadataText,
             results: &results
         )
 
@@ -181,6 +186,7 @@ enum PakArchiveSearch {
                 terms: terms,
                 isPathQuery: isPathQuery,
                 allowsFuzzyMatching: true,
+                metadataText: metadataText,
                 results: &results
             )
         }
@@ -200,6 +206,8 @@ enum PakArchiveSearch {
         let type: String
         let compactName: String
         let compactPath: String
+        let metadata: String
+        let compactMetadata: String
     }
 
     private static func collectMatches(
@@ -209,6 +217,7 @@ enum PakArchiveSearch {
         terms: [String],
         isPathQuery: Bool,
         allowsFuzzyMatching: Bool,
+        metadataText: (PakNode) -> String,
         results: inout [PakSearchResult]
     ) {
         for node in parent.children ?? [] {
@@ -219,7 +228,8 @@ enum PakArchiveSearch {
                 normalizedQuery: normalizedQuery,
                 terms: terms,
                 isPathQuery: isPathQuery,
-                allowsFuzzyMatching: allowsFuzzyMatching
+                allowsFuzzyMatching: allowsFuzzyMatching,
+                metadataText: metadataText(node)
             ) {
                 results.append(PakSearchResult(node: node, path: "/" + path, score: score))
             }
@@ -231,6 +241,7 @@ enum PakArchiveSearch {
                     terms: terms,
                     isPathQuery: isPathQuery,
                     allowsFuzzyMatching: allowsFuzzyMatching,
+                    metadataText: metadataText,
                     results: &results
                 )
             }
@@ -243,12 +254,14 @@ enum PakArchiveSearch {
         normalizedQuery: String,
         terms: [String],
         isPathQuery: Bool,
-        allowsFuzzyMatching: Bool
+        allowsFuzzyMatching: Bool,
+        metadataText: String
     ) -> Int? {
         let name = normalize(node.name)
         let stem = normalize((node.name as NSString).deletingPathExtension)
         let fileExtension = normalize((node.name as NSString).pathExtension)
         let normalizedPath = normalize(path)
+        let normalizedMetadata = normalize(metadataText)
         let candidate = Candidate(
             name: name,
             stem: stem,
@@ -257,7 +270,9 @@ enum PakArchiveSearch {
             pathComponents: normalizedPath.split(separator: "/").map(String.init),
             type: normalize(node.fileType),
             compactName: compact(name),
-            compactPath: compact(normalizedPath)
+            compactPath: compact(normalizedPath),
+            metadata: normalizedMetadata,
+            compactMetadata: compact(normalizedMetadata)
         )
 
         var total = 0
@@ -287,6 +302,7 @@ enum PakArchiveSearch {
             else if candidate.name.hasPrefix(normalizedQuery) { total += 700 }
             else if isPathQuery, candidate.path.contains(normalizedQuery) { total += 500 }
             else if candidate.compactName.contains(compact(normalizedQuery)) { total += 350 }
+            else if candidate.metadata.contains(normalizedQuery) { total += 250 }
         }
 
         // For otherwise-equal results, shorter names and paths are usually the
@@ -347,6 +363,12 @@ enum PakArchiveSearch {
         if candidate.type.contains(term) { return TermMatch(score: 600, matchesLeaf: true) }
         if compactTerm.count >= 2, candidate.compactName.contains(compactTerm) {
             return TermMatch(score: candidate.compactName.hasPrefix(compactTerm) ? 620 : 590, matchesLeaf: true)
+        }
+        if candidate.metadata.contains(term) {
+            return TermMatch(score: 575, matchesLeaf: true)
+        }
+        if compactTerm.count >= 2, candidate.compactMetadata.contains(compactTerm) {
+            return TermMatch(score: 550, matchesLeaf: true)
         }
 
         if isPathQuery {
