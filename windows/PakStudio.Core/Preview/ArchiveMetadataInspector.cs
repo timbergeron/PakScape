@@ -78,7 +78,7 @@ public static partial class ArchiveMetadataInspector
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".arena", ".cfg", ".csv", ".def", ".ent", ".fgd", ".ini", ".json", ".loc",
-        ".log", ".map", ".md", ".menu", ".pts", ".qc", ".rc", ".rtlights", ".scr",
+        ".log", ".lst", ".map", ".md", ".menu", ".pts", ".qc", ".rc", ".rtlights", ".scr",
         ".shader", ".skin", ".src", ".txt", ".xml", ".yaml", ".yml",
     };
 
@@ -115,6 +115,7 @@ public static partial class ArchiveMetadataInspector
     private static ArchiveMetadata InspectCore(ArchiveFileNode file)
     {
         var extension = file.Extension.ToLowerInvariant();
+        var leaf = Path.GetFileName(file.Name);
         var budget = extension switch
         {
             ".bsp" => MaximumBspInspectionBytes,
@@ -155,8 +156,14 @@ public static partial class ArchiveMetadataInspector
             ".umx" => InspectUmx(data),
             ".sav" => InspectSavegame(data),
             /* Neither extension is exclusively Quake's, so both fall back to the magic. */
+            ".dat" when leaf.Equals("iplog.dat", StringComparison.OrdinalIgnoreCase) =>
+                OrMagic(InspectIpLog(data, file.Data.Length), data),
             ".dat" => OrMagic(InspectQuakeCProgram(data), data),
             ".bin" => OrMagic(InspectDosTextScreen(data, file.Data.Length), data),
+            _ when leaf.Equals("servers.json.bad", StringComparison.OrdinalIgnoreCase) =>
+                InspectText(".json", data, file.Data.Length),
+            _ when leaf.Equals("qw_maps.tmp", StringComparison.OrdinalIgnoreCase) =>
+                InspectText(".txt", data, file.Data.Length),
             _ when TextExtensions.Contains(extension) =>
                 InspectText(extension, data, file.Data.Length),
             _ => InspectMagic(data),
@@ -276,6 +283,23 @@ public static partial class ArchiveMetadataInspector
     }
 
     /// <summary>
+    /// ProQuake and QSS-M store one masked IPv4 prefix and a 16-byte player name per record.
+    /// </summary>
+    private static List<ArchiveMetadataDetail> InspectIpLog(ReadOnlySpan<byte> data, int fileLength)
+    {
+        const int recordSize = 20;
+        if (fileLength < recordSize || fileLength % recordSize != 0 || data.Length < recordSize)
+        {
+            return [];
+        }
+        return
+        [
+            Detail("Format", "ProQuake IP log"),
+            Detail("Entries", (fileLength / recordSize).ToString("N0", CultureInfo.CurrentCulture)),
+        ];
+    }
+
+    /// <summary>
     /// The 80 by 25 text-mode screens the DOS release printed as it exited, stored as a
     /// character and a colour attribute per cell.
     /// </summary>
@@ -353,6 +377,7 @@ public static partial class ArchiveMetadataInspector
             ["spprogs.dat"] = "The compiled QuakeC program for single-player, where a mod ships a separate build.",
             ["csprogs.dat"] = "Client-side QuakeC, run by the client for effects and HUD work the server cannot draw.",
             ["menu.dat"] = "A QuakeC menu program, run by engines that replace the built-in menus.",
+            ["pak.lst"] = "The package load order QSS-M applies after the base game PAKs, with one PAK or PK3 name per entry.",
             ["progs.src"] = "The list qcc compiles: the program to write first, then every QuakeC source file in order.",
             ["quake.rc"] = "The startup script the engine runs at launch: it execs default.cfg, config.cfg, and autoexec.cfg, then starts the demo loop.",
             ["default.cfg"] = "The bindings and settings the game ships with, exec'd before any saved configuration.",
@@ -365,6 +390,28 @@ public static partial class ArchiveMetadataInspector
             ["pop.lmp"] = "The pattern QuakeWorld servers checked to tell a registered install from shareware.",
             ["gfx.wad"] = "The 2D interface art: console font, status bar, and menu graphics.",
             ["conchars.lmp"] = "The console character set, one 16 by 16 grid of glyphs.",
+            ["servers.json"] = "QSS-M's dated multiplayer server history, used by history menus and address completion.",
+            ["servers.json.bad"] = "An unreadable QSS-M server history preserved before a fresh servers.json was started.",
+            ["servers.txt"] = "The legacy QSS-M multiplayer server history, imported into servers.json.",
+            ["lastserver.txt"] = "The legacy record of the last multiplayer server used, imported into servers.json.",
+            ["server_hostnames.json"] = "QSS-M's cache of successfully resolved server hostnames and endpoints.",
+            ["bookmarks.json"] = "QSS-M's multiplayer server bookmarks, including their pinned order.",
+            ["bookmarks.txt"] = "The legacy QSS-M server bookmark list, imported into bookmarks.json.",
+            ["names.json"] = "QSS-M's dated player-name history.",
+            ["names.txt"] = "The legacy QSS-M player-name history, imported into names.json.",
+            ["demomarks.json"] = "QSS-M's saved timeline markers for recorded demos.",
+            ["mapdesc.json"] = "QSS-M's cache of map names and descriptions.",
+            ["shistory.json"] = "QSS-M's most recently used multiplayer host-game settings.",
+            ["demos_metadata_cache.json"] = "QSS-M's cache of metadata parsed for the demo browser.",
+            ["optional_download_cache.json"] = "QSS-M's retry cache for optional location-file downloads.",
+            ["skybox_download_cache.json"] = "QSS-M's retry cache for downloaded skybox faces.",
+            ["qw_maps.txt"] = "QSS-M's downloaded QuakeWorld map-name list for console completion.",
+            ["qw_maps.tmp"] = "A temporary QSS-M QuakeWorld map-list download awaiting validation.",
+            ["lastdemo.txt"] = "The name of the most recently recorded QSS-M demo.",
+            ["ghost.txt"] = "QSS-M's temporary multiplayer ghost code, retained across a restart or crash.",
+            ["name.txt"] = "QSS-M's temporary player-name backup, retained while the AFK name is active.",
+            ["iplog.dat"] = "The binary player IP-prefix and name history used by ProQuake-compatible commands.",
+            ["iplog.txt"] = "A readable export of the player IP-prefix and name history.",
         };
 
     private static readonly Dictionary<string, string> PurposesByExtension =
@@ -394,6 +441,10 @@ public static partial class ArchiveMetadataInspector
         if (leaf.Length > 0 && PurposesByName.TryGetValue(leaf, out var named))
         {
             return named;
+        }
+        if (Regex.IsMatch(leaf, @"^config-\d{2}-\d{2}-\d{4}\.cfg$", RegexOptions.IgnoreCase))
+        {
+            return "A dated backup of the effective QSS-M configuration.";
         }
         return PurposesByExtension.TryGetValue(extension, out var byExtension) ? byExtension : null;
     }
@@ -1033,6 +1084,7 @@ public static partial class ArchiveMetadataInspector
         ".cfg" => "Quake configuration",
         ".rc" => "Quake console script",
         ".src" => "qcc source list",
+        ".lst" => "Package load-order list",
         ".loc" => "QuakeWorld locations",
         ".ent" => "Quake entity definitions",
         ".fgd" => "Game definition",

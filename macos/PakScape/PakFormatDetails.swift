@@ -562,7 +562,7 @@ enum PakFormatInspector {
 
     private static let textExtensions: Set<String> = [
         "arena", "cfg", "csv", "def", "ent", "fgd", "ini", "json", "loc", "log",
-        "map", "md", "menu", "pts", "qc", "rc", "rtlights", "scr", "shader", "skin",
+        "lst", "map", "md", "menu", "pts", "qc", "rc", "rtlights", "scr", "shader", "skin",
         "src", "txt", "xml", "yaml", "yml",
     ]
 
@@ -586,6 +586,13 @@ enum PakFormatInspector {
         data: Data,
         fileSize: Int
     ) -> [PakFormatDetail] {
+        let leaf = (lowerName as NSString).lastPathComponent
+        if leaf == "servers.json.bad" {
+            return textDetails(extension: "json", data: data, fileSize: fileSize)
+        }
+        if leaf == "qw_maps.tmp" {
+            return textDetails(extension: "txt", data: data, fileSize: fileSize)
+        }
         switch ext {
         case "bsp":
             return bspDetails(data)
@@ -646,7 +653,11 @@ enum PakFormatInspector {
             return savegameDetails(data)
         case "dat", "bin":
             /* Neither extension is exclusively Quake's, so both fall back to the magic. */
-            let details = ext == "dat" ? quakeCProgramDetails(data) : dosTextScreenDetails(data)
+            let details = ext == "dat"
+                ? (leaf == "iplog.dat"
+                    ? ipLogDetails(data, fileSize: fileSize)
+                    : quakeCProgramDetails(data))
+                : dosTextScreenDetails(data)
             return details.isEmpty ? detailsFromMagic(data) : details
         default:
             if textExtensions.contains(ext) {
@@ -948,7 +959,7 @@ enum PakFormatInspector {
             preferredLabels = ["Dimensions", "Compression", "Mipmaps"]
         case "wad":
             preferredLabels = ["Entries"]
-        case "cfg", "csv", "def", "ent", "fgd", "ini", "json", "loc", "log", "map",
+        case "cfg", "csv", "def", "ent", "fgd", "ini", "json", "loc", "log", "lst", "map",
              "md", "menu", "pts", "qc", "rc", "rtlights", "scr", "shader", "skin",
              "src", "txt", "xml", "yaml", "yml":
             preferredLabels = ["Lines", "Encoding"]
@@ -1051,6 +1062,18 @@ enum PakFormatInspector {
             detail("Statements", formatted(statements)),
             detail("Entity Fields", formatted(entityFields)),
             detail("String Data", "\(formatted(stringBytes)) bytes"),
+        ]
+    }
+
+    /// ProQuake and QSS-M store one masked IPv4 prefix and a 16-byte player name per record.
+    private static func ipLogDetails(_ data: Data, fileSize: Int) -> [PakFormatDetail] {
+        let recordSize = 20
+        guard fileSize >= recordSize, fileSize % recordSize == 0, data.count >= recordSize else {
+            return []
+        }
+        return [
+            detail("Format", "ProQuake IP log"),
+            detail("Entries", formatted(fileSize / recordSize)),
         ]
     }
 
@@ -1412,7 +1435,8 @@ enum PakFormatInspector {
             "cfg": "Quake configuration", "rc": "Quake console script",
             "src": "qcc source list", "loc": "QuakeWorld locations",
             "ent": "Quake entity definitions", "fgd": "Game definition",
-            "map": "Quake map source", "pts": "Quake leak trail", "qc": "QuakeC source",
+            "lst": "Package load-order list", "map": "Quake map source",
+            "pts": "Quake leak trail", "qc": "QuakeC source",
             "rtlights": "Quake real-time lights", "scr": "Quake console script",
             "shader": "Shader script", "skin": "Quake III skin mapping", "json": "JSON", "xml": "XML",
             "yaml": "YAML", "yml": "YAML", "csv": "CSV", "md": "Markdown",
@@ -1460,6 +1484,7 @@ enum PakFormatInspector {
         "spprogs.dat": "The compiled QuakeC program for single-player, where a mod ships a separate build.",
         "csprogs.dat": "Client-side QuakeC, run by the client for effects and HUD work the server cannot draw.",
         "menu.dat": "A QuakeC menu program, run by engines that replace the built-in menus.",
+        "pak.lst": "The package load order QSS-M applies after the base game PAKs, with one PAK or PK3 name per entry.",
         "progs.src": "The list qcc compiles: the program to write first, then every QuakeC source file in order.",
         "quake.rc": "The startup script the engine runs at launch: it execs default.cfg, config.cfg, and autoexec.cfg, then starts the demo loop.",
         "default.cfg": "The bindings and settings the game ships with, exec'd before any saved configuration.",
@@ -1472,6 +1497,28 @@ enum PakFormatInspector {
         "pop.lmp": "The pattern QuakeWorld servers checked to tell a registered install from shareware.",
         "gfx.wad": "The 2D interface art: console font, status bar, and menu graphics.",
         "conchars.lmp": "The console character set, one 16 by 16 grid of glyphs.",
+        "servers.json": "QSS-M's dated multiplayer server history, used by history menus and address completion.",
+        "servers.json.bad": "An unreadable QSS-M server history preserved before a fresh servers.json was started.",
+        "servers.txt": "The legacy QSS-M multiplayer server history, imported into servers.json.",
+        "lastserver.txt": "The legacy record of the last multiplayer server used, imported into servers.json.",
+        "server_hostnames.json": "QSS-M's cache of successfully resolved server hostnames and endpoints.",
+        "bookmarks.json": "QSS-M's multiplayer server bookmarks, including their pinned order.",
+        "bookmarks.txt": "The legacy QSS-M server bookmark list, imported into bookmarks.json.",
+        "names.json": "QSS-M's dated player-name history.",
+        "names.txt": "The legacy QSS-M player-name history, imported into names.json.",
+        "demomarks.json": "QSS-M's saved timeline markers for recorded demos.",
+        "mapdesc.json": "QSS-M's cache of map names and descriptions.",
+        "shistory.json": "QSS-M's most recently used multiplayer host-game settings.",
+        "demos_metadata_cache.json": "QSS-M's cache of metadata parsed for the demo browser.",
+        "optional_download_cache.json": "QSS-M's retry cache for optional location-file downloads.",
+        "skybox_download_cache.json": "QSS-M's retry cache for downloaded skybox faces.",
+        "qw_maps.txt": "QSS-M's downloaded QuakeWorld map-name list for console completion.",
+        "qw_maps.tmp": "A temporary QSS-M QuakeWorld map-list download awaiting validation.",
+        "lastdemo.txt": "The name of the most recently recorded QSS-M demo.",
+        "ghost.txt": "QSS-M's temporary multiplayer ghost code, retained across a restart or crash.",
+        "name.txt": "QSS-M's temporary player-name backup, retained while the AFK name is active.",
+        "iplog.dat": "The binary player IP-prefix and name history used by ProQuake-compatible commands.",
+        "iplog.txt": "A readable export of the player IP-prefix and name history.",
     ]
 
     private static let purposesByExtension: [String: String] = [
@@ -1497,6 +1544,12 @@ enum PakFormatInspector {
         let leaf = (lowerName as NSString).lastPathComponent
         if let named = purposesByName[leaf] {
             return named
+        }
+        if leaf.range(
+            of: #"^config-\d{2}-\d{2}-\d{4}\.cfg$"#,
+            options: .regularExpression
+        ) != nil {
+            return "A dated backup of the effective QSS-M configuration."
         }
         return purposesByExtension[ext]
     }
