@@ -5,6 +5,7 @@ struct SkyboxPreviewItem {
     let name: String
     /// SceneKit order: +X, -X, +Y, -Y, +Z, -Z.
     let images: [NSImage]
+    let returnToImage: () -> Void
 }
 
 final class SkyboxPreviewPresenter: NSObject, NSWindowDelegate {
@@ -84,10 +85,22 @@ final class SkyboxPreviewController: NSViewController {
         closeHint.font = .systemFont(ofSize: 12)
         closeHint.textColor = .secondaryLabelColor
 
+        let imageButton = NSButton(
+            title: "Back to Image",
+            target: self,
+            action: #selector(returnToImage)
+        )
+        imageButton.bezelStyle = .rounded
+
         let header = NSStackView(views: [labels, NSView(), resetButton])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 12
+
+        let footer = NSStackView(views: [closeHint, NSView(), imageButton])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
 
         sceneView.configure(images: item.images)
         sceneView.wantsLayer = true
@@ -96,7 +109,7 @@ final class SkyboxPreviewController: NSViewController {
         sceneView.layer?.borderWidth = 1
         sceneView.layer?.borderColor = NSColor.separatorColor.cgColor
 
-        for child in [header, sceneView, closeHint] {
+        for child in [header, sceneView, footer] {
             child.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(child)
         }
@@ -110,9 +123,10 @@ final class SkyboxPreviewController: NSViewController {
             sceneView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
             sceneView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
 
-            closeHint.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
-            closeHint.topAnchor.constraint(equalTo: sceneView.bottomAnchor, constant: 10),
-            closeHint.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
+            footer.topAnchor.constraint(equalTo: sceneView.bottomAnchor, constant: 10),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
         ])
 
         view = container
@@ -126,6 +140,10 @@ final class SkyboxPreviewController: NSViewController {
     @objc private func resetView() {
         sceneView.resetView()
         view.window?.makeFirstResponder(sceneView)
+    }
+
+    @objc private func returnToImage() {
+        item.returnToImage()
     }
 }
 

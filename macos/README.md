@@ -56,7 +56,7 @@ Inline audio preview uses PakScape's shared native player for the same formats a
 
 PakScape renders deterministic still-image previews for Quake BSP, LMP, MDL, PCX, SPR, TGA, and `gfx.wad` content. BSP level overviews keep item markers out of archive thumbnails by default; Quick Look checkboxes can show major armor, megahealth, powerups, weapons, and CTF flags. The icon and list views ask Quick Look Thumbnailing for native, Finder-style previews of system-supported documents and media, with content-aware system icons as the fallback. Other files are passed to the system Quick Look service when opened in the preview panel. Unknown, malformed, or unsupported formats still receive Quick Look's generic file preview. Preview preparation is limited to 1,000 items, 128 MB per file, and 256 MB per selection; inline native thumbnails are limited to 32 MB per file, text thumbnails use at most the first 2 MB, and decoded custom images are limited to 8,192 pixels per dimension and 16,777,216 total pixels.
 
-When an image belongs to a complete Quake `rt`, `bk`, `lf`, `ft`, `up`, and `dn` face set in the same archive folder, its context menu and Quick Look panel include **View Skybox**. The interactive viewer supports drag-to-look, scroll zoom, view reset, and Space or Escape to close.
+When an image belongs to a complete Quake `rt`, `bk`, `lf`, `ft`, `up`, and `dn` face set in the same archive folder, its context menu and Quick Look panel include **View Skybox**. The interactive viewer supports drag-to-look, scroll zoom, view reset, a **Back to Image** button, and Space or Escape to close.
 
 Treat all archive paths and payloads as untrusted input when changing import, preview, extraction, or save behavior.
 

@@ -284,12 +284,33 @@ final class PakViewModel: NSObject, ObservableObject {
             PakQuickLook.shared.hide()
             ModelPreviewPresenter.shared.hide()
             SkyboxPreviewPresenter.shared.show(
-                item: SkyboxPreviewItem(name: faceSet.name, images: images)
+                item: SkyboxPreviewItem(
+                    name: faceSet.name,
+                    images: images,
+                    returnToImage: { [weak self] in
+                        self?.showImagePreview(for: node)
+                    }
+                )
             )
         } catch {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Unable to Preview Skybox"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func showImagePreview(for node: PakNode) {
+        do {
+            let items = try prepareQuickLookItems(for: [node])
+            SkyboxPreviewPresenter.shared.hide()
+            ModelPreviewPresenter.shared.hide()
+            PakQuickLook.shared.show(items: items)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Preview Image"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
