@@ -106,7 +106,10 @@ public static class ArchivePreviewBuilder
     /// <paramref name="includeInteractiveModels"/> as false so that a model is
     /// decoded to its flat skin instead of the interactive viewer.
     /// </summary>
-    public static ArchivePreview Build(ArchiveNode node, bool includeInteractiveModels = true)
+    public static ArchivePreview Build(
+        ArchiveNode node,
+        bool includeInteractiveModels = true,
+        BspLevelPreviewOptions bspOptions = default)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -168,7 +171,7 @@ public static class ArchivePreviewBuilder
                 Model: new PreviewModel(file.Data, extension, new ModelTextureResolver(file)));
         }
 
-        if (QuakePreviewDecoder.TryDecode(file.Name, file.Data, out var bitmap))
+        if (QuakePreviewDecoder.TryDecode(file.Name, file.Data, out var bitmap, bspOptions))
         {
             return new ArchivePreview(
                 file.Name,

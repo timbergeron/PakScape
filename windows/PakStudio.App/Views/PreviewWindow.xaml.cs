@@ -20,6 +20,7 @@ public partial class PreviewWindow : Window
     private int _index;
     private bool _isAudioPlaying;
     private bool _isUpdatingAudioProgress;
+    private bool _isShowingPreview;
 
     public PreviewWindow(IReadOnlyList<ArchiveNode> nodes)
     {
@@ -42,11 +43,14 @@ public partial class PreviewWindow : Window
 
     private void ShowCurrentPreview()
     {
+        _isShowingPreview = true;
         ResetContent();
         ArchivePreview preview;
         try
         {
-            preview = ArchivePreviewBuilder.Build(_nodes[_index]);
+            preview = ArchivePreviewBuilder.Build(
+                _nodes[_index],
+                bspOptions: CurrentBspOptions());
         }
         catch (Exception exception)
         {
@@ -96,6 +100,8 @@ public partial class PreviewWindow : Window
                 {
                     ImagePreview.Source = previewImage;
                     ImagePanel.Visibility = Visibility.Visible;
+                    BspMarkerOptionsPanel.Visibility =
+                        IsBspLevelPreview(preview) ? Visibility.Visible : Visibility.Collapsed;
                 }
                 else
                 {
@@ -105,6 +111,29 @@ public partial class PreviewWindow : Window
             default:
                 ShowMetadata(preview);
                 break;
+        }
+        _isShowingPreview = false;
+    }
+
+    private BspLevelPreviewOptions CurrentBspOptions() => new(
+        ShowBspArmors.IsChecked == true,
+        ShowBspMegaHealth.IsChecked == true,
+        ShowBspPowerups.IsChecked == true,
+        ShowBspMajorWeapons.IsChecked == true,
+        ShowBspFlags.IsChecked == true);
+
+    private bool IsBspLevelPreview(ArchivePreview preview) =>
+        preview.Kind == ArchivePreviewKind.Bitmap &&
+        _nodes[_index] is ArchiveFileNode file &&
+        file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase);
+
+    private void BspMarkerOption_OnChanged(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded && !_isShowingPreview &&
+            _nodes[_index] is ArchiveFileNode file &&
+            file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowCurrentPreview();
         }
     }
 
@@ -195,6 +224,7 @@ public partial class PreviewWindow : Window
         ImagePreview.Source = null;
         TextPreview.Text = string.Empty;
         ImagePanel.Visibility = Visibility.Collapsed;
+        BspMarkerOptionsPanel.Visibility = Visibility.Collapsed;
         TextPreview.Visibility = Visibility.Collapsed;
         MetadataPanel.Visibility = Visibility.Collapsed;
     }

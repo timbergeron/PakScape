@@ -24,7 +24,11 @@ internal static class QuakePreviewDecoder
 
     internal static ReadOnlySpan<byte> PaletteBytes => Palette;
 
-    public static bool TryDecode(string fileName, byte[] data, out PreviewBitmap bitmap)
+    public static bool TryDecode(
+        string fileName,
+        byte[] data,
+        out PreviewBitmap bitmap,
+        BspLevelPreviewOptions bspOptions = default)
     {
         bitmap = null!;
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
@@ -35,7 +39,7 @@ internal static class QuakePreviewDecoder
             ".spr" => TryDecodeSpr(data, out bitmap),
             ".pcx" => TryDecodePcx(data, out bitmap),
             ".tga" => TryDecodeTga(data, out bitmap),
-            ".bsp" => TryDecodeBsp(data, out bitmap),
+            ".bsp" => TryDecodeBsp(data, out bitmap, bspOptions),
             ".wad" when fileName.Equals("gfx.wad", StringComparison.OrdinalIgnoreCase) =>
                 TryDecodeWad(data, out bitmap),
             _ => false,
@@ -465,7 +469,10 @@ internal static class QuakePreviewDecoder
         pixels[destination + 3] = color.A;
     }
 
-    private static bool TryDecodeBsp(byte[] data, out PreviewBitmap bitmap)
+    private static bool TryDecodeBsp(
+        byte[] data,
+        out PreviewBitmap bitmap,
+        BspLevelPreviewOptions options)
     {
         bitmap = null!;
         const int lumpCount = 15;
@@ -577,7 +584,9 @@ internal static class QuakePreviewDecoder
             DrawBspMarkers(
                 pixels,
                 size,
-                ParseBspMarkers(data.AsSpan(entityOffset, entityLength)),
+                ParseBspMarkers(data.AsSpan(entityOffset, entityLength))
+                    .Where(marker => IncludesBspMarker(options, marker.Label))
+                    .ToArray(),
                 minX,
                 maxY,
                 scale,
@@ -587,6 +596,17 @@ internal static class QuakePreviewDecoder
         bitmap = new PreviewBitmap(size, size, pixels);
         return true;
     }
+
+    private static bool IncludesBspMarker(BspLevelPreviewOptions options, string label) =>
+        label switch
+        {
+            "GA" or "YA" or "RA" => options.ShowArmors,
+            "MH" => options.ShowMegaHealth,
+            "Q" or "R" or "P" => options.ShowPowerups,
+            "RL" or "LG" => options.ShowMajorWeapons,
+            "RF" or "BF" => options.ShowFlags,
+            _ => false,
+        };
 
     private static void DrawMapLine(
         byte[] pixels,

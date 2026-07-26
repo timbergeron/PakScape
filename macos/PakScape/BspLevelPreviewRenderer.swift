@@ -2,14 +2,6 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-enum BspPreviewPreferencesKey {
-    static let showArmors = "bspPreviewShowArmors"
-    static let showMegaHealth = "bspPreviewShowMegaHealth"
-    static let showPowerups = "bspPreviewShowPowerups"
-    static let showMajorWeapons = "bspPreviewShowMajorWeapons"
-    static let showFlags = "bspPreviewShowFlags"
-}
-
 struct BspLevelPreviewOptions: Equatable {
     var showArmors = true
     var showMegaHealth = true
@@ -26,18 +18,6 @@ struct BspLevelPreviewOptions: Equatable {
         showFlags: false
     )
 
-    static func stored(in defaults: UserDefaults = .standard) -> BspLevelPreviewOptions {
-        func value(forKey key: String) -> Bool {
-            defaults.object(forKey: key) as? Bool ?? true
-        }
-        return BspLevelPreviewOptions(
-            showArmors: value(forKey: BspPreviewPreferencesKey.showArmors),
-            showMegaHealth: value(forKey: BspPreviewPreferencesKey.showMegaHealth),
-            showPowerups: value(forKey: BspPreviewPreferencesKey.showPowerups),
-            showMajorWeapons: value(forKey: BspPreviewPreferencesKey.showMajorWeapons),
-            showFlags: value(forKey: BspPreviewPreferencesKey.showFlags)
-        )
-    }
 }
 
 enum BspLevelPreviewRenderer {

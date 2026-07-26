@@ -25,6 +25,12 @@ public sealed class PreviewWindow : Window, IDisposable
     private readonly TextBlock _subtitleText;
     private readonly Border _imagePanel;
     private readonly Image _imagePreview;
+    private readonly Border _bspMarkerOptionsPanel;
+    private readonly CheckBox _showBspArmors;
+    private readonly CheckBox _showBspMegaHealth;
+    private readonly CheckBox _showBspPowerups;
+    private readonly CheckBox _showBspMajorWeapons;
+    private readonly CheckBox _showBspFlags;
     private readonly TextBox _textPreview;
     private readonly Grid _audioPanel;
     private readonly Button _audioPlayPauseButton;
@@ -120,10 +126,49 @@ public sealed class PreviewWindow : Window, IDisposable
             Margin = new Thickness(16),
             Stretch = Stretch.Uniform,
         };
+        _showBspArmors = CreateBspMarkerCheckBox("Armor");
+        _showBspMegaHealth = CreateBspMarkerCheckBox("Megahealth");
+        _showBspPowerups = CreateBspMarkerCheckBox("Powerups");
+        _showBspMajorWeapons = CreateBspMarkerCheckBox("Weapons");
+        _showBspFlags = CreateBspMarkerCheckBox("Flags", isLast: true);
+        _bspMarkerOptionsPanel = new Border
+        {
+            Margin = new Thickness(12),
+            Padding = new Thickness(10, 7),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Background = new SolidColorBrush(Color.Parse("#D9202329")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#664C515B")),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            IsVisible = false,
+            Child = new WrapPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Show:",
+                        Margin = new Thickness(0, 0, 10, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = Brushes.White,
+                    },
+                    _showBspArmors,
+                    _showBspMegaHealth,
+                    _showBspPowerups,
+                    _showBspMajorWeapons,
+                    _showBspFlags,
+                },
+            },
+        };
         _imagePanel = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#181B20")),
-            Child = _imagePreview,
+            Child = new Grid
+            {
+                Children = { _imagePreview, _bspMarkerOptionsPanel },
+            },
             IsVisible = false,
         };
 
@@ -389,7 +434,9 @@ public sealed class PreviewWindow : Window, IDisposable
         ArchivePreview preview;
         try
         {
-            preview = ArchivePreviewBuilder.Build(_nodes[_index]);
+            preview = ArchivePreviewBuilder.Build(
+                _nodes[_index],
+                bspOptions: CurrentBspOptions());
         }
         catch (Exception exception)
         {
@@ -443,6 +490,7 @@ public sealed class PreviewWindow : Window, IDisposable
                 break;
             case ArchivePreviewKind.Bitmap when preview.Bitmap is { } bitmap:
                 SetImage(CreateBitmap(bitmap));
+                _bspMarkerOptionsPanel.IsVisible = IsBspLevelPreview(preview);
                 break;
             case ArchivePreviewKind.Model when preview.Model is { } model:
                 ShowModel(preview, model);
@@ -554,6 +602,7 @@ public sealed class PreviewWindow : Window, IDisposable
         DisposeCurrentImage();
         _textPreview.Text = string.Empty;
         _imagePanel.IsVisible = false;
+        _bspMarkerOptionsPanel.IsVisible = false;
         _textPreview.IsVisible = false;
         _audioPanel.IsVisible = false;
         _metadataPanel.IsVisible = false;
@@ -613,6 +662,39 @@ public sealed class PreviewWindow : Window, IDisposable
         _currentImage = bitmap;
         _imagePreview.Source = bitmap;
         _imagePanel.IsVisible = true;
+    }
+
+    private CheckBox CreateBspMarkerCheckBox(string label, bool isLast = false)
+    {
+        var checkBox = new CheckBox
+        {
+            Content = label,
+            Margin = isLast ? default : new Thickness(0, 0, 10, 0),
+            Foreground = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        checkBox.IsCheckedChanged += OnBspMarkerOptionChanged;
+        return checkBox;
+    }
+
+    private BspLevelPreviewOptions CurrentBspOptions() => new(
+        _showBspArmors.IsChecked == true,
+        _showBspMegaHealth.IsChecked == true,
+        _showBspPowerups.IsChecked == true,
+        _showBspMajorWeapons.IsChecked == true,
+        _showBspFlags.IsChecked == true);
+
+    private bool IsBspLevelPreview(ArchivePreview preview) =>
+        preview.Kind == ArchivePreviewKind.Bitmap &&
+        _nodes[_index] is ArchiveFileNode file &&
+        file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase);
+
+    private void OnBspMarkerOptionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_bspMarkerOptionsPanel.IsVisible)
+        {
+            _ = ShowCurrentPreviewAsync();
+        }
     }
 
     private void DisposeCurrentImage()

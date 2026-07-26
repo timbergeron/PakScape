@@ -343,7 +343,8 @@ public sealed class ModelPreviewTests
             "{\n\"classname\" \"info_player_start\"\n\"origin\" \"8 8 16\"\n}\n" +
             "{\n\"classname\" \"item_armor3\"\n\"origin\" \"0 0 16\"\n}\n";
         var preview = ArchivePreviewBuilder.Build(
-            new ArchiveFileNode("arena.bsp", TestModels.CreateBsp(entities)));
+            new ArchiveFileNode("arena.bsp", TestModels.CreateBsp(entities)),
+            bspOptions: BspLevelPreviewOptions.All);
 
         var bitmap = Assert.IsType<PreviewBitmap>(preview.Bitmap);
         var foundRedArmorBadge = false;
@@ -363,6 +364,26 @@ public sealed class ModelPreviewTests
         }
 
         Assert.True(foundRedArmorBadge);
+    }
+
+    [Fact]
+    public void LevelBspOverviewHidesMarkersByDefault()
+    {
+        var entities =
+            "{\n\"classname\" \"worldspawn\"\n}\n" +
+            "{\n\"classname\" \"info_player_start\"\n\"origin\" \"8 8 16\"\n}\n" +
+            "{\n\"classname\" \"item_armor3\"\n\"origin\" \"0 0 16\"\n}\n";
+        var preview = ArchivePreviewBuilder.Build(
+            new ArchiveFileNode("arena.bsp", TestModels.CreateBsp(entities)));
+
+        var bitmap = Assert.IsType<PreviewBitmap>(preview.Bitmap);
+        for (var offset = 0; offset < bitmap.BgraPixels.Length; offset += 4)
+        {
+            Assert.False(
+                bitmap.BgraPixels[offset] == 52 &&
+                bitmap.BgraPixels[offset + 1] == 52 &&
+                bitmap.BgraPixels[offset + 2] == 205);
+        }
     }
 
     [Fact]

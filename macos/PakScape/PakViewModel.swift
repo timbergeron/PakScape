@@ -101,7 +101,6 @@ final class PakViewModel: NSObject, ObservableObject {
     private var audioPreviewProgress: Double = 0
     private var previewImageCacheVersion: UUID?
     private var previewImageCacheUsesDarkAppearance: Bool?
-    private var previewImageCacheBspOptions: BspLevelPreviewOptions?
     private var previewImageCache: [PakNode.ID: NSImage] = [:]
     private var previewImageMisses: Set<PakNode.ID> = []
     private var previewImageRequests: [PakNode.ID: Task<Void, Never>] = [:]
@@ -491,12 +490,24 @@ final class PakViewModel: NSObject, ObservableObject {
                let pngData = quickLookPNGData(fileName: node.name, data: data) {
                 let destination = base.appendingPathComponent("preview.png")
                 try pngData.write(to: destination, options: .atomic)
-                return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+                let bspLevelData = ext == "bsp" && !QuakeModelFormats.isBrushModel(data: data)
+                    ? data
+                    : nil
+                return PakQuickLookItem(
+                    url: destination,
+                    title: node.name,
+                    cleanupURL: base,
+                    bspLevelData: bspLevelData
+                )
             }
 
             let destination = base.appendingPathComponent(node.name)
             try data.write(to: destination, options: .atomic)
-            return PakQuickLookItem(url: destination, title: node.name, cleanupURL: base)
+            return PakQuickLookItem(
+                url: destination,
+                title: node.name,
+                cleanupURL: base
+            )
         } catch {
             try? fileManager.removeItem(at: base)
             throw error
@@ -1627,7 +1638,7 @@ final class PakViewModel: NSObject, ObservableObject {
                 ?? BspLevelPreviewRenderer.renderImage(
                     data: data,
                     appearance: appearance,
-                    options: .stored()
+                    options: .geometryOnly
                 )
         } else if ext == "wad" {
             return WadPreviewRenderer.renderImage(fileName: fileName, data: data)
@@ -1794,10 +1805,8 @@ final class PakViewModel: NSObject, ObservableObject {
         let currentVersion = pakFile?.version
         let usesDarkAppearance =
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let bspOptions = BspLevelPreviewOptions.stored()
         guard previewImageCacheVersion != currentVersion
-                || previewImageCacheUsesDarkAppearance != usesDarkAppearance
-                || previewImageCacheBspOptions != bspOptions else {
+                || previewImageCacheUsesDarkAppearance != usesDarkAppearance else {
             return
         }
 
@@ -1805,7 +1814,6 @@ final class PakViewModel: NSObject, ObservableObject {
         previewImageRequests.removeAll(keepingCapacity: true)
         previewImageCacheVersion = currentVersion
         previewImageCacheUsesDarkAppearance = usesDarkAppearance
-        previewImageCacheBspOptions = bspOptions
         previewImageCache.removeAll(keepingCapacity: true)
         previewImageMisses.removeAll(keepingCapacity: true)
     }
