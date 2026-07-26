@@ -2,7 +2,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
+using Microsoft.Win32;
 using PakStudio.App.Services;
 using PakStudio.Core.Models;
 using PakStudio.Core.Preview;
@@ -17,10 +19,13 @@ namespace PakStudio.App.Controls;
 public sealed class ModelPreviewControl : UserControl, IDisposable
 {
     private readonly Image _image;
+    private readonly Image _skinImage;
     private readonly Border _hint;
     private readonly ComboBox _skinPicker;
+    private readonly Button _viewSkinButton;
     private readonly Button _resetButton;
     private readonly ModelPreviewSession _session;
+    private readonly string _modelName;
 
     private WriteableBitmap? _bitmap;
     private int _bufferWidth;
@@ -29,12 +34,14 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     private bool _isHooked;
     private bool _isOrbiting;
     private bool _isPanning;
+    private bool _isViewingSkin;
     private Point _lastPosition;
     private bool _disposed;
 
-    public ModelPreviewControl(ModelPreviewSession session)
+    public ModelPreviewControl(ModelPreviewSession session, string modelName = "model")
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _modelName = modelName;
 
         _image = new Image
         {
@@ -42,6 +49,15 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
             SnapsToDevicePixels = true,
         };
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.HighQuality);
+
+        _skinImage = new Image
+        {
+            Stretch = Stretch.Uniform,
+            SnapsToDevicePixels = true,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        RenderOptions.SetBitmapScalingMode(_skinImage, BitmapScalingMode.NearestNeighbor);
 
         _hint = new Border
         {
@@ -62,9 +78,6 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
         _skinPicker = new ComboBox
         {
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(12),
             MinWidth = 96,
             Visibility = _session.SkinCount > 1 ? Visibility.Visible : Visibility.Collapsed,
             ToolTip = "Skin",
@@ -79,6 +92,75 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         }
         _skinPicker.SelectionChanged += OnSkinChanged;
 
+        _viewSkinButton = new Button
+        {
+            Content = "View skin",
+            Padding = new Thickness(10, 4, 10, 4),
+            Visibility = _session.SkinCount > 0 ? Visibility.Visible : Visibility.Collapsed,
+            ToolTip = "View the selected MDL skin",
+        };
+        _viewSkinButton.Click += (_, _) => ToggleSkinView();
+
+        var copySkinButton = new Button
+        {
+            Content = "Copy skin",
+            Padding = new Thickness(10, 4, 10, 4),
+            Visibility = _session.SkinCount > 0 ? Visibility.Visible : Visibility.Collapsed,
+            ToolTip = "Copy the selected MDL skin image",
+        };
+        copySkinButton.Click += (_, _) => CopySelectedSkin();
+
+        var skinControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(12),
+        };
+        skinControls.Children.Add(_skinPicker);
+        skinControls.Children.Add(_viewSkinButton);
+        skinControls.Children.Add(copySkinButton);
+        _viewSkinButton.Margin = new Thickness(8, 0, 0, 0);
+        copySkinButton.Margin = new Thickness(8, 0, 0, 0);
+
+        var animateCheck = new CheckBox
+        {
+            Content = "Animate",
+            IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        animateCheck.Checked += (_, _) => _session.AnimationEnabled = true;
+        animateCheck.Unchecked += (_, _) => _session.AnimationEnabled = false;
+
+        var speedPicker = new ComboBox
+        {
+            MinWidth = 72,
+            ToolTip = "Animation speed",
+            ItemsSource = new[] { "0.25×", "0.5×", "1×", "2×", "4×" },
+            SelectedIndex = 2,
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        var animationSpeeds = new[] { 0.25, 0.5, 1.0, 2.0, 4.0 };
+        speedPicker.SelectionChanged += (_, _) =>
+        {
+            if (speedPicker.SelectedIndex >= 0)
+            {
+                _session.AnimationSpeed = animationSpeeds[speedPicker.SelectedIndex];
+            }
+        };
+        var animationControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(12),
+            Visibility = _session.Statistics.FrameCount > 1
+                ? Visibility.Visible
+                : Visibility.Collapsed,
+        };
+        animationControls.Children.Add(animateCheck);
+        animationControls.Children.Add(speedPicker);
+
         _resetButton = new Button
         {
             Content = "Reset view",
@@ -92,8 +174,9 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         Content = new Grid
         {
             Background = Brushes.Transparent,
-            Children = { _image, _hint, _skinPicker, _resetButton },
+            Children = { _image, _hint, _skinImage, skinControls, _resetButton, animationControls },
         };
+        ContextMenu = CreateSkinContextMenu();
 
         Focusable = true;
         IsManipulationEnabled = true;
@@ -256,7 +339,9 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
     private void UpdateHint()
     {
-        var wanted = _session.ShowInteractionPrompt ? Visibility.Visible : Visibility.Collapsed;
+        var wanted = _session.ShowInteractionPrompt && !_isViewingSkin
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         if (_hint.Visibility != wanted)
         {
             _hint.Visibility = wanted;
@@ -379,7 +464,151 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         if (_skinPicker.SelectedIndex >= 0)
         {
             _session.TrySelectSkin(_skinPicker.SelectedIndex);
+            if (_isViewingSkin)
+            {
+                ShowSelectedSkin();
+            }
         }
+    }
+
+    private void ToggleSkinView()
+    {
+        if (_isViewingSkin)
+        {
+            _isViewingSkin = false;
+            _skinImage.Visibility = Visibility.Collapsed;
+            _skinImage.Source = null;
+            _image.Effect = null;
+            _viewSkinButton.Content = "View skin";
+            Focus();
+            return;
+        }
+
+        if (ShowSelectedSkin())
+        {
+            _isViewingSkin = true;
+            _viewSkinButton.Content = "View model";
+        }
+    }
+
+    private bool ShowSelectedSkin()
+    {
+        var skin = _session.GetSelectedSkin();
+        if (skin is null)
+        {
+            return false;
+        }
+        _skinImage.Source = CreateSkinImage(skin);
+        _skinImage.Visibility = Visibility.Visible;
+        _image.Effect ??= new BlurEffect { Radius = 14 };
+        return true;
+    }
+
+    private void CopySelectedSkin()
+    {
+        var skin = _session.GetSelectedSkin();
+        if (skin is null)
+        {
+            return;
+        }
+
+        var image = CreateSkinImage(skin);
+        try
+        {
+            Clipboard.SetImage(image);
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            System.Media.SystemSounds.Beep.Play();
+        }
+    }
+
+    private ContextMenu? CreateSkinContextMenu()
+    {
+        if (_session.SkinCount == 0)
+        {
+            return null;
+        }
+
+        var saveAs = new MenuItem { Header = "Save Skin As" };
+        foreach (var (label, format) in new[]
+                 {
+                     ("LMP…", "lmp"),
+                     ("JPEG…", "jpeg"),
+                     ("PNG…", "png"),
+                     ("TGA…", "tga"),
+                 })
+        {
+            var item = new MenuItem { Header = label, Tag = format };
+            item.Click += async (_, _) => await SaveSelectedSkinAsAsync(format);
+            saveAs.Items.Add(item);
+        }
+        return new ContextMenu { Items = { saveAs } };
+    }
+
+    private async Task SaveSelectedSkinAsAsync(string formatId)
+    {
+        var skin = _session.GetSelectedSkin();
+        if (skin is null || !ImageFormatConverter.TryParseFormat(formatId, out var format))
+        {
+            return;
+        }
+
+        var extension = ImageFormatConverter.ExtensionFor(format);
+        var baseName = Path.GetFileNameWithoutExtension(_modelName);
+        var skinSuffix = _session.SkinCount > 1 ? $"_skin{_session.SkinIndex + 1}" : "_skin";
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save Skin As",
+            FileName = baseName + skinSuffix + extension,
+            DefaultExt = extension,
+            AddExtension = true,
+            OverwritePrompt = true,
+            Filter = $"{formatId.ToUpperInvariant()} image (*{extension})|*{extension}",
+        };
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var data = await Task.Run(() =>
+                ImageFormatConverter.EncodeRgba(skin.Width, skin.Height, skin.RgbaPixels, format));
+            await File.WriteAllBytesAsync(dialog.FileName, data);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            MessageBox.Show(
+                Window.GetWindow(this),
+                exception.Message,
+                "Save Skin As Failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private static BitmapSource CreateSkinImage(ModelSkin skin)
+    {
+        var bgra = new byte[skin.RgbaPixels.Length];
+        for (var offset = 0; offset < bgra.Length; offset += 4)
+        {
+            bgra[offset] = skin.RgbaPixels[offset + 2];
+            bgra[offset + 1] = skin.RgbaPixels[offset + 1];
+            bgra[offset + 2] = skin.RgbaPixels[offset];
+            bgra[offset + 3] = skin.RgbaPixels[offset + 3];
+        }
+        var image = BitmapSource.Create(
+            skin.Width,
+            skin.Height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            bgra,
+            skin.Width * 4);
+        image.Freeze();
+        return image;
     }
 
     public void Dispose()
@@ -395,6 +624,6 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     }
 
     /// <summary>Opens a model preview, decoding PNG and JPEG skins with WPF.</summary>
-    public static ModelPreviewControl Create(PreviewModel model) =>
-        new(ModelPreviewSession.Create(model, ModelTextureDecoder.Decode));
+    public static ModelPreviewControl Create(PreviewModel model, string modelName = "model") =>
+        new(ModelPreviewSession.Create(model, ModelTextureDecoder.Decode), modelName);
 }

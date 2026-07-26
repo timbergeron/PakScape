@@ -7,13 +7,542 @@ struct PakFormatDetail: Identifiable, Equatable {
     var id: String { label }
 }
 
+private extension PakFormatInspector {
+    static func md3Details(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "IDP3",
+              int32LE(data, at: 4) == 15,
+              let frames = nonnegativeInt32(data, at: 76),
+              let tags = nonnegativeInt32(data, at: 80),
+              let surfaces = nonnegativeInt32(data, at: 84),
+              let surfaceOffset = int32LE(data, at: 100),
+              frames <= 1_000_000,
+              tags <= 1_000_000,
+              surfaces <= 16_384 else { return [] }
+
+        var details = [
+            detail("Format", "Quake III alias model"),
+            detail("Version", "15"),
+            detail("Frames", formatted(frames)),
+            detail("Tags", formatted(tags)),
+            detail("Surfaces", formatted(surfaces)),
+        ]
+        appendText(&details, label: "Name", value: nullTerminatedText(data, at: 8, length: 64))
+
+        var cursor = surfaceOffset
+        var vertices = 0
+        var triangles = 0
+        var shaders = 0
+        var complete = cursor >= 0
+        for _ in 0 ..< surfaces where complete {
+            guard ascii(data, at: cursor, length: 4) == "IDP3",
+                  let surfaceShaders = nonnegativeInt32(data, at: cursor + 76),
+                  let surfaceVertices = nonnegativeInt32(data, at: cursor + 80),
+                  let surfaceTriangles = nonnegativeInt32(data, at: cursor + 84),
+                  let surfaceSize = positiveInt32(data, at: cursor + 104),
+                  cursor <= data.count - surfaceSize else {
+                complete = false
+                break
+            }
+            shaders += surfaceShaders
+            vertices += surfaceVertices
+            triangles += surfaceTriangles
+            cursor += surfaceSize
+        }
+        if complete {
+            details.append(detail("Vertices", formatted(vertices)))
+            details.append(detail("Triangles", formatted(triangles)))
+            details.append(detail("Shaders", formatted(shaders)))
+        }
+        return details
+    }
+
+    static func md5Details(_ data: Data) -> [PakFormatDetail] {
+        guard let text = String(data: data, encoding: .utf8),
+              md5Value(text, key: "MD5Version") == 10 else { return [] }
+        let frames = md5Value(text, key: "numFrames")
+        let meshes = md5Value(text, key: "numMeshes")
+        guard frames != nil || meshes != nil else { return [] }
+
+        var details = [
+            detail("Format", frames != nil ? "Doom 3 model animation" : "Doom 3 model mesh"),
+            detail("Version", "10"),
+        ]
+        if let joints = md5Value(text, key: "numJoints") {
+            details.append(detail("Joints", formatted(joints)))
+        }
+        if let frames {
+            details.append(detail("Frames", formatted(frames)))
+            if let frameRate = md5Value(text, key: "frameRate"), frameRate > 0 {
+                details.append(detail("Frame Rate", "\(formatted(frameRate)) fps"))
+                details.append(detail("Duration", duration(Double(frames) / Double(frameRate))))
+            }
+            if let components = md5Value(text, key: "numAnimatedComponents") {
+                details.append(detail("Animated Components", formatted(components)))
+            }
+        } else if let meshes {
+            details.append(detail("Meshes", formatted(meshes)))
+            if let vertices = md5Sum(text, key: "numverts") {
+                details.append(detail("Vertices", formatted(vertices)))
+            }
+            if let triangles = md5Sum(text, key: "numtris") {
+                details.append(detail("Triangles", formatted(triangles)))
+            }
+        }
+        return details
+    }
+
+    static func md5Value(_ text: String, key: String) -> Int? {
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let parts = rawLine
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(whereSeparator: { $0.isWhitespace || $0 == "/" })
+            if parts.count >= 2, parts[0] == Substring(key), let value = Int(parts[1]), value >= 0 {
+                return value
+            }
+        }
+        return nil
+    }
+
+    static func md5Sum(_ text: String, key: String) -> Int? {
+        var total = 0
+        var found = false
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let parts = rawLine
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(whereSeparator: { $0.isWhitespace || $0 == "/" })
+            if parts.count >= 2, parts[0] == Substring(key), let value = Int(parts[1]), value >= 0 {
+                total += value
+                found = true
+            }
+        }
+        return found ? total : nil
+    }
+
+    static func litDetails(_ data: Data, fileSize: Int) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "QLIT",
+              let version = positiveInt32(data, at: 4),
+              fileSize >= 8 else { return [] }
+        let payload = fileSize - 8
+        var details = [
+            detail("Format", "Quake coloured lighting"),
+            detail("Version", String(version)),
+            detail("Data Size", "\(formatted(payload)) bytes"),
+        ]
+        if version == 1, payload % 3 == 0 {
+            details.append(detail("Samples", formatted(payload / 3)))
+        }
+        return details
+    }
+
+    static func visDetails(_ data: Data, fileSize: Int) -> [PakFormatDetail] {
+        var cursor = 0
+        var maps: [String] = []
+        var payloadBytes = 0
+        while cursor <= data.count - 36 {
+            let name = nullTerminatedText(data, at: cursor, length: 32)
+            guard !name.isEmpty,
+                  let payload = positiveInt32(data, at: cursor + 32),
+                  cursor <= fileSize - 36 - payload else { return [] }
+            maps.append(name)
+            payloadBytes += payload
+            cursor += 36 + payload
+            if cursor > data.count { break }
+        }
+        guard !maps.isEmpty, cursor == fileSize else { return [] }
+        return [
+            detail("Format", "Quake external visibility patch"),
+            detail("Maps", maps.count == 1 ? maps[0] : "\(formatted(maps.count)) maps"),
+            detail("Visibility Data", "\(formatted(payloadBytes)) bytes"),
+        ]
+    }
+
+    static func navDetails(_ data: Data, fileSize: Int) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "NAV2", fileSize >= 8 else { return [] }
+        return [
+            detail("Format", "Quake bot navigation"),
+            detail("Version", "NAV2"),
+            detail("Data Size", "\(formatted(fileSize - 4)) bytes"),
+        ]
+    }
+
+    static func ddsDetails(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "DDS ",
+              int32LE(data, at: 4) == 124,
+              let height = positiveInt32(data, at: 12),
+              let width = positiveInt32(data, at: 16),
+              dimensionsAreSafe(width, height),
+              int32LE(data, at: 76) == 32 else { return [] }
+        var details = [
+            detail("Format", "DirectDraw Surface image"),
+            detail("Dimensions", dimensions(width, height)),
+        ]
+        if let mipmaps = positiveInt32(data, at: 28) {
+            details.append(detail("Mipmaps", formatted(mipmaps)))
+        }
+        let fourCC = ascii(data, at: 84, length: 4)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\0 "))
+        if !fourCC.isEmpty {
+            if fourCC == "DX10", let dxgi = int32LE(data, at: 128) {
+                details.append(detail("Compression", "DX10 (DXGI format \(dxgi))"))
+            } else {
+                details.append(detail("Compression", fourCC))
+            }
+        } else if let bitDepth = positiveInt32(data, at: 88) {
+            details.append(detail("Color Depth", "\(bitDepth)-bit"))
+        }
+        return details
+    }
+
+    static func flacDetails(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "fLaC",
+              data.count >= 42,
+              let blockType = byte(data, at: 4),
+              blockType & 0x7f == 0,
+              uint24BE(data, at: 5) == 34,
+              let packed = uint64BE(data, at: 18) else { return [] }
+        let sampleRate = Int(packed >> 44 & 0xfffff)
+        let channels = Int(packed >> 41 & 0x7) + 1
+        let bitDepth = Int(packed >> 36 & 0x1f) + 1
+        let samples = packed & 0xfffffffff
+        guard sampleRate > 0 else { return [] }
+        var details = [
+            detail("Format", "FLAC audio"),
+            detail("Sample Rate", "\(formatted(sampleRate)) Hz"),
+            detail("Channels", channelDescription(channels)),
+            detail("Bit Depth", "\(bitDepth)-bit"),
+        ]
+        if samples > 0 {
+            details.append(detail("Duration", duration(Double(samples) / Double(sampleRate))))
+        }
+        addFlacComments(&details, data: data)
+        return details
+    }
+
+    static func addFlacComments(_ details: inout [PakFormatDetail], data: Data) {
+        var cursor = 4
+        while cursor <= data.count - 4 {
+            guard let header = byte(data, at: cursor), let length = uint24BE(data, at: cursor + 1) else {
+                return
+            }
+            cursor += 4
+            guard cursor <= data.count - length else { return }
+            if header & 0x7f == 4 {
+                var commentCursor = cursor
+                addVorbisComments(&details, data: data, cursor: &commentCursor, limit: cursor + length)
+                return
+            }
+            cursor += length
+            if header & 0x80 != 0 { return }
+        }
+    }
+
+    static func oggDetails(_ data: Data, fileSize: Int) -> [PakFormatDetail] {
+        guard let packet = firstOggPacket(data) else { return [] }
+        var details: [PakFormatDetail]
+        var sampleRate: Int
+        var preSkip = 0
+        if packet.count >= 16,
+           byte(packet, at: 0) == 1,
+           ascii(packet, at: 1, length: 6) == "vorbis",
+           let channels = byte(packet, at: 11),
+           let rate = uint32LE(packet, at: 12),
+           channels > 0,
+           rate > 0 {
+            sampleRate = Int(rate)
+            details = [
+                detail("Format", "Ogg Vorbis audio"),
+                detail("Sample Rate", "\(formatted(sampleRate)) Hz"),
+                detail("Channels", channelDescription(Int(channels))),
+            ]
+            addOggComments(&details, data: data, marker: Data([3]) + Data("vorbis".utf8))
+        } else if packet.count >= 19,
+                  ascii(packet, at: 0, length: 8) == "OpusHead",
+                  let version = byte(packet, at: 8),
+                  let channels = byte(packet, at: 9),
+                  let skip = uint16LE(packet, at: 10),
+                  channels > 0 {
+            sampleRate = 48_000
+            preSkip = Int(skip)
+            details = [
+                detail("Format", "Ogg Opus audio"),
+                detail("Version", String(version)),
+                detail("Sample Rate", "48,000 Hz"),
+                detail("Channels", channelDescription(Int(channels))),
+            ]
+            addOggComments(&details, data: data, marker: Data("OpusTags".utf8))
+        } else {
+            return []
+        }
+        if data.count == fileSize,
+           let granule = lastOggGranule(data),
+           granule > UInt64(preSkip) {
+            details.append(detail(
+                "Duration",
+                duration(Double(granule - UInt64(preSkip)) / Double(sampleRate))
+            ))
+        }
+        return details
+    }
+
+    static func firstOggPacket(_ data: Data) -> Data? {
+        guard ascii(data, at: 0, length: 4) == "OggS",
+              data.count >= 28,
+              let segmentCount = byte(data, at: 26),
+              data.count >= 27 + Int(segmentCount) else { return nil }
+        var size = 0
+        for index in 0 ..< Int(segmentCount) {
+            guard let segment = byte(data, at: 27 + index) else { return nil }
+            size += Int(segment)
+            if segment < 255 { break }
+        }
+        let body = 27 + Int(segmentCount)
+        guard size > 0, body <= data.count - size else { return nil }
+        return data.subdata(in: body ..< body + size)
+    }
+
+    static func lastOggGranule(_ data: Data) -> UInt64? {
+        guard data.count >= 27 else { return nil }
+        for cursor in stride(from: data.count - 27, through: 0, by: -1) {
+            if ascii(data, at: cursor, length: 4) == "OggS",
+               let granule = uint64LE(data, at: cursor + 6),
+               granule != UInt64.max {
+                return granule
+            }
+        }
+        return nil
+    }
+
+    static func addOggComments(
+        _ details: inout [PakFormatDetail],
+        data: Data,
+        marker: Data
+    ) {
+        guard let range = data.range(of: marker) else { return }
+        var cursor = range.upperBound
+        addVorbisComments(&details, data: data, cursor: &cursor, limit: data.count)
+    }
+
+    static func addVorbisComments(
+        _ details: inout [PakFormatDetail],
+        data: Data,
+        cursor: inout Int,
+        limit: Int
+    ) {
+        guard readLengthPrefixedText(data, cursor: &cursor, limit: limit) != nil,
+              let count = uint32LE(data, at: cursor),
+              count <= 10_000 else { return }
+        cursor += 4
+        for _ in 0 ..< Int(count) {
+            guard let comment = readLengthPrefixedText(data, cursor: &cursor, limit: limit),
+                  let separator = comment.firstIndex(of: "=") else { return }
+            let key = comment[..<separator].uppercased()
+            let value = comment[comment.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = ["TITLE": "Title", "ARTIST": "Artist", "ALBUM": "Album"][key]
+            if let label, !value.isEmpty, !details.contains(where: { $0.label == label }) {
+                details.append(detail(label, value))
+            }
+        }
+    }
+
+    static func readLengthPrefixedText(
+        _ data: Data,
+        cursor: inout Int,
+        limit: Int
+    ) -> String? {
+        guard let rawLength = uint32LE(data, at: cursor),
+              rawLength <= Int.max,
+              Int(rawLength) <= limit - cursor - 4 else { return nil }
+        cursor += 4
+        let length = Int(rawLength)
+        let value = String(data: data.subdata(in: cursor ..< cursor + length), encoding: .utf8)
+        cursor += length
+        return value
+    }
+
+    static func xmDetails(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 17) == "Extended Module: ",
+              data.count >= 80,
+              byte(data, at: 37) == 0x1a,
+              let version = uint16LE(data, at: 58) else { return [] }
+        return trackerDetails(
+            format: "FastTracker II module",
+            title: nullTerminatedText(data, at: 17, length: 20),
+            channels: Int(uint16LE(data, at: 68) ?? 0),
+            orders: Int(uint16LE(data, at: 64) ?? 0),
+            patterns: Int(uint16LE(data, at: 70) ?? 0),
+            instruments: Int(uint16LE(data, at: 72) ?? 0),
+            tempo: Int(uint16LE(data, at: 78) ?? 0),
+            version: "\(version >> 8).\(String(format: "%02d", version & 0xff))",
+            tracker: nullTerminatedText(data, at: 38, length: 20)
+        )
+    }
+
+    static func s3mDetails(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 44, length: 4) == "SCRM", data.count >= 96 else { return [] }
+        let channels = (64 ..< 96).reduce(into: 0) { count, index in
+            if let setting = byte(data, at: index), setting < 16 { count += 1 }
+        }
+        return trackerDetails(
+            format: "Scream Tracker 3 module",
+            title: nullTerminatedText(data, at: 0, length: 28),
+            channels: channels,
+            orders: Int(uint16LE(data, at: 32) ?? 0),
+            patterns: Int(uint16LE(data, at: 36) ?? 0),
+            instruments: Int(uint16LE(data, at: 34) ?? 0),
+            tempo: Int(byte(data, at: 50) ?? 0)
+        )
+    }
+
+    static func itDetails(_ data: Data) -> [PakFormatDetail] {
+        guard ascii(data, at: 0, length: 4) == "IMPM",
+              data.count >= 128,
+              let version = uint16LE(data, at: 40) else { return [] }
+        let channels = (64 ..< 128).reduce(into: 0) { count, index in
+            if let setting = byte(data, at: index), setting < 128 { count += 1 }
+        }
+        return trackerDetails(
+            format: "Impulse Tracker module",
+            title: nullTerminatedText(data, at: 4, length: 26),
+            channels: channels,
+            orders: Int(uint16LE(data, at: 32) ?? 0),
+            patterns: Int(uint16LE(data, at: 38) ?? 0),
+            instruments: Int(uint16LE(data, at: 34) ?? 0),
+            samples: Int(uint16LE(data, at: 36) ?? 0),
+            tempo: Int(byte(data, at: 51) ?? 0),
+            version: "\(version >> 8).\(String(format: "%02d", version & 0xff))"
+        )
+    }
+
+    static func modDetails(_ data: Data) -> [PakFormatDetail] {
+        guard data.count >= 1_084 else { return [] }
+        let signature = ascii(data, at: 1_080, length: 4)
+        let channels = modChannels(signature)
+        guard channels > 0, let rawOrders = byte(data, at: 950) else { return [] }
+        let orders = Int(rawOrders)
+        var patterns = 0
+        if orders > 0 {
+            for index in 952 ..< min(1_080, 952 + orders) {
+                patterns = max(patterns, Int(byte(data, at: index) ?? 0) + 1)
+            }
+        }
+        return trackerDetails(
+            format: "ProTracker module",
+            title: nullTerminatedText(data, at: 0, length: 20),
+            channels: channels,
+            orders: orders,
+            patterns: patterns,
+            instruments: 31,
+            tracker: signature
+        )
+    }
+
+    static func umxDetails(_ data: Data) -> [PakFormatDetail] {
+        guard uint32LE(data, at: 0) == 0x9e2a83c1, data.count >= 36 else { return [] }
+        var details = [
+            detail("Format", "Unreal music package"),
+            detail("Version", String(uint16LE(data, at: 4) ?? 0)),
+        ]
+        if let names = nonnegativeInt32(data, at: 12) {
+            details.append(detail("Names", formatted(names)))
+        }
+        if let exports = nonnegativeInt32(data, at: 20) {
+            details.append(detail("Exports", formatted(exports)))
+        }
+        return details
+    }
+
+    static func trackerDetails(
+        format: String,
+        title: String,
+        channels: Int,
+        orders: Int,
+        patterns: Int,
+        instruments: Int,
+        samples: Int? = nil,
+        tempo: Int? = nil,
+        version: String? = nil,
+        tracker: String? = nil
+    ) -> [PakFormatDetail] {
+        var details = [detail("Format", format)]
+        appendText(&details, label: "Title", value: title)
+        appendText(&details, label: "Tracker", value: tracker ?? "")
+        appendText(&details, label: "Version", value: version ?? "")
+        if channels > 0 { details.append(detail("Channels", formatted(channels))) }
+        if orders > 0 { details.append(detail("Orders", formatted(orders))) }
+        if patterns > 0 { details.append(detail("Patterns", formatted(patterns))) }
+        if instruments > 0 { details.append(detail("Instruments", formatted(instruments))) }
+        if let samples, samples > 0 { details.append(detail("Samples", formatted(samples))) }
+        if let tempo, tempo > 0 { details.append(detail("Tempo", "\(formatted(tempo)) BPM")) }
+        return details
+    }
+
+    static func modChannels(_ signature: String) -> Int {
+        if ["M.K.", "M!K!", "M&K!", "FLT4"].contains(signature) { return 4 }
+        if ["OCTA", "CD81", "FLT8"].contains(signature) { return 8 }
+        if signature.count == 4, signature.hasSuffix("CHN"),
+           let first = signature.first?.wholeNumberValue { return first }
+        if signature.count == 4, signature.hasSuffix("CH"),
+           let channels = Int(signature.prefix(2)) { return channels }
+        return 0
+    }
+
+    static func appendText(
+        _ details: inout [PakFormatDetail],
+        label: String,
+        value: String
+    ) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { details.append(detail(label, trimmed)) }
+    }
+
+    static func nullTerminatedText(_ data: Data, at offset: Int, length: Int) -> String {
+        guard offset >= 0, length >= 0, offset <= data.count - length else { return "" }
+        var bytes = Array(data[offset ..< offset + length])
+        if let end = bytes.firstIndex(of: 0) { bytes.removeSubrange(end...) }
+        return String(bytes: bytes, encoding: .isoLatin1)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    static func uint24BE(_ data: Data, at offset: Int) -> Int? {
+        guard let a = byte(data, at: offset),
+              let b = byte(data, at: offset + 1),
+              let c = byte(data, at: offset + 2) else { return nil }
+        return Int(a) << 16 | Int(b) << 8 | Int(c)
+    }
+
+    static func uint64LE(_ data: Data, at offset: Int) -> UInt64? {
+        guard offset >= 0, offset <= data.count - 8 else { return nil }
+        return (0 ..< 8).reduce(UInt64(0)) {
+            $0 | UInt64(data[offset + $1]) << UInt64($1 * 8)
+        }
+    }
+
+    static func uint64BE(_ data: Data, at offset: Int) -> UInt64? {
+        guard offset >= 0, offset <= data.count - 8 else { return nil }
+        return (0 ..< 8).reduce(UInt64(0)) {
+            $0 << 8 | UInt64(data[offset + $1])
+        }
+    }
+}
+
 enum PakFormatInspector {
     static let maximumInspectionBytes = 1 * 1_024 * 1_024
+
+    /// Large BSPs can place their entity lump, including the worldspawn title, after
+    /// the first megabyte even though their fixed header is at the start.
+    static let maximumBspInspectionBytes = 4 * 1_024 * 1_024
 
     /// Demos are read frame by frame rather than sampled, so the whole recording has to be
     /// available for the duration and the closing scores to be right. Longer recordings than
     /// this still describe themselves, but report their length as a lower bound.
     static let maximumDemoInspectionBytes = 16 * 1_024 * 1_024
+
+    /// Ogg duration is stored in the final page rather than the identification header.
+    static let maximumAudioInspectionBytes = 16 * 1_024 * 1_024
+
+    /// MD3 surface headers are chained through each surface's full payload.
+    static let maximumModelInspectionBytes = 8 * 1_024 * 1_024
 
     private static let maximumListedPlayers = 8
 
@@ -22,14 +551,19 @@ enum PakFormatInspector {
 
     /// Demos earn a larger budget than the fixed headers every other format is read from.
     static func inspectionByteLimit(for fileName: String) -> Int {
-        (fileName as NSString).pathExtension.lowercased() == "dem"
-            ? maximumDemoInspectionBytes
-            : maximumInspectionBytes
+        switch (fileName as NSString).pathExtension.lowercased() {
+        case "bsp": return maximumBspInspectionBytes
+        case "dem": return maximumDemoInspectionBytes
+        case "md3": return maximumModelInspectionBytes
+        case "ogg", "opus": return maximumAudioInspectionBytes
+        default: return maximumInspectionBytes
+        }
     }
 
     private static let textExtensions: Set<String> = [
-        "arena", "cfg", "csv", "def", "ent", "ini", "json", "loc", "log", "map",
-        "md", "menu", "qc", "rc", "shader", "src", "txt", "xml", "yaml", "yml",
+        "arena", "cfg", "csv", "def", "ent", "fgd", "ini", "json", "loc", "log",
+        "map", "md", "menu", "pts", "qc", "rc", "rtlights", "scr", "shader", "skin",
+        "src", "txt", "xml", "yaml", "yml",
     ]
 
     static func details(fileName: String, data: Data?, fileSize: Int) -> [PakFormatDetail] {
@@ -58,13 +592,26 @@ enum PakFormatInspector {
         case "dem":
             return demoDetails(data)
         case "mdl":
-            return mdlDetails(data)
+            let details = mdlDetails(data)
+            return details.isEmpty ? detailsFromMagic(data) : details
+        case "md3":
+            return md3Details(data)
+        case "md5", "md5mesh", "md5anim":
+            return md5Details(data)
         case "spr":
             return spriteDetails(data)
         case "wad":
             return wadDetails(data)
+        case "lit":
+            return litDetails(data, fileSize: fileSize)
+        case "vis":
+            return visDetails(data, fileSize: fileSize)
+        case "nav":
+            return navDetails(data, fileSize: fileSize)
         case "lmp":
             return lmpDetails(fileName: lowerName, data: data, fileSize: fileSize)
+        case "dds":
+            return ddsDetails(data)
         case "pcx":
             return pcxDetails(data)
         case "tga":
@@ -81,6 +628,22 @@ enum PakFormatInspector {
             return waveDetails(data)
         case "mp3":
             return mp3Details(data, fileSize: fileSize)
+        case "flac":
+            return flacDetails(data)
+        case "ogg", "opus":
+            return oggDetails(data, fileSize: fileSize)
+        case "it":
+            return itDetails(data)
+        case "s3m":
+            return s3mDetails(data)
+        case "xm":
+            return xmDetails(data)
+        case "mod":
+            return modDetails(data)
+        case "umx":
+            return umxDetails(data)
+        case "sav":
+            return savegameDetails(data)
         case "dat", "bin":
             /* Neither extension is exclusively Quake's, so both fall back to the magic. */
             let details = ext == "dat" ? quakeCProgramDetails(data) : dosTextScreenDetails(data)
@@ -93,10 +656,72 @@ enum PakFormatInspector {
         }
     }
 
+    private static func savegameDetails(_ data: Data) -> [PakFormatDetail] {
+        guard var text = String(data: data, encoding: .isoLatin1) else { return [] }
+        text = text.replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+        let lines = text.components(separatedBy: "\n")
+        guard let version = lines.first.flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }),
+              version == 5 || version == 6 else { return [] }
+
+        var cursor = 1
+        var gameDirectory: String?
+        if version == 6 {
+            guard cursor < lines.count else { return [] }
+            gameDirectory = lines[cursor].trimmingCharacters(in: .whitespaces)
+            cursor += 1
+        }
+
+        /* comment + 16 spawn parms + skill + map + elapsed time */
+        guard lines.count - cursor >= 20 else { return [] }
+        let comment = lines[cursor]
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        cursor += 17
+        guard let skill = Int(lines[cursor].trimmingCharacters(in: .whitespaces)) else { return [] }
+        cursor += 1
+        let map = lines[cursor].trimmingCharacters(in: .whitespaces)
+        cursor += 1
+        guard !map.isEmpty,
+              let elapsedTime = Double(lines[cursor].trimmingCharacters(in: .whitespaces)),
+              elapsedTime.isFinite else { return [] }
+
+        var details = [
+            detail("Format", version == 6 ? "Quake remaster savegame" : "Quake savegame"),
+            detail("Version", String(version)),
+        ]
+        if !comment.isEmpty {
+            details.append(detail("Description", comment))
+        }
+        details.append(detail("Map", map))
+        details.append(detail("Skill", skillName(skill)))
+        details.append(detail("Duration", duration(elapsedTime)))
+        if let gameDirectory, !gameDirectory.isEmpty {
+            details.append(detail("Mod", gameDirectory))
+        }
+        return details
+    }
+
+    private static func skillName(_ skill: Int) -> String {
+        switch skill {
+        case 0: return "Easy"
+        case 1: return "Normal"
+        case 2: return "Hard"
+        case 3: return "Nightmare"
+        default: return "Skill \(skill)"
+        }
+    }
+
     private static func detailsFromMagic(_ data: Data) -> [PakFormatDetail] {
         if ascii(data, at: 0, length: 4) == "IDPO" { return mdlDetails(data) }
+        if ascii(data, at: 0, length: 4) == "IDP3" { return md3Details(data) }
         if ascii(data, at: 0, length: 4) == "IDSP" { return spriteDetails(data) }
         if ["WAD2", "WAD3"].contains(ascii(data, at: 0, length: 4)) { return wadDetails(data) }
+        if ascii(data, at: 0, length: 4) == "QLIT" { return litDetails(data, fileSize: data.count) }
+        if ascii(data, at: 0, length: 4) == "NAV2" { return navDetails(data, fileSize: data.count) }
+        if ascii(data, at: 0, length: 4) == "DDS " { return ddsDetails(data) }
+        if ascii(data, at: 0, length: 4) == "fLaC" { return flacDetails(data) }
+        if ascii(data, at: 0, length: 4) == "OggS" { return oggDetails(data, fileSize: data.count) }
         if data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) { return pngDetails(data) }
         if data.starts(with: [0xff, 0xd8]) { return jpegDetails(data) }
         if ascii(data, at: 0, length: 3) == "GIF" { return gifDetails(data) }
@@ -108,11 +733,26 @@ enum PakFormatInspector {
     }
 
     private static func bspDetails(_ data: Data) -> [PakFormatDetail] {
-        guard let version = int32LE(data, at: 0), version == 29 || version == 30 else { return [] }
+        guard let version = int32LE(data, at: 0) else { return [] }
+        let magic = ascii(data, at: 0, length: 4)
+        let format: String
+        switch version {
+        case 29: format = "Quake BSP level"
+        case 30: format = "GoldSrc BSP level"
+        case 23: format = "Quake 64 BSP level"
+        default:
+            if magic == "BSP2" {
+                format = "Quake BSP2 level"
+            } else if magic == "2PSB" {
+                format = "Quake BSP2-RMQ level"
+            } else {
+                return []
+            }
+        }
 
         var details = [
-            detail("Format", version == 29 ? "Quake BSP level" : "GoldSrc BSP level"),
-            detail("Version", String(version)),
+            detail("Format", format),
+            detail("Version", magic == "BSP2" || magic == "2PSB" ? magic : String(version)),
         ]
 
         if let description = bspWorldspawnMessage(data) {
@@ -121,7 +761,11 @@ enum PakFormatInspector {
         if let vertices = bspLumpCount(data, index: 3, recordSize: 12) {
             details.append(detail("Vertices", formatted(vertices)))
         }
-        if let faces = bspLumpCount(data, index: 7, recordSize: 20) {
+        if let faces = bspLumpCount(
+            data,
+            index: 7,
+            recordSize: magic == "BSP2" || magic == "2PSB" ? 28 : 20
+        ) {
             details.append(detail("Faces", formatted(faces)))
         }
         if let models = bspLumpCount(data, index: 14, recordSize: 64) {
@@ -286,14 +930,27 @@ enum PakFormatInspector {
             preferredLabels = ["Screen Size"]
         case "dem":
             preferredLabels = ["Map", "Maps", "Duration"]
-        case "mdl", "spr":
-            preferredLabels = ["Skin Size", "Canvas Size", "Frames"]
-        case "wav", "mp3":
-            preferredLabels = ["Duration", "Channels", "Sample Rate", "Bit Rate"]
+        case "sav":
+            preferredLabels = ["Map", "Skill", "Duration"]
+        case "mdl", "md3", "md5", "md5mesh", "md5anim", "spr":
+            preferredLabels = [
+                "Skin Size", "Canvas Size", "Frames", "Meshes", "Surfaces", "Triangles",
+            ]
+        case "wav", "mp3", "flac", "ogg", "opus", "it", "s3m", "xm", "mod", "umx":
+            preferredLabels = ["Duration", "Channels", "Sample Rate", "Bit Rate", "Patterns"]
+        case "lit":
+            preferredLabels = ["Samples", "Version"]
+        case "vis":
+            preferredLabels = ["Maps", "Visibility Data"]
+        case "nav":
+            preferredLabels = ["Format", "Data Size"]
+        case "dds":
+            preferredLabels = ["Dimensions", "Compression", "Mipmaps"]
         case "wad":
             preferredLabels = ["Entries"]
-        case "cfg", "csv", "def", "ent", "ini", "json", "loc", "log", "map", "md",
-             "menu", "qc", "rc", "shader", "src", "txt", "xml", "yaml", "yml":
+        case "cfg", "csv", "def", "ent", "fgd", "ini", "json", "loc", "log", "map",
+             "md", "menu", "pts", "qc", "rc", "rtlights", "scr", "shader", "skin",
+             "src", "txt", "xml", "yaml", "yml":
             preferredLabels = ["Lines", "Encoding"]
         default:
             preferredLabels = ["Dimensions", "Canvas Size", "Color Depth", "Bit Depth", "Frames"]
@@ -321,8 +978,12 @@ enum PakFormatInspector {
         let hiddenPrefixes = ["Duration:", "Description:", "Dimensions:"]
         return summary(fileName: fileName, data: data, fileSize: fileSize)
             .components(separatedBy: "  •  ")
-            .filter { part in
-                !hiddenPrefixes.contains(where: { part.hasPrefix($0) })
+            .map { part in
+                guard let prefix = hiddenPrefixes.first(where: { part.hasPrefix($0) }) else {
+                    return part
+                }
+                return part.dropFirst(prefix.count)
+                    .trimmingCharacters(in: .whitespaces)
             }
             .joined(separator: "  •  ")
     }
@@ -750,8 +1411,10 @@ enum PakFormatInspector {
         let languages: [String: String] = [
             "cfg": "Quake configuration", "rc": "Quake console script",
             "src": "qcc source list", "loc": "QuakeWorld locations",
-            "ent": "Quake entity definitions", "map": "Quake map source",
-            "qc": "QuakeC source", "shader": "Shader script", "json": "JSON", "xml": "XML",
+            "ent": "Quake entity definitions", "fgd": "Game definition",
+            "map": "Quake map source", "pts": "Quake leak trail", "qc": "QuakeC source",
+            "rtlights": "Quake real-time lights", "scr": "Quake console script",
+            "shader": "Shader script", "skin": "Quake III skin mapping", "json": "JSON", "xml": "XML",
             "yaml": "YAML", "yml": "YAML", "csv": "CSV", "md": "Markdown",
         ]
 
@@ -822,6 +1485,12 @@ enum PakFormatInspector {
         "sav": "A Quake savegame.",
         "skin": "A Quake III skin file, mapping each surface of a model to a texture.",
         "shader": "A Quake III shader script describing how a texture is drawn.",
+        "fgd": "Game and entity definitions used by level editors.",
+        "pts": "A point-by-point leak trail written by a map compiler.",
+        "rtlights": "External real-time lights for the level of the same name.",
+        "scr": "A console command script.",
+        "vis": "External visibility and leaf data for one or more Quake levels.",
+        "nav": "Bot navigation data for the level of the same name.",
     ]
 
     private static func purpose(lowerName: String, ext: String) -> String? {

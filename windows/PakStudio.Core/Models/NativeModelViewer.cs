@@ -36,6 +36,10 @@ public sealed record ModelStatistics(
 
 public sealed record ModelTextureRequest(int Index, string Surface, string Name);
 
+public sealed record ModelSkin(byte[] RgbaPixels, int Width, int Height);
+
+public sealed record EmbeddedModelTexture(string Name, byte[] RgbaPixels, int Width, int Height);
+
 /// <summary>
 /// Cross-platform managed owner for PakScape's private model viewer, which parses
 /// MDL, MD3, and MD5 meshes plus SPR sprites and BSP brush models, and software
@@ -173,6 +177,55 @@ public sealed class NativeModelViewer : IDisposable
         return NativeMethods.ModelSetSkin(_model, skinIndex) == 0;
     }
 
+    public ModelSkin? GetSkin(int skinIndex)
+    {
+        ThrowIfDisposed();
+        if (NativeMethods.ModelGetSkinSize(_model, skinIndex, out var width, out var height) != 0 ||
+            width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var byteCount = checked(width * height * 4);
+        var pixels = new byte[byteCount];
+        return NativeMethods.ModelCopySkinRgba(
+            _model, skinIndex, pixels, (nuint)pixels.Length) == 0
+            ? new ModelSkin(pixels, width, height)
+            : null;
+    }
+
+    public int EmbeddedTextureCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return NativeMethods.ModelTextureCount(_model);
+        }
+    }
+
+    public EmbeddedModelTexture? GetEmbeddedTexture(int textureIndex)
+    {
+        ThrowIfDisposed();
+        var nameBytes = new byte[256];
+        if (NativeMethods.ModelTextureName(
+                _model, textureIndex, nameBytes, (nuint)nameBytes.Length) != 0 ||
+            NativeMethods.ModelGetTextureSize(
+                _model, textureIndex, out var width, out var height) != 0 ||
+            width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var pixels = new byte[checked(width * height * 4)];
+        if (NativeMethods.ModelCopyTextureRgba(
+                _model, textureIndex, pixels, (nuint)pixels.Length) != 0)
+        {
+            return null;
+        }
+
+        return new EmbeddedModelTexture(DecodeError(nameBytes), pixels, width, height);
+    }
+
     public bool ShowInteractionPrompt
     {
         get
@@ -197,6 +250,24 @@ public sealed class NativeModelViewer : IDisposable
         {
             ThrowIfDisposed();
             NativeMethods.ViewSetAutoRotate(_view, value ? 1 : 0);
+        }
+    }
+
+    public bool AnimationEnabled
+    {
+        set
+        {
+            ThrowIfDisposed();
+            NativeMethods.ViewSetAnimationEnabled(_view, value ? 1 : 0);
+        }
+    }
+
+    public double AnimationSpeed
+    {
+        set
+        {
+            ThrowIfDisposed();
+            NativeMethods.ViewSetAnimationSpeed(_view, (float)value);
         }
     }
 
@@ -419,6 +490,44 @@ public sealed class NativeModelViewer : IDisposable
         [DllImport(LibraryName, EntryPoint = "pkm_model_set_skin", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int ModelSetSkin(SafeModelHandle model, int skinIndex);
 
+        [DllImport(LibraryName, EntryPoint = "pkm_model_get_skin_size", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelGetSkinSize(
+            SafeModelHandle model,
+            int skinIndex,
+            out int width,
+            out int height);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_model_copy_skin_rgba", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelCopySkinRgba(
+            SafeModelHandle model,
+            int skinIndex,
+            [Out] byte[] rgbaPixels,
+            nuint rgbaSize);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_model_texture_count", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelTextureCount(SafeModelHandle model);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_model_texture_name", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelTextureName(
+            SafeModelHandle model,
+            int textureIndex,
+            [Out] byte[] name,
+            nuint nameSize);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_model_get_texture_size", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelGetTextureSize(
+            SafeModelHandle model,
+            int textureIndex,
+            out int width,
+            out int height);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_model_copy_texture_rgba", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ModelCopyTextureRgba(
+            SafeModelHandle model,
+            int textureIndex,
+            [Out] byte[] rgbaPixels,
+            nuint rgbaSize);
+
         [DllImport(LibraryName, EntryPoint = "pkm_view_create", CallingConvention = CallingConvention.Cdecl)]
         internal static extern SafeModelViewHandle ViewCreate(SafeModelHandle model);
 
@@ -430,6 +539,12 @@ public sealed class NativeModelViewer : IDisposable
 
         [DllImport(LibraryName, EntryPoint = "pkm_view_set_auto_rotate", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void ViewSetAutoRotate(SafeModelViewHandle view, int enabled);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_view_set_animation_enabled", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void ViewSetAnimationEnabled(SafeModelViewHandle view, int enabled);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_view_set_animation_speed", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void ViewSetAnimationSpeed(SafeModelViewHandle view, float speed);
 
         [DllImport(LibraryName, EntryPoint = "pkm_view_begin_interaction", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void ViewBeginInteraction(SafeModelViewHandle view);

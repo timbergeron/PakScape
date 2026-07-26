@@ -559,6 +559,25 @@ struct PakIconView: NSViewRepresentable {
             openItem.representedObject = node
             menu.addItem(openItem)
 
+            let quickPreviewItem = NSMenuItem(
+                title: "Quick Preview",
+                action: #selector(quickPreview(_:)),
+                keyEquivalent: ""
+            )
+            quickPreviewItem.target = self
+            menu.addItem(quickPreviewItem)
+
+            if parent.viewModel.canPreviewSkybox(node) {
+                let skyboxItem = NSMenuItem(
+                    title: "View Skybox",
+                    action: #selector(viewSkybox(_:)),
+                    keyEquivalent: ""
+                )
+                skyboxItem.target = self
+                skyboxItem.representedObject = node
+                menu.addItem(skyboxItem)
+            }
+
             let infoItem = NSMenuItem(title: "Get Info", action: #selector(getInfo(_:)), keyEquivalent: "")
             infoItem.target = self
             infoItem.representedObject = node
@@ -575,6 +594,54 @@ struct PakIconView: NSViewRepresentable {
                     )
                     formatItem.target = self
                     formatItem.representedObject = PakImageSaveRequest(node: node, format: format)
+                    saveAsMenu.addItem(formatItem)
+                }
+                saveAsItem.submenu = saveAsMenu
+                menu.addItem(saveAsItem)
+            }
+            if parent.viewModel.canSaveModelSkinAs(node) {
+                let saveAsItem = NSMenuItem(title: "Save Model Skins As", action: nil, keyEquivalent: "")
+                let saveAsMenu = NSMenu(title: "Save Model Skins As")
+                for format in PakImageFormat.allCases {
+                    let formatItem = NSMenuItem(
+                        title: format.menuTitle,
+                        action: #selector(saveModelSkinsAs(_:)),
+                        keyEquivalent: ""
+                    )
+                    formatItem.target = self
+                    formatItem.representedObject = PakModelSkinSaveRequest(node: node, format: format)
+                    saveAsMenu.addItem(formatItem)
+                }
+                saveAsItem.submenu = saveAsMenu
+                menu.addItem(saveAsItem)
+            }
+            if parent.viewModel.canSaveBspTexturesAs(node) {
+                let saveAsItem = NSMenuItem(title: "Save BSP Textures As", action: nil, keyEquivalent: "")
+                let saveAsMenu = NSMenu(title: "Save BSP Textures As")
+                for format in PakImageFormat.allCases {
+                    let formatItem = NSMenuItem(
+                        title: format.menuTitle,
+                        action: #selector(saveBspTexturesAs(_:)),
+                        keyEquivalent: ""
+                    )
+                    formatItem.target = self
+                    formatItem.representedObject = PakBspTextureSaveRequest(node: node, format: format)
+                    saveAsMenu.addItem(formatItem)
+                }
+                saveAsItem.submenu = saveAsMenu
+                menu.addItem(saveAsItem)
+            }
+            if parent.viewModel.canSaveWadTexturesAs(node) {
+                let saveAsItem = NSMenuItem(title: "Save WAD Textures As", action: nil, keyEquivalent: "")
+                let saveAsMenu = NSMenu(title: "Save WAD Textures As")
+                for format in PakImageFormat.allCases {
+                    let formatItem = NSMenuItem(
+                        title: format.menuTitle,
+                        action: #selector(saveWadTexturesAs(_:)),
+                        keyEquivalent: ""
+                    )
+                    formatItem.target = self
+                    formatItem.representedObject = PakWadTextureSaveRequest(node: node, format: format)
                     saveAsMenu.addItem(formatItem)
                 }
                 saveAsItem.submenu = saveAsMenu
@@ -630,6 +697,15 @@ struct PakIconView: NSViewRepresentable {
             open(node: node)
         }
 
+        @objc private func quickPreview(_ sender: NSMenuItem) {
+            quickLookSelection()
+        }
+
+        @objc private func viewSkybox(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? PakNode else { return }
+            parent.viewModel.showSkyboxPreview(for: node)
+        }
+
         @objc private func getInfo(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? PakNode else { return }
             parent.onGetInfo(node)
@@ -638,6 +714,21 @@ struct PakIconView: NSViewRepresentable {
         @objc private func saveImageAs(_ sender: NSMenuItem) {
             guard let request = sender.representedObject as? PakImageSaveRequest else { return }
             parent.viewModel.saveImageAs(request.node, format: request.format)
+        }
+
+        @objc private func saveModelSkinsAs(_ sender: NSMenuItem) {
+            guard let request = sender.representedObject as? PakModelSkinSaveRequest else { return }
+            parent.viewModel.saveModelSkinsAs(request.node, format: request.format)
+        }
+
+        @objc private func saveBspTexturesAs(_ sender: NSMenuItem) {
+            guard let request = sender.representedObject as? PakBspTextureSaveRequest else { return }
+            parent.viewModel.saveBspTexturesAs(request.node, format: request.format)
+        }
+
+        @objc private func saveWadTexturesAs(_ sender: NSMenuItem) {
+            guard let request = sender.representedObject as? PakWadTextureSaveRequest else { return }
+            parent.viewModel.saveWadTexturesAs(request.node, format: request.format)
         }
 
         @objc private func cutSelection(_ sender: NSMenuItem) {

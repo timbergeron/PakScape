@@ -11,7 +11,7 @@ public sealed record ArchiveMetadataDetail(string Label, string Value);
 
 public sealed record ArchiveMetadata(IReadOnlyList<ArchiveMetadataDetail> Details, string Summary)
 {
-    private static readonly string[] DetailsColumnLabelsToHide =
+    private static readonly string[] DetailsColumnPrefixesToHide =
         ["Duration:", "Description:", "Dimensions:"];
 
     public static ArchiveMetadata Empty { get; } = new([], string.Empty);
@@ -22,8 +22,12 @@ public sealed record ArchiveMetadata(IReadOnlyList<ArchiveMetadataDetail> Detail
         "  •  ",
         Summary
             .Split("  •  ", StringSplitOptions.RemoveEmptyEntries)
-            .Where(part => !DetailsColumnLabelsToHide.Any(
-                label => part.StartsWith(label, StringComparison.Ordinal))));
+            .Select(part =>
+            {
+                var prefix = DetailsColumnPrefixesToHide.FirstOrDefault(
+                    candidate => part.StartsWith(candidate, StringComparison.Ordinal));
+                return prefix is null ? part : part[prefix.Length..].TrimStart();
+            }));
 
     public string DisplayText => string.Join(
         Environment.NewLine,
@@ -39,11 +43,29 @@ public static partial class ArchiveMetadataInspector
     public const int MaximumInspectionBytes = 1024 * 1024;
 
     /// <summary>
+    /// Large BSPs can place their entity lump, including the worldspawn title, after
+    /// the first megabyte even though their fixed header is at the start.
+    /// </summary>
+    public const int MaximumBspInspectionBytes = 4 * 1024 * 1024;
+
+    /// <summary>
     /// Demos are read frame by frame rather than sampled, so the whole recording has to be
     /// available for the duration and the closing scores to be right. Longer recordings than
     /// this still describe themselves, but report their length as a lower bound.
     /// </summary>
     public const int MaximumDemoInspectionBytes = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// Ogg duration lives in the final page rather than the identification header. Most
+    /// Quake music fits inside this bound; larger files still report their stream format.
+    /// </summary>
+    public const int MaximumAudioInspectionBytes = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// MD3 surface headers are chained through each surface's complete payload, so the
+    /// inspector needs the whole ordinary model to total vertices, triangles, and shaders.
+    /// </summary>
+    public const int MaximumModelInspectionBytes = 8 * 1024 * 1024;
 
     private const int MaximumListedPlayers = 8;
 
@@ -55,9 +77,9 @@ public static partial class ArchiveMetadataInspector
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".arena", ".cfg", ".csv", ".def", ".ent", ".ini", ".json", ".loc", ".log",
-        ".map", ".md", ".menu", ".qc", ".rc", ".shader", ".src", ".txt", ".xml",
-        ".yaml", ".yml",
+        ".arena", ".cfg", ".csv", ".def", ".ent", ".fgd", ".ini", ".json", ".loc",
+        ".log", ".map", ".md", ".menu", ".pts", ".qc", ".rc", ".rtlights", ".scr",
+        ".shader", ".skin", ".src", ".txt", ".xml", ".yaml", ".yml",
     };
 
     private static readonly HashSet<string> ExcludedBrushModels = new(StringComparer.OrdinalIgnoreCase)
@@ -93,16 +115,29 @@ public static partial class ArchiveMetadataInspector
     private static ArchiveMetadata InspectCore(ArchiveFileNode file)
     {
         var extension = file.Extension.ToLowerInvariant();
-        var budget = extension == ".dem" ? MaximumDemoInspectionBytes : MaximumInspectionBytes;
+        var budget = extension switch
+        {
+            ".bsp" => MaximumBspInspectionBytes,
+            ".dem" => MaximumDemoInspectionBytes,
+            ".md3" => MaximumModelInspectionBytes,
+            ".ogg" or ".opus" => MaximumAudioInspectionBytes,
+            _ => MaximumInspectionBytes,
+        };
         var data = file.Data.AsSpan(0, Math.Min(file.Data.Length, budget));
         List<ArchiveMetadataDetail> details = extension switch
         {
             ".bsp" => InspectBsp(data),
             ".dem" => InspectDemo(data),
-            ".mdl" => InspectMdl(data),
+            ".mdl" => OrMagic(InspectMdl(data), data),
+            ".md3" => InspectMd3(data),
+            ".md5" or ".md5mesh" or ".md5anim" => InspectMd5(data),
             ".spr" => InspectSprite(data),
             ".wad" => InspectWad(data),
+            ".lit" => InspectLit(data, file.Data.Length),
+            ".vis" => InspectVis(data, file.Data.Length),
+            ".nav" => InspectNav(data, file.Data.Length),
             ".lmp" => InspectLmp(file.Name, data, file.Data.Length),
+            ".dds" => InspectDds(data),
             ".pcx" => InspectPcx(data),
             ".tga" => InspectTga(data),
             ".png" => InspectPng(data),
@@ -111,6 +146,14 @@ public static partial class ArchiveMetadataInspector
             ".bmp" => InspectBitmap(data),
             ".wav" => InspectWave(data),
             ".mp3" => InspectMp3(data, file.Data.Length),
+            ".flac" => InspectFlac(data),
+            ".ogg" or ".opus" => InspectOgg(data, file.Data.Length),
+            ".it" => InspectIt(data),
+            ".s3m" => InspectS3m(data),
+            ".xm" => InspectXm(data),
+            ".mod" => InspectMod(data),
+            ".umx" => InspectUmx(data),
+            ".sav" => InspectSavegame(data),
             /* Neither extension is exclusively Quake's, so both fall back to the magic. */
             ".dat" => OrMagic(InspectQuakeCProgram(data), data),
             ".bin" => OrMagic(InspectDosTextScreen(data, file.Data.Length), data),
@@ -127,6 +170,80 @@ public static partial class ArchiveMetadataInspector
 
         return new ArchiveMetadata(details, BuildSummary(extension, details));
     }
+
+    private static List<ArchiveMetadataDetail> InspectSavegame(ReadOnlySpan<byte> data)
+    {
+        var text = Encoding.Latin1.GetString(data).TrimStart('\uFEFF').Replace("\r", string.Empty);
+        var lines = text.Split('\n');
+        if (lines.Length == 0 ||
+            !int.TryParse(lines[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var version) ||
+            version is not (5 or 6))
+        {
+            return [];
+        }
+
+        var cursor = 1;
+        string? gameDirectory = null;
+        if (version == 6)
+        {
+            if (cursor >= lines.Length)
+            {
+                return [];
+            }
+            gameDirectory = lines[cursor++].Trim();
+        }
+
+        /* comment + 16 spawn parms + skill + map + elapsed time */
+        if (lines.Length - cursor < 20)
+        {
+            return [];
+        }
+
+        var comment = lines[cursor++].Replace('_', ' ').Trim();
+        cursor += 16;
+        if (!int.TryParse(lines[cursor++].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var skill))
+        {
+            return [];
+        }
+        var map = lines[cursor++].Trim();
+        if (map.Length == 0 ||
+            !double.TryParse(
+                lines[cursor].Trim(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var elapsedTime) ||
+            !double.IsFinite(elapsedTime))
+        {
+            return [];
+        }
+
+        List<ArchiveMetadataDetail> details =
+        [
+            Detail("Format", version == 6 ? "Quake remaster savegame" : "Quake savegame"),
+            Detail("Version", version.ToString(CultureInfo.InvariantCulture)),
+        ];
+        if (comment.Length > 0)
+        {
+            details.Add(Detail("Description", comment));
+        }
+        details.Add(Detail("Map", map));
+        details.Add(Detail("Skill", SkillName(skill)));
+        details.Add(Detail("Duration", FormatDuration(elapsedTime)));
+        if (!string.IsNullOrEmpty(gameDirectory))
+        {
+            details.Add(Detail("Mod", gameDirectory));
+        }
+        return details;
+    }
+
+    private static string SkillName(int skill) => skill switch
+    {
+        0 => "Easy",
+        1 => "Normal",
+        2 => "Hard",
+        3 => "Nightmare",
+        _ => $"Skill {skill}",
+    };
 
     /// <summary>
     /// Reads the header qcc writes at the front of a compiled QuakeC program. The CRC is
@@ -263,6 +380,12 @@ public static partial class ArchiveMetadataInspector
             [".sav"] = "A Quake savegame.",
             [".skin"] = "A Quake III skin file, mapping each surface of a model to a texture.",
             [".shader"] = "A Quake III shader script describing how a texture is drawn.",
+            [".fgd"] = "Game and entity definitions used by level editors.",
+            [".pts"] = "A point-by-point leak trail written by a map compiler.",
+            [".rtlights"] = "External real-time lights for the level of the same name.",
+            [".scr"] = "A console command script.",
+            [".vis"] = "External visibility and leaf data for one or more Quake levels.",
+            [".nav"] = "Bot navigation data for the level of the same name.",
         };
 
     private static string? DescribePurpose(string fileName, string extension)
@@ -277,15 +400,32 @@ public static partial class ArchiveMetadataInspector
 
     private static List<ArchiveMetadataDetail> InspectBsp(ReadOnlySpan<byte> data)
     {
-        if (!TryInt32(data, 0, out var version) || version is not (29 or 30))
+        if (!TryInt32(data, 0, out var version))
+        {
+            return [];
+        }
+
+        var magic = Ascii(data, 0, 4);
+        var format = version switch
+        {
+            29 => "Quake BSP level",
+            30 => "GoldSrc BSP level",
+            23 => "Quake 64 BSP level",
+            _ when magic == "BSP2" => "Quake BSP2 level",
+            _ when magic == "2PSB" => "Quake BSP2-RMQ level",
+            _ => null,
+        };
+        if (format is null)
         {
             return [];
         }
 
         List<ArchiveMetadataDetail> details =
         [
-            Detail("Format", version == 29 ? "Quake BSP level" : "GoldSrc BSP level"),
-            Detail("Version", version.ToString(CultureInfo.InvariantCulture)),
+            Detail("Format", format),
+            Detail("Version", magic is "BSP2" or "2PSB"
+                ? magic
+                : version.ToString(CultureInfo.InvariantCulture)),
         ];
         if (TryBspLump(data, 0, out var entityOffset, out var entityLength))
         {
@@ -308,7 +448,7 @@ public static partial class ArchiveMetadataInspector
             }
         }
         AddBspCount(details, data, 3, 12, "Vertices");
-        AddBspCount(details, data, 7, 20, "Faces");
+        AddBspCount(details, data, 7, magic is "BSP2" or "2PSB" ? 28 : 20, "Faces");
         AddBspCount(details, data, 14, 64, "Models");
         if (TryBspLump(data, 2, out var textureOffset, out _) &&
             TryInt32(data, textureOffset, out var textures) &&
@@ -774,8 +914,14 @@ public static partial class ArchiveMetadataInspector
     private static List<ArchiveMetadataDetail> InspectMagic(ReadOnlySpan<byte> data)
     {
         if (HasAscii(data, 0, "IDPO")) return InspectMdl(data);
+        if (HasAscii(data, 0, "IDP3")) return InspectMd3(data);
         if (HasAscii(data, 0, "IDSP")) return InspectSprite(data);
         if (HasAscii(data, 0, "WAD2") || HasAscii(data, 0, "WAD3")) return InspectWad(data);
+        if (HasAscii(data, 0, "QLIT")) return InspectLit(data, data.Length);
+        if (HasAscii(data, 0, "NAV2")) return InspectNav(data, data.Length);
+        if (HasAscii(data, 0, "DDS ")) return InspectDds(data);
+        if (HasAscii(data, 0, "fLaC")) return InspectFlac(data);
+        if (HasAscii(data, 0, "OggS")) return InspectOgg(data, data.Length);
         if (HasAscii(data, 0, "RIFF") && HasAscii(data, 8, "WAVE")) return InspectWave(data);
         return [];
     }
@@ -796,8 +942,16 @@ public static partial class ArchiveMetadataInspector
             ".dat" => ["Functions", "Entity Fields"],
             ".bin" => ["Screen Size"],
             ".dem" => ["Map", "Maps", "Duration"],
-            ".mdl" or ".spr" => ["Skin Size", "Canvas Size", "Frames"],
-            ".wav" or ".mp3" => ["Duration", "Channels", "Sample Rate", "Bit Rate"],
+            ".sav" => ["Map", "Skill", "Duration"],
+            ".mdl" or ".md3" or ".md5" or ".md5mesh" or ".md5anim" or ".spr" =>
+                ["Skin Size", "Canvas Size", "Frames", "Meshes", "Surfaces", "Triangles"],
+            ".wav" or ".mp3" or ".flac" or ".ogg" or ".opus" or
+                ".it" or ".s3m" or ".xm" or ".mod" or ".umx" =>
+                ["Duration", "Channels", "Sample Rate", "Bit Rate", "Patterns"],
+            ".lit" => ["Samples", "Version"],
+            ".vis" => ["Maps", "Visibility Data"],
+            ".nav" => ["Format", "Data Size"],
+            ".dds" => ["Dimensions", "Compression", "Mipmaps"],
             ".wad" => ["Entries"],
             _ when TextExtensions.Contains(extension) => ["Lines", "Encoding"],
             _ => ["Dimensions", "Canvas Size", "Color Depth", "Bit Depth", "Frames"],
@@ -881,9 +1035,14 @@ public static partial class ArchiveMetadataInspector
         ".src" => "qcc source list",
         ".loc" => "QuakeWorld locations",
         ".ent" => "Quake entity definitions",
+        ".fgd" => "Game definition",
         ".map" => "Quake map source",
+        ".pts" => "Quake leak trail",
         ".qc" => "QuakeC source",
+        ".rtlights" => "Quake real-time lights",
+        ".scr" => "Quake console script",
         ".shader" => "Shader script",
+        ".skin" => "Quake III skin mapping",
         ".json" => "JSON",
         ".xml" => "XML",
         ".yaml" or ".yml" => "YAML",

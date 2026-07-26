@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 struct ModelPreviewItem {
     let name: String
@@ -95,7 +96,14 @@ final class ModelPreviewController: NSViewController {
     private let previousButton = NSButton()
     private let nextButton = NSButton()
     private let skinPicker = NSPopUpButton()
+    private let viewSkinButton = NSButton()
+    private let copySkinButton = NSButton()
     private let resetButton = NSButton()
+    private let animateButton = NSButton()
+    private let speedPicker = NSPopUpButton()
+    private let skinBlurView = NSVisualEffectView()
+    private let skinImageView = NSImageView()
+    private var isViewingSkin = false
 
     let renderView = ModelRenderView()
 
@@ -139,12 +147,37 @@ final class ModelPreviewController: NSViewController {
         skinPicker.action = #selector(skinChanged)
         skinPicker.toolTip = "Skin"
 
+        configure(button: viewSkinButton, title: "View skin", tooltip: "View the selected MDL skin")
+        viewSkinButton.target = self
+        viewSkinButton.action = #selector(toggleSkinView)
+
+        copySkinButton.translatesAutoresizingMaskIntoConstraints = false
+        copySkinButton.bezelStyle = .rounded
+        copySkinButton.title = "Copy skin"
+        copySkinButton.target = self
+        copySkinButton.action = #selector(copySkin)
+        copySkinButton.toolTip = "Copy the selected MDL skin image"
+
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
         resetButton.title = "Reset view"
         resetButton.target = self
         resetButton.action = #selector(resetView)
         resetButton.toolTip = "Frame the model again (R)"
+
+        animateButton.translatesAutoresizingMaskIntoConstraints = false
+        animateButton.setButtonType(.switch)
+        animateButton.title = "Animate"
+        animateButton.state = .on
+        animateButton.target = self
+        animateButton.action = #selector(animationToggled)
+
+        speedPicker.translatesAutoresizingMaskIntoConstraints = false
+        speedPicker.addItems(withTitles: ["0.25×", "0.5×", "1×", "2×", "4×"])
+        speedPicker.selectItem(at: 2)
+        speedPicker.target = self
+        speedPicker.action = #selector(animationSpeedChanged)
+        speedPicker.toolTip = "Animation speed"
 
         positionLabel.font = .systemFont(ofSize: 12)
         positionLabel.textColor = .secondaryLabelColor
@@ -158,7 +191,8 @@ final class ModelPreviewController: NSViewController {
         navigation.spacing = 4
 
         let footer = NSStackView(views: [
-            navigation, skinPicker, resetButton, positionLabel, closeHint,
+            navigation, skinPicker, viewSkinButton, copySkinButton, resetButton,
+            animateButton, speedPicker, positionLabel, closeHint,
         ])
         footer.orientation = .horizontal
         footer.spacing = 10
@@ -176,6 +210,18 @@ final class ModelPreviewController: NSViewController {
 
         renderView.translatesAutoresizingMaskIntoConstraints = false
         surface.addSubview(renderView)
+        skinBlurView.translatesAutoresizingMaskIntoConstraints = false
+        skinBlurView.blendingMode = .withinWindow
+        skinBlurView.material = .contentBackground
+        skinBlurView.state = .active
+        skinBlurView.isHidden = true
+        surface.addSubview(skinBlurView)
+        skinImageView.translatesAutoresizingMaskIntoConstraints = false
+        skinImageView.imageScaling = .scaleProportionallyUpOrDown
+        skinImageView.isHidden = true
+        skinImageView.wantsLayer = true
+        skinImageView.layer?.magnificationFilter = .nearest
+        surface.addSubview(skinImageView)
 
         for view in [header, surface, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -187,6 +233,14 @@ final class ModelPreviewController: NSViewController {
             renderView.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
             renderView.topAnchor.constraint(equalTo: surface.topAnchor),
             renderView.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
+            skinBlurView.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            skinBlurView.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            skinBlurView.topAnchor.constraint(equalTo: surface.topAnchor),
+            skinBlurView.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
+            skinImageView.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            skinImageView.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            skinImageView.topAnchor.constraint(equalTo: surface.topAnchor),
+            skinImageView.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
 
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
@@ -217,7 +271,32 @@ final class ModelPreviewController: NSViewController {
         button.toolTip = tooltip
     }
 
+    private func makeSkinContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        let saveAsItem = NSMenuItem(title: "Save Skin As", action: nil, keyEquivalent: "")
+        let saveAsMenu = NSMenu(title: "Save Skin As")
+        for format in PakImageFormat.allCases {
+            let item = NSMenuItem(
+                title: format.menuTitle,
+                action: #selector(saveSkinAs(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = format.rawValue as NSString
+            saveAsMenu.addItem(item)
+        }
+        saveAsItem.submenu = saveAsMenu
+        menu.addItem(saveAsItem)
+        return menu
+    }
+
     private func showCurrentItem() {
+        isViewingSkin = false
+        skinImageView.image = nil
+        skinImageView.isHidden = true
+        skinBlurView.isHidden = true
+        viewSkinButton.title = "View skin"
+
         let item = items[index]
         titleLabel.stringValue = item.name
         positionLabel.stringValue = items.count == 1
@@ -246,13 +325,31 @@ final class ModelPreviewController: NSViewController {
             } else {
                 skinPicker.isHidden = true
             }
+            let hidesSkinActions = viewer.format != .mdl || viewer.skinCount == 0
+            viewSkinButton.isHidden = hidesSkinActions
+            copySkinButton.isHidden = hidesSkinActions
+            renderView.menu = hidesSkinActions ? nil : makeSkinContextMenu()
+            skinImageView.menu = hidesSkinActions ? nil : makeSkinContextMenu()
             resetButton.isEnabled = true
+            let hidesAnimation = viewer.frameCount <= 1
+            animateButton.isHidden = hidesAnimation
+            speedPicker.isHidden = hidesAnimation
+            animateButton.state = .on
+            speedPicker.selectItem(at: 2)
+            viewer.setAnimationEnabled(true)
+            viewer.setAnimationSpeed(1)
         } catch {
             /* Truncated models still have a skin worth showing, as on the other editions. */
             renderView.attach(viewer: nil, fallbackImage: item.fallbackImage())
             subtitleLabel.stringValue = error.localizedDescription
             skinPicker.isHidden = true
+            viewSkinButton.isHidden = true
+            copySkinButton.isHidden = true
+            renderView.menu = nil
+            skinImageView.menu = nil
             resetButton.isEnabled = false
+            animateButton.isHidden = true
+            speedPicker.isHidden = true
         }
     }
 
@@ -275,11 +372,92 @@ final class ModelPreviewController: NSViewController {
         renderView.viewer?.reset()
     }
 
+    @objc private func animationToggled() {
+        renderView.viewer?.setAnimationEnabled(animateButton.state == .on)
+    }
+
+    @objc private func animationSpeedChanged() {
+        let speeds: [Float] = [0.25, 0.5, 1, 2, 4]
+        guard speedPicker.indexOfSelectedItem >= 0 else { return }
+        renderView.viewer?.setAnimationSpeed(speeds[speedPicker.indexOfSelectedItem])
+    }
+
     @objc private func skinChanged() {
         guard let viewer = renderView.viewer, skinPicker.indexOfSelectedItem >= 0 else { return }
         if viewer.selectSkin(skinPicker.indexOfSelectedItem) {
             subtitleLabel.stringValue = viewer.statusLine
+            if isViewingSkin {
+                skinImageView.image = viewer.selectedSkinImage()
+            }
             renderView.requestRedraw()
+        }
+    }
+
+    @objc private func toggleSkinView() {
+        if isViewingSkin {
+            isViewingSkin = false
+            skinImageView.isHidden = true
+            skinBlurView.isHidden = true
+            viewSkinButton.title = "View skin"
+            renderView.requestRedraw()
+            view.window?.makeFirstResponder(renderView)
+            return
+        }
+
+        guard let image = renderView.viewer?.selectedSkinImage() else {
+            NSSound.beep()
+            return
+        }
+        isViewingSkin = true
+        skinImageView.image = image
+        skinBlurView.isHidden = false
+        skinImageView.isHidden = false
+        viewSkinButton.title = "View model"
+    }
+
+    @objc private func copySkin() {
+        guard let image = renderView.viewer?.selectedSkinImage() else {
+            NSSound.beep()
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if !pasteboard.writeObjects([image]) {
+            NSSound.beep()
+        }
+    }
+
+    @objc private func saveSkinAs(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let format = PakImageFormat(rawValue: rawValue),
+              let viewer = renderView.viewer,
+              let image = viewer.selectedSkinImage() else {
+            NSSound.beep()
+            return
+        }
+
+        do {
+            let data = try PakImageConverter.convert(image: image, to: format)
+            let sourceName = items[index].name as NSString
+            let skinSuffix = viewer.skinCount > 1 ? "_skin\(viewer.skinIndex + 1)" : "_skin"
+            let outputName = sourceName.deletingPathExtension + skinSuffix + "." + format.pathExtension
+            let save = NSSavePanel()
+            save.title = "Save Skin As"
+            save.nameFieldStringValue = outputName
+            if let contentType = UTType(filenameExtension: format.pathExtension) {
+                save.allowedContentTypes = [contentType]
+            }
+            save.canCreateDirectories = true
+            save.begin { response in
+                guard response == .OK, let outputURL = save.url else { return }
+                do {
+                    try data.write(to: outputURL, options: .atomic)
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 
@@ -334,6 +512,7 @@ final class ModelRenderView: NSView {
     private var timer: Timer?
     private var lastFrame = Date()
     private var isPanning = false
+    private var didRightDrag = false
     private let hintLabel = NSTextField(labelWithString: "Drag to orbit • Scroll to zoom • R to reset")
     private let hintBackground = PassThroughView()
     private let fallbackImageView = NSImageView()
@@ -547,15 +726,21 @@ final class ModelRenderView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        didRightDrag = false
         viewer?.beginInteraction()
     }
 
     override func rightMouseDragged(with event: NSEvent) {
+        didRightDrag = true
         viewer?.pan(dx: event.deltaX * inputScale, dy: event.deltaY * inputScale)
     }
 
     override func rightMouseUp(with event: NSEvent) {
         viewer?.endInteraction()
+        if !didRightDrag, let menu {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
+        didRightDrag = false
     }
 
     override func scrollWheel(with event: NSEvent) {

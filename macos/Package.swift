@@ -31,6 +31,7 @@ let package = Package(
                 "PakScape-Bridging-Header.h",
                 "PreferencesView.swift",
                 "QuakeModelViewer.swift",
+                "SkyboxPreviewWindow.swift",
             ],
             sources: [
                 "PakModels.swift",

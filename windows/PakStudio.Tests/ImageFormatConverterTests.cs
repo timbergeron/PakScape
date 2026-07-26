@@ -39,6 +39,24 @@ public sealed class ImageFormatConverterTests
     }
 
     [Theory]
+    [InlineData(ImageSaveFormat.Lmp)]
+    [InlineData(ImageSaveFormat.Png)]
+    [InlineData(ImageSaveFormat.Jpeg)]
+    [InlineData(ImageSaveFormat.Tga)]
+    public void EncodesDecodedRgbaSkins(ImageSaveFormat format)
+    {
+        byte[] pixels = [255, 0, 0, 255, 0, 0, 0, 0];
+
+        var encoded = ImageFormatConverter.EncodeRgba(2, 1, pixels, format);
+
+        Assert.NotEmpty(encoded);
+        var extension = ImageFormatConverter.ExtensionFor(format);
+        var roundTrip = ImageFormatConverter.Convert("skin" + extension, encoded, ImageSaveFormat.Lmp);
+        Assert.Equal(10, roundTrip.Length);
+        Assert.Equal(255, roundTrip[9]);
+    }
+
+    [Theory]
     [InlineData("picture.lmp")]
     [InlineData("picture.jpg")]
     [InlineData("picture.jpeg")]
@@ -47,5 +65,15 @@ public sealed class ImageFormatConverterTests
     public void RecognizesSupportedSources(string fileName)
     {
         Assert.True(ImageFormatConverter.IsSupportedSource(fileName));
+    }
+
+    [Theory]
+    [InlineData("*water", "_water")]
+    [InlineData("maps/wall", "maps_wall")]
+    [InlineData("CON", "_CON")]
+    [InlineData("", "texture3")]
+    public void MakesTextureNamesSafeForExport(string name, string expected)
+    {
+        Assert.Equal(expected, ImageFormatConverter.SafeTextureFileStem(name, 2));
     }
 }

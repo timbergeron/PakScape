@@ -25,6 +25,14 @@ public static class ImageFormatConverter
             ".lmp", ".jpg", ".jpeg", ".png", ".tga",
         };
 
+    private static readonly HashSet<string> ReservedFileStems = new(
+        [
+            "CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
     public static bool IsSupportedSource(string fileName) =>
         SupportedSourceExtensions.Contains(Path.GetExtension(fileName));
 
@@ -50,6 +58,24 @@ public static class ImageFormatConverter
         _ => throw new ArgumentOutOfRangeException(nameof(format)),
     };
 
+    public static string SafeTextureFileStem(string? name, int fallbackIndex)
+    {
+        var value = string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();
+        var invalid = "<>:\"/\\|?*";
+        var cleaned = new string(value.Select(character =>
+            char.IsControl(character) || invalid.Contains(character) ? '_' : character).ToArray())
+            .Trim(' ', '.');
+        if (cleaned.Length == 0)
+        {
+            cleaned = $"texture{fallbackIndex + 1}";
+        }
+        if (ReservedFileStems.Contains(cleaned))
+        {
+            cleaned = "_" + cleaned;
+        }
+        return cleaned;
+    }
+
     public static byte[] Convert(string fileName, byte[] data, ImageSaveFormat format)
     {
         ArgumentNullException.ThrowIfNull(fileName);
@@ -60,6 +86,25 @@ public static class ImageFormatConverter
         }
 
         var image = Decode(fileName, data);
+        return format == ImageSaveFormat.Lmp
+            ? EncodeLmp(image)
+            : EncodeStandardImage(image, format);
+    }
+
+    public static byte[] EncodeRgba(
+        int width,
+        int height,
+        byte[] rgbaPixels,
+        ImageSaveFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(rgbaPixels);
+        ValidateDimensions(width, height);
+        if (rgbaPixels.Length != checked(width * height * 4))
+        {
+            throw new InvalidDataException("The RGBA image buffer has an invalid size.");
+        }
+
+        var image = new RgbaImage(width, height, rgbaPixels);
         return format == ImageSaveFormat.Lmp
             ? EncodeLmp(image)
             : EncodeStandardImage(image, format);

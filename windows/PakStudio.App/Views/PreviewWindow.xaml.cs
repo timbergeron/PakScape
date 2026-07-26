@@ -112,7 +112,7 @@ public partial class PreviewWindow : Window
     {
         try
         {
-            var control = ModelPreviewControl.Create(model);
+            var control = ModelPreviewControl.Create(model, preview.Title);
             _modelPreview = control;
             ModelPanel.Content = control;
             ModelPanel.Visibility = Visibility.Visible;

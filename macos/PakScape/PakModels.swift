@@ -82,6 +82,73 @@ final class PakFile {
     }
 }
 
+/// A complete Quake skybox beside any one of its six image faces.
+///
+/// Engines append `rt`, `bk`, `lf`, `ft`, `up`, and `dn` directly to the sky
+/// name, so both `desertrt.tga` and the common `desert_rt.tga` spelling work.
+struct PakSkyboxFaceSet {
+    enum Face: String, CaseIterable {
+        case right = "rt"
+        case back = "bk"
+        case left = "lf"
+        case front = "ft"
+        case up
+        case down = "dn"
+    }
+
+    static let supportedImageExtensions: Set<String> = [
+        "bmp", "jpeg", "jpg", "pcx", "png", "tga",
+    ]
+
+    let name: String
+    let faces: [Face: PakNode]
+
+    /// SceneKit cube maps use +X, -X, +Y, -Y, +Z, -Z. Quake maps those axes
+    /// to ft, bk, up, dn, rt, lf respectively.
+    var sceneKitFaceNodes: [PakNode] {
+        [.front, .back, .up, .down, .right, .left].compactMap { faces[$0] }
+    }
+
+    init?(selected: PakNode, siblings: [PakNode]) {
+        guard !selected.isFolder else { return nil }
+
+        let selectedName = selected.name as NSString
+        let selectedExtension = selectedName.pathExtension.lowercased()
+        guard Self.supportedImageExtensions.contains(selectedExtension) else { return nil }
+
+        let stem = selectedName.deletingPathExtension
+        guard let selectedFace = Face.allCases.first(where: {
+            stem.lowercased().hasSuffix($0.rawValue)
+        }) else {
+            return nil
+        }
+
+        let baseEnd = stem.index(stem.endIndex, offsetBy: -selectedFace.rawValue.count)
+        let base = String(stem[..<baseEnd])
+        guard !base.isEmpty else { return nil }
+
+        var matched: [Face: PakNode] = [:]
+        for face in Face.allCases {
+            let wantedStem = (base + face.rawValue).lowercased()
+            let candidates = siblings.filter { node in
+                guard !node.isFolder else { return false }
+                let name = node.name as NSString
+                return name.deletingPathExtension.lowercased() == wantedStem
+                    && Self.supportedImageExtensions.contains(name.pathExtension.lowercased())
+            }
+            guard let node = candidates.first(where: {
+                ($0.name as NSString).pathExtension.lowercased() == selectedExtension
+            }) ?? candidates.first else {
+                return nil
+            }
+            matched[face] = node
+        }
+
+        name = base.trimmingCharacters(in: CharacterSet(charactersIn: "_- "))
+        faces = matched
+    }
+}
+
 struct PakNodePlacement {
     let parent: PakNode
     let node: PakNode
@@ -794,9 +861,6 @@ struct PakLoader {
 
             let nameData = data.subdata(in: base ..< base + 56)
             let rawName = asciiStringFromNullTerminated(nameData)
-            let name = try PakPathValidator.normalizeArchiveEntryName(rawName)
-            try registerPath(name, filePaths: &filePaths, folderPaths: &folderPaths)
-
             let filePos = Int(readInt32LE(data, at: base + 56))
             let fileLen = Int(readInt32LE(data, at: base + 60))
 
@@ -804,6 +868,18 @@ struct PakLoader {
                   filePos + fileLen <= data.count else {
                 throw PakError.badDirectory
             }
+
+            // Some PAK tools emit zero-byte entries ending in a slash as
+            // directory markers. They are not files and classic PAK cannot
+            // preserve empty directories, so validate and ignore them.
+            if fileLen == 0, rawName.hasSuffix("/") || rawName.hasSuffix("\\") {
+                _ = try PakPathValidator.normalizeArchiveEntryName(String(rawName.dropLast()))
+                continue
+            }
+
+            let name = try PakPathValidator.normalizeArchiveEntryName(rawName)
+            try registerPath(name, filePaths: &filePaths, folderPaths: &folderPaths)
+
             guard fileLen <= PakSafetyLimits.maximumFileSize else {
                 throw PakError.fileTooLarge(name)
             }

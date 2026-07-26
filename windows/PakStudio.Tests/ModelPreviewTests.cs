@@ -95,6 +95,20 @@ public sealed class ModelPreviewTests
     }
 
     [Fact]
+    public void ViewerExposesTheSelectedMdlSkinForCopying()
+    {
+        using var viewer = NativeModelViewer.Create(TestModels.CreateMdl(), ".mdl");
+
+        var skin = Assert.IsType<ModelSkin>(viewer.GetSkin(0));
+
+        Assert.Equal(4, skin.Width);
+        Assert.Equal(4, skin.Height);
+        Assert.Equal(4 * 4 * 4, skin.RgbaPixels.Length);
+        Assert.Equal(255, skin.RgbaPixels[3]);
+        Assert.Null(viewer.GetSkin(1));
+    }
+
+    [Fact]
     public void OrbitingChangesTheCameraAndResetRestoresIt()
     {
         using var viewer = NativeModelViewer.Create(TestModels.CreateMdl(), ".mdl");
@@ -295,6 +309,15 @@ public sealed class ModelPreviewTests
         Assert.Equal(12, session.Statistics.TriangleCount);
         Assert.Equal(1, session.Statistics.TexturedSurfaceCount);
         Assert.Contains("Quake brush model", session.StatusLine);
+
+        using var viewer = NativeModelViewer.Create(file.Data, ".bsp");
+        Assert.Equal(1, viewer.EmbeddedTextureCount);
+        var texture = Assert.IsType<EmbeddedModelTexture>(viewer.GetEmbeddedTexture(0));
+        Assert.Equal("crate_top", texture.Name);
+        Assert.Equal(8, texture.Width);
+        Assert.Equal(8, texture.Height);
+        Assert.Equal(8 * 8 * 4, texture.RgbaPixels.Length);
+        Assert.Equal(255, texture.RgbaPixels[3]);
     }
 
     [Fact]
@@ -310,6 +333,36 @@ public sealed class ModelPreviewTests
         Assert.False(ArchivePreviewBuilder.SupportsInteractiveModel(file));
         Assert.False(ArchivePreviewBuilder.OpensInQuickPreview(file));
         Assert.NotEqual(ArchivePreviewKind.Model, ArchivePreviewBuilder.Build(file).Kind);
+    }
+
+    [Fact]
+    public void LevelBspOverviewMarksImportantPickups()
+    {
+        var entities =
+            "{\n\"classname\" \"worldspawn\"\n}\n" +
+            "{\n\"classname\" \"info_player_start\"\n\"origin\" \"8 8 16\"\n}\n" +
+            "{\n\"classname\" \"item_armor3\"\n\"origin\" \"0 0 16\"\n}\n";
+        var preview = ArchivePreviewBuilder.Build(
+            new ArchiveFileNode("arena.bsp", TestModels.CreateBsp(entities)));
+
+        var bitmap = Assert.IsType<PreviewBitmap>(preview.Bitmap);
+        var foundRedArmorBadge = false;
+        for (var y = bitmap.Height / 2 - 16; y <= bitmap.Height / 2 + 16; y++)
+        {
+            for (var x = bitmap.Width / 2 - 16; x <= bitmap.Width / 2 + 16; x++)
+            {
+                var offset = y * bitmap.Stride + x * 4;
+                if (bitmap.BgraPixels[offset] == 52 &&
+                    bitmap.BgraPixels[offset + 1] == 52 &&
+                    bitmap.BgraPixels[offset + 2] == 205)
+                {
+                    foundRedArmorBadge = true;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(foundRedArmorBadge);
     }
 
     [Fact]

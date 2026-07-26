@@ -499,7 +499,7 @@ public sealed class PreviewWindow : Window, IDisposable
     {
         try
         {
-            var control = ModelPreviewControl.Create(model);
+            var control = ModelPreviewControl.Create(model, preview.Title);
             _modelPreview = control;
             _modelPanel.Children.Add(control);
             _modelPanel.IsVisible = true;

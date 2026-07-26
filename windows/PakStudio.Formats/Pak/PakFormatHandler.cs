@@ -134,15 +134,24 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         {
             var entryOffset = directoryOffset + (index * DirectoryEntrySize);
             var entryName = ReadEntryName(bytes.Slice(entryOffset, EntryNameLength));
-            var normalizedPath = ValidateAndNormalizeEntryPath(entryName);
-
             var fileOffset = LittleEndianReader.ReadInt32(bytes, entryOffset + EntryNameLength);
             var fileLength = LittleEndianReader.ReadInt32(bytes, entryOffset + EntryNameLength + sizeof(int));
             var fileEnd = (long)fileOffset + fileLength;
             if (fileOffset < 0 || fileLength < 0 || fileEnd > bytes.Length)
             {
-                throw new ArchiveCorruptException($"Entry '{normalizedPath}' has invalid data bounds.");
+                throw new ArchiveCorruptException($"Entry '{entryName}' has invalid data bounds.");
             }
+
+            // Some PAK tools emit zero-byte entries ending in a slash as
+            // directory markers. They are not files and classic PAK cannot
+            // preserve empty directories, so validate and ignore them.
+            if (fileLength == 0 && (entryName.EndsWith('/') || entryName.EndsWith('\\')))
+            {
+                ValidateAndNormalizeEntryPath(entryName[..^1]);
+                continue;
+            }
+
+            var normalizedPath = ValidateAndNormalizeEntryPath(entryName);
             ArchiveSafetyLimits.EnsureFileSize(fileLength, $"PAK entry '{normalizedPath}'");
 
             if (fileLength > 0 && fileOffset < HeaderSize)

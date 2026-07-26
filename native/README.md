@@ -27,6 +27,10 @@ orbit with inertia, bounding-sphere framing, clamped pitch and zoom, pan, an
 idle turntable, and camera-anchored studio lighting.
 Each app only forwards input and blits the BGRA rows the renderer produces.
 
+MDL and MD3 poses are decoded as animations and loop at ten frames per second
+by default. The view API keeps playback separate from the idle turntable and
+lets each host pause it or apply a playback-speed multiplier.
+
 Frames are rasterized in horizontal bands across worker threads, at screen
 resolution while the camera is moving and supersampled once it settles, so
 dragging stays responsive without giving up a clean still image.

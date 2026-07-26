@@ -16,7 +16,7 @@ Each edition uses the platform's native desktop conventions while sharing the sa
 
 - Browse archives as a folder tree, list, or icon grid with inline thumbnails and platform-appropriate file-type icons.
 - Add, rename, move, copy, remove, and export files and folders, with native Undo and Redo on macOS.
-- Press Space to preview selected text, common images, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files.
+- Press Space to preview selected text, common images, and Quake assets, including BSP, LMP, MDL, PCX, SPR, TGA, and WAD files. BSP level overviews label major items and objectives.
 - Inspect QSS-M models — MDL, MD3, and MD5 — in an interactive viewer: drag to orbit, right-drag to pan, scroll or pinch to zoom, and leave it alone to watch it turn. Double-click a model to open it, and MD3 and MD5 skins are loaded from the archive.
 - Watch SPR and SPR32 sprites animate in the same viewer, frame by frame at the rate the file asks for, on a fullbright card you can still orbit.
 - Turn BSP brush models — ammo boxes, health kits, and prefab props — in the same viewer, textured from the file. PakScape spots them by their content, not their name, so a playable level keeps its flat overview instead.

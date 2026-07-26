@@ -119,6 +119,42 @@ PKM_API int pkm_model_set_texture(
 PKM_API int pkm_model_set_skin(pkm_model *model, int skin_index);
 
 /*
+ * Reads an embedded MDL skin as straight RGBA8 pixels. Query its dimensions first,
+ * then provide at least width * height * 4 bytes to copy the image.
+ */
+PKM_API int pkm_model_get_skin_size(
+    const pkm_model *model,
+    int skin_index,
+    int *width,
+    int *height);
+PKM_API int pkm_model_copy_skin_rgba(
+    const pkm_model *model,
+    int skin_index,
+    void *rgba_pixels,
+    size_t rgba_size);
+
+/*
+ * Reads the embedded mip textures from a Quake BSP brush model. Names are the
+ * original miptex names and pixels are straight, opaque RGBA8.
+ */
+PKM_API int pkm_model_texture_count(const pkm_model *model);
+PKM_API int pkm_model_texture_name(
+    const pkm_model *model,
+    int texture_index,
+    char *name,
+    size_t name_size);
+PKM_API int pkm_model_get_texture_size(
+    const pkm_model *model,
+    int texture_index,
+    int *width,
+    int *height);
+PKM_API int pkm_model_copy_texture_rgba(
+    const pkm_model *model,
+    int texture_index,
+    void *rgba_pixels,
+    size_t rgba_size);
+
+/*
  * A view owns the orbit camera and the software renderer. The model must outlive
  * every view created from it.
  */
@@ -128,6 +164,10 @@ PKM_API void pkm_view_destroy(pkm_view *view);
 /* Uses a light backdrop when dark is zero. */
 PKM_API void pkm_view_set_dark_background(pkm_view *view, int dark);
 PKM_API void pkm_view_set_auto_rotate(pkm_view *view, int enabled);
+/* Mesh and sprite playback are separate from the idle camera turntable. */
+PKM_API void pkm_view_set_animation_enabled(pkm_view *view, int enabled);
+/* A multiplier where 1.0 is the format's normal playback rate. */
+PKM_API void pkm_view_set_animation_speed(pkm_view *view, float speed);
 
 /*
  * Pointer deltas are in rendered device pixels so that the gesture tracks the
@@ -143,10 +183,10 @@ PKM_API void pkm_view_nudge(pkm_view *view, int nudge);
 PKM_API void pkm_view_reset(pkm_view *view);
 
 /*
- * Advances damping, inertia, idle auto-rotation, and sprite playback. Returns 1
+ * Advances damping, inertia, idle auto-rotation, and model playback. Returns 1
  * when the next frame differs from the one already on screen, so an idle viewer
- * costs nothing. A sprite with more than one frame is never idle: it loops at the
- * intervals stored in the file, or ten frames a second when it stores none.
+ * costs nothing. Animated MDL and MD3 meshes default to ten frames a second;
+ * sprites use intervals stored in the file, or the same default when absent.
  */
 PKM_API int pkm_view_advance(pkm_view *view, double elapsed_seconds);
 

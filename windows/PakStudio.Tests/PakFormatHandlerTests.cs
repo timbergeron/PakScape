@@ -49,6 +49,20 @@ public sealed class PakFormatHandlerTests
     }
 
     [Fact]
+    public void Parse_ZeroByteDirectoryMarker_IsIgnored()
+    {
+        var bytes = CreatePak(
+            ("textures/empty/", 0, []),
+            ("textures/real.png", 12, [1]));
+
+        var document = _handler.Parse(bytes);
+        var file = Assert.Single(ArchiveTreeBuilder.FlattenFiles(document.Root));
+
+        Assert.Equal("textures/real.png", file.Path);
+        Assert.Equal(new byte[] { 1 }, file.File.Data);
+    }
+
+    [Fact]
     public void Parse_NonAsciiPathByte_ThrowsInsteadOfReplacingCharacter()
     {
         var bytes = CreatePak(("maps/a.txt", 12, [1]));

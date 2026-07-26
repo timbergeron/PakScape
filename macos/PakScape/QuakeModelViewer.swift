@@ -311,6 +311,7 @@ final class QuakeModelViewer {
     }
 
     var skinCount: Int { Int(statistics.skin_count) }
+    var frameCount: Int { Int(statistics.frame_count) }
 
     var showsInteractionPrompt: Bool {
         pkm_view_show_interaction_prompt(view) != 0
@@ -358,12 +359,93 @@ final class QuakeModelViewer {
         return true
     }
 
+    func selectedSkinImage() -> NSImage? {
+        var width: Int32 = 0
+        var height: Int32 = 0
+        guard pkm_model_get_skin_size(model, Int32(skinIndex), &width, &height) == 0,
+              width > 0, height > 0 else {
+            return nil
+        }
+
+        let byteCount = Int(width) * Int(height) * 4
+        var pixels = [UInt8](repeating: 0, count: byteCount)
+        guard pixels.withUnsafeMutableBytes({
+            pkm_model_copy_skin_rgba(model, Int32(skinIndex), $0.baseAddress, $0.count)
+        }) == 0 else {
+            return nil
+        }
+        return Self.image(rgba: pixels, width: Int(width), height: Int(height))
+    }
+
+    func embeddedTextures() -> [(name: String, image: NSImage)] {
+        let count = Int(pkm_model_texture_count(model))
+        guard count > 0 else { return [] }
+
+        var results: [(name: String, image: NSImage)] = []
+        results.reserveCapacity(count)
+        for textureIndex in 0 ..< count {
+            var nameBytes = [CChar](repeating: 0, count: 256)
+            var width: Int32 = 0
+            var height: Int32 = 0
+            let readName = nameBytes.withUnsafeMutableBufferPointer {
+                pkm_model_texture_name(
+                    model, Int32(textureIndex), $0.baseAddress, $0.count)
+            }
+            guard readName == 0,
+                  pkm_model_get_texture_size(
+                    model, Int32(textureIndex), &width, &height) == 0,
+                  width > 0, height > 0 else {
+                continue
+            }
+            let byteCount = Int(width) * Int(height) * 4
+            var pixels = [UInt8](repeating: 0, count: byteCount)
+            guard pixels.withUnsafeMutableBytes({
+                pkm_model_copy_texture_rgba(
+                    model, Int32(textureIndex), $0.baseAddress, $0.count)
+            }) == 0,
+            let image = Self.image(rgba: pixels, width: Int(width), height: Int(height)) else {
+                continue
+            }
+            results.append((String(cString: nameBytes), image))
+        }
+        return results
+    }
+
+    private static func image(rgba pixels: [UInt8], width: Int, height: Int) -> NSImage? {
+        guard
+        let provider = CGDataProvider(data: Data(pixels) as CFData),
+        let image = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+        return NSImage(cgImage: image, size: NSSize(width: width, height: height))
+    }
+
     func setDarkBackground(_ dark: Bool) {
         pkm_view_set_dark_background(view, dark ? 1 : 0)
     }
 
     func setAutoRotate(_ enabled: Bool) {
         pkm_view_set_auto_rotate(view, enabled ? 1 : 0)
+    }
+
+    func setAnimationEnabled(_ enabled: Bool) {
+        pkm_view_set_animation_enabled(view, enabled ? 1 : 0)
+    }
+
+    func setAnimationSpeed(_ speed: Float) {
+        pkm_view_set_animation_speed(view, speed)
     }
 
     func beginInteraction() {

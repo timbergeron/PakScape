@@ -50,7 +50,7 @@ void appendPadded(std::vector<unsigned char> &bytes, const std::string &value, s
     }
 }
 
-std::vector<unsigned char> buildMdl() {
+std::vector<unsigned char> buildMdl(int frameCount = 1) {
     constexpr int skinWidth = 4;
     constexpr int skinHeight = 4;
     std::vector<unsigned char> bytes;
@@ -72,7 +72,7 @@ std::vector<unsigned char> buildMdl() {
     appendI32(bytes, skinHeight);
     appendI32(bytes, 3);  // vertices
     appendI32(bytes, 1);  // triangles
-    appendI32(bytes, 1);  // frames
+    appendI32(bytes, frameCount);  // frames
     appendI32(bytes, 0);  // sync type
     appendI32(bytes, 0);  // flags
     appendFloat(bytes, 0.0f);
@@ -94,17 +94,23 @@ std::vector<unsigned char> buildMdl() {
     appendI32(bytes, 1);
     appendI32(bytes, 2);
 
-    appendI32(bytes, 0);  // single frame
-    for (int index = 0; index < 8; index++) {
-        bytes.push_back(0);  // bounding box
-    }
-    appendPadded(bytes, "frame", 16);
-    const unsigned char positions[3][3] = {{10, 10, 10}, {200, 20, 10}, {20, 200, 180}};
-    for (const auto &position : positions) {
-        bytes.push_back(position[0]);
-        bytes.push_back(position[1]);
-        bytes.push_back(position[2]);
-        bytes.push_back(0);  // normal index
+    for (int frame = 0; frame < frameCount; frame++) {
+        appendI32(bytes, 0);  // single frame
+        for (int index = 0; index < 8; index++) {
+            bytes.push_back(0);  // bounding box
+        }
+        appendPadded(bytes, "frame", 16);
+        const unsigned char positions[3][3] = {
+            {10, 10, 10},
+            {200, 20, static_cast<unsigned char>(10 + frame * 30)},
+            {20, 200, static_cast<unsigned char>(180 - frame * 30)},
+        };
+        for (const auto &position : positions) {
+            bytes.push_back(position[0]);
+            bytes.push_back(position[1]);
+            bytes.push_back(position[2]);
+            bytes.push_back(0);  // normal index
+        }
     }
     return bytes;
 }
@@ -308,38 +314,42 @@ std::vector<unsigned char> buildBsp(const std::string &entities, bool visibility
     return bytes;
 }
 
-std::vector<unsigned char> buildMd3(const std::string &shader) {
+std::vector<unsigned char> buildMd3(const std::string &shader, int frameCount = 1) {
     std::vector<unsigned char> bytes;
+    const int surfaceOffset = 108 + frameCount * 56;
+    const int surfaceEndOffset = 212 + frameCount * 24;
 
     appendU32(bytes, 0x33504449);  // "IDP3"
     appendI32(bytes, 15);
     appendPadded(bytes, "test", 64);
     appendI32(bytes, 0);    // flags
-    appendI32(bytes, 1);    // frames
+    appendI32(bytes, frameCount);  // frames
     appendI32(bytes, 0);    // tags
     appendI32(bytes, 1);    // surfaces
     appendI32(bytes, 0);    // skins
     appendI32(bytes, 108);  // frame offset
-    appendI32(bytes, 164);  // tag offset
-    appendI32(bytes, 164);  // surface offset
-    appendI32(bytes, 400);  // end offset
+    appendI32(bytes, surfaceOffset);  // tag offset
+    appendI32(bytes, surfaceOffset);  // surface offset
+    appendI32(bytes, surfaceOffset + surfaceEndOffset);  // end offset
 
-    for (int index = 0; index < 3; index++) {  // bounds and origin
-        appendFloat(bytes, -64.0f);
-    }
-    for (int index = 0; index < 3; index++) {
+    for (int frame = 0; frame < frameCount; frame++) {
+        for (int index = 0; index < 3; index++) {  // bounds and origin
+            appendFloat(bytes, -64.0f);
+        }
+        for (int index = 0; index < 3; index++) {
+            appendFloat(bytes, 64.0f);
+        }
+        for (int index = 0; index < 3; index++) {
+            appendFloat(bytes, 0.0f);
+        }
         appendFloat(bytes, 64.0f);
+        appendPadded(bytes, "frame", 16);
     }
-    for (int index = 0; index < 3; index++) {
-        appendFloat(bytes, 0.0f);
-    }
-    appendFloat(bytes, 64.0f);
-    appendPadded(bytes, "frame", 16);
 
     appendU32(bytes, 0x33504449);
     appendPadded(bytes, "body", 64);
     appendI32(bytes, 0);    // flags
-    appendI32(bytes, 1);    // frames
+    appendI32(bytes, frameCount);  // frames
     appendI32(bytes, 1);    // shaders
     appendI32(bytes, 3);    // vertices
     appendI32(bytes, 1);    // triangles
@@ -347,7 +357,7 @@ std::vector<unsigned char> buildMd3(const std::string &shader) {
     appendI32(bytes, 108);  // shader offset
     appendI32(bytes, 188);  // texture coordinate offset
     appendI32(bytes, 212);  // vertex offset
-    appendI32(bytes, 236);  // end offset
+    appendI32(bytes, surfaceEndOffset);  // end offset
 
     appendPadded(bytes, shader, 64);
     appendI32(bytes, 0);  // shader index
@@ -362,13 +372,19 @@ std::vector<unsigned char> buildMd3(const std::string &shader) {
         appendFloat(bytes, coordinate[1]);
     }
 
-    const short positions[3][3] = {{-512, -512, -512}, {512, -512, -512}, {-512, 512, 512}};
-    for (const auto &position : positions) {
-        appendI16(bytes, position[0]);
-        appendI16(bytes, position[1]);
-        appendI16(bytes, position[2]);
-        bytes.push_back(64);
-        bytes.push_back(32);
+    for (int frame = 0; frame < frameCount; frame++) {
+        const short positions[3][3] = {
+            {-512, -512, -512},
+            {512, -512, static_cast<short>(-512 + frame * 256)},
+            {-512, 512, static_cast<short>(512 - frame * 256)},
+        };
+        for (const auto &position : positions) {
+            appendI16(bytes, position[0]);
+            appendI16(bytes, position[1]);
+            appendI16(bytes, position[2]);
+            bytes.push_back(64);
+            bytes.push_back(32);
+        }
     }
     return bytes;
 }
@@ -492,6 +508,19 @@ void testMdl() {
     check(pkm_model_set_skin(model, 0) == PKM_OK, "the first skin can be selected");
     check(pkm_model_set_skin(model, 4) == PKM_ERROR_INVALID_ARGUMENT,
           "an out of range skin is rejected");
+    int skinWidth = 0;
+    int skinHeight = 0;
+    check(pkm_model_get_skin_size(model, 0, &skinWidth, &skinHeight) == PKM_OK,
+          "MDL skin dimensions are readable");
+    check(skinWidth == 4 && skinHeight == 4, "MDL skin dimensions match the source");
+    std::vector<unsigned char> skinPixels(
+        static_cast<size_t>(skinWidth) * static_cast<size_t>(skinHeight) * 4);
+    check(pkm_model_copy_skin_rgba(model, 0, skinPixels.data(), skinPixels.size()) == PKM_OK,
+          "an MDL skin can be copied as RGBA");
+    check(skinPixels[3] == 255, "copied MDL skin pixels preserve alpha");
+    check(pkm_model_copy_skin_rgba(model, 0, skinPixels.data(), skinPixels.size() - 1) ==
+              PKM_ERROR_INVALID_ARGUMENT,
+          "an undersized MDL skin buffer is rejected");
 
     pkm_view *view = pkm_view_create(model);
     check(view != nullptr, "a view is created");
@@ -529,6 +558,33 @@ void testMdl() {
 
     pkm_view_destroy(view);
     pkm_model_destroy(model);
+
+    const std::vector<unsigned char> animatedBytes = buildMdl(2);
+    pkm_model *animated = pkm_model_create(
+        animatedBytes.data(), animatedBytes.size(), "mdl", error, sizeof(error));
+    check(animated != nullptr, "a multi-frame MDL parses");
+    if (animated != nullptr) {
+        pkm_model_get_stats(animated, &stats);
+        check(stats.frame_count == 2, "every MDL pose is counted");
+        pkm_view *animatedView = pkm_view_create(animated);
+        pkm_view_set_auto_rotate(animatedView, 0);
+        settle(animatedView);
+        pkm_view_set_animation_enabled(animatedView, 0);
+        settle(animatedView);
+        const std::vector<unsigned char> firstPose = renderFrame(animatedView, 96, 96);
+        for (int step = 0; step < 20; step++) {
+            pkm_view_advance(animatedView, 1.0 / 60.0);
+        }
+        check(renderFrame(animatedView, 96, 96) == firstPose,
+              "paused model animation holds its pose");
+        pkm_view_set_animation_speed(animatedView, 4.0f);
+        pkm_view_set_animation_enabled(animatedView, 1);
+        pkm_view_advance(animatedView, 0.03);
+        check(renderFrame(animatedView, 96, 96) != firstPose,
+              "animation speed changes mesh playback timing");
+        pkm_view_destroy(animatedView);
+        pkm_model_destroy(animated);
+    }
 }
 
 void testMd3() {
@@ -575,6 +631,25 @@ void testMd3() {
 
     pkm_view_destroy(view);
     pkm_model_destroy(model);
+
+    const std::vector<unsigned char> animatedBytes =
+        buildMd3("models/test/body.tga", 2);
+    pkm_model *animated = pkm_model_create(
+        animatedBytes.data(), animatedBytes.size(), "md3", error, sizeof(error));
+    check(animated != nullptr, "a multi-frame MD3 parses");
+    if (animated != nullptr) {
+        pkm_model_get_stats(animated, &stats);
+        check(stats.frame_count == 2, "every MD3 pose is counted");
+        pkm_view *animatedView = pkm_view_create(animated);
+        pkm_view_set_auto_rotate(animatedView, 0);
+        settle(animatedView);
+        const std::vector<unsigned char> firstPose = renderFrame(animatedView, 96, 96);
+        pkm_view_advance(animatedView, 0.11);
+        check(renderFrame(animatedView, 96, 96) != firstPose,
+              "MD3 playback advances to the next pose");
+        pkm_view_destroy(animatedView);
+        pkm_model_destroy(animated);
+    }
 }
 
 void testMd5() {
@@ -766,6 +841,22 @@ void testBsp() {
     check(stats.skin_count == 0, "brush model textures are not offered as skins");
     check(stats.texture_request_count == 0, "BSP textures come from the file itself");
     check(stats.textured_surface_count == 1, "the embedded texture is applied");
+    check(pkm_model_texture_count(model) == 1, "the embedded BSP texture is exportable");
+    char textureName[32]{};
+    check(pkm_model_texture_name(model, 0, textureName, sizeof(textureName)) == PKM_OK,
+          "the BSP texture name is readable");
+    check(std::string(textureName) == "crate_top", "the BSP texture keeps its miptex name");
+    int textureWidth = 0;
+    int textureHeight = 0;
+    check(pkm_model_get_texture_size(model, 0, &textureWidth, &textureHeight) == PKM_OK,
+          "the BSP texture dimensions are readable");
+    check(textureWidth == 8 && textureHeight == 8, "the BSP texture dimensions match");
+    std::vector<unsigned char> texturePixels(
+        static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight) * 4);
+    check(pkm_model_copy_texture_rgba(
+              model, 0, texturePixels.data(), texturePixels.size()) == PKM_OK,
+          "the BSP texture pixels are readable");
+    check(texturePixels[3] == 255, "BSP texture palette index 255 stays opaque");
 
     pkm_view *view = pkm_view_create(model);
     pkm_view_set_auto_rotate(view, 0);

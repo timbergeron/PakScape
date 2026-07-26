@@ -440,6 +440,19 @@ struct ContentView: View {
         Button("Select") {
             select(node)
         }
+        Button("Quick Preview") {
+            if selectedFileIDs.contains(node.id) {
+                model.toggleQuickLook(for: model.selectedNodes)
+            } else {
+                select(node)
+                model.toggleQuickLook(for: [node])
+            }
+        }
+        if model.canPreviewSkybox(node) {
+            Button("View Skybox") {
+                model.showSkyboxPreview(for: node)
+            }
+        }
         Button("Rename…") {
             beginRenaming(node)
         }
@@ -464,6 +477,33 @@ struct ContentView: View {
                     ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
                         Button(format.menuTitle) {
                             model.saveImageAs(node, format: format)
+                        }
+                    }
+                }
+            }
+            if model.canSaveModelSkinAs(node) {
+                Menu("Save Model Skins As") {
+                    ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
+                        Button(format.menuTitle) {
+                            model.saveModelSkinsAs(node, format: format)
+                        }
+                    }
+                }
+            }
+            if model.canSaveBspTexturesAs(node) {
+                Menu("Save BSP Textures As") {
+                    ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
+                        Button(format.menuTitle) {
+                            model.saveBspTexturesAs(node, format: format)
+                        }
+                    }
+                }
+            }
+            if model.canSaveWadTexturesAs(node) {
+                Menu("Save WAD Textures As") {
+                    ForEach(PakImageFormat.allCases, id: \.rawValue) { format in
+                        Button(format.menuTitle) {
+                            model.saveWadTexturesAs(node, format: format)
                         }
                     }
                 }

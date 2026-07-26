@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 using Xunit;
@@ -8,17 +9,53 @@ namespace PakStudio.Tests;
 public sealed class ArchiveMetadataInspectorTests
 {
     [Fact]
-    public void DetailsColumnOmitsPreviewMetadata()
+    public void DetailsColumnOmitsPreviewMetadataPrefixes()
     {
         var metadata = new ArchiveMetadata(
             [],
             "Dimensions: 320 × 200 pixels  •  Color Depth: 8-bit  •  Duration: 0:12");
 
-        Assert.Equal("Color Depth: 8-bit", metadata.DetailsColumnText);
+        Assert.Equal(
+            "320 × 200 pixels  •  Color Depth: 8-bit  •  0:12",
+            metadata.DetailsColumnText);
         Assert.Equal(
             "Dimensions: 320 × 200 pixels  •  Color Depth: 8-bit  •  Duration: 0:12",
             metadata.Summary);
-        Assert.Empty(new ArchiveMetadata([], "Description: The Slipgate Complex").DetailsColumnText);
+        Assert.Equal(
+            "The Slipgate Complex",
+            new ArchiveMetadata([], "Description: The Slipgate Complex").DetailsColumnText);
+    }
+
+    [Fact]
+    public void SavegameDetailsReadClassicAndRemasterHeaders()
+    {
+        var classic = ArchiveMetadataInspector.Inspect(
+            new ArchiveFileNode("s0.sav", Savegame(version: 5, comment: "The_Slipgate_Complex_kills:__3/__9")));
+        var classicDetails = classic.Details.ToDictionary(detail => detail.Label, detail => detail.Value);
+
+        Assert.Equal("Quake savegame", classicDetails["Format"]);
+        Assert.Equal("The Slipgate Complex kills:  3/  9", classicDetails["Description"]);
+        Assert.Equal("e1m1", classicDetails["Map"]);
+        Assert.Equal("Hard", classicDetails["Skill"]);
+        Assert.Equal("1:36", classicDetails["Duration"]);
+        Assert.Equal("Map: e1m1  •  Skill: Hard", classic.DetailsColumnText);
+
+        var remaster = ArchiveMetadataInspector.Inspect(
+            new ArchiveFileNode("s1.sav", Savegame(version: 6, comment: "Dimension_of_the_Machine", gameDirectory: "mg1")));
+        var remasterDetails = remaster.Details.ToDictionary(detail => detail.Label, detail => detail.Value);
+
+        Assert.Equal("Quake remaster savegame", remasterDetails["Format"]);
+        Assert.Equal("mg1", remasterDetails["Mod"]);
+    }
+
+    [Fact]
+    public void TruncatedSavegameDoesNotClaimMetadata()
+    {
+        var metadata = ArchiveMetadataInspector.Inspect(
+            new ArchiveFileNode("broken.sav", "5\nnot enough lines\n"u8.ToArray()));
+
+        Assert.DoesNotContain(metadata.Details, detail => detail.Label == "Format");
+        Assert.Empty(metadata.DetailsColumnText);
     }
 
     [Fact]
@@ -183,6 +220,22 @@ public sealed class ArchiveMetadataInspectorTests
         return data.ToArray();
     }
 
+    private static byte[] Savegame(int version, string comment, string? gameDirectory = null)
+    {
+        var lines = new List<string> { version.ToString() };
+        if (version == 6)
+        {
+            lines.Add(gameDirectory ?? "id1");
+        }
+        lines.Add(comment);
+        lines.AddRange(Enumerable.Repeat("0", 16));
+        lines.Add("2");
+        lines.Add("e1m1");
+        lines.Add("95.5");
+        lines.Add("{}");
+        return Encoding.ASCII.GetBytes(string.Join("\r\n", lines));
+    }
+
     private static void AppendServerInfo(
         List<byte> data,
         int protocolVersion,
@@ -278,6 +331,23 @@ public sealed class ArchiveMetadataInspectorTests
     }
 
     [Fact]
+    public void BspSummaryReadsDescriptionPastOrdinaryInspectionLimit()
+    {
+        var entities = "{\"classname\" \"worldspawn\" \"message\" \"The Wind Tunnels\"}"u8.ToArray();
+        var entityOffset = ArchiveMetadataInspector.MaximumInspectionBytes + 128;
+        var data = new byte[entityOffset + entities.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(0, 4), 29);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4, 4), entityOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8, 4), entities.Length);
+        entities.CopyTo(data.AsSpan(entityOffset));
+
+        var metadata = ArchiveMetadataInspector.Inspect(new ArchiveFileNode("e3m5.bsp", data));
+
+        Assert.Equal("Description: The Wind Tunnels", metadata.Summary);
+        Assert.Equal("The Wind Tunnels", metadata.DetailsColumnText);
+    }
+
+    [Fact]
     public void QuakeCProgramDetailsReadTheProgsHeader()
     {
         var data = new byte[60];
@@ -370,6 +440,268 @@ public sealed class ArchiveMetadataInspectorTests
 
     private static string Find(ArchiveMetadata metadata, string label) =>
         metadata.Details.FirstOrDefault(detail => detail.Label == label)?.Value ?? string.Empty;
+
+    [Fact]
+    public void ModernBspHeadersReportBsp2AndQuake64Metadata()
+    {
+        var bsp2 = new byte[320];
+        "BSP2"u8.CopyTo(bsp2);
+        var entities = "{\"classname\" \"worldspawn\" \"message\" \"Modern Map\"}"u8.ToArray();
+        WriteInt32At(bsp2, 4, 124);
+        WriteInt32At(bsp2, 8, entities.Length);
+        entities.CopyTo(bsp2.AsSpan(124));
+        WriteInt32At(bsp2, 4 + 3 * 8, 200);
+        WriteInt32At(bsp2, 4 + 3 * 8 + 4, 24);
+        WriteInt32At(bsp2, 4 + 7 * 8, 224);
+        WriteInt32At(bsp2, 4 + 7 * 8 + 4, 56);
+
+        var details = Inspected("modern.bsp", bsp2);
+        Assert.Equal("Quake BSP2 level", details["Format"]);
+        Assert.Equal("Modern Map", details["Description"]);
+        Assert.Equal("2", details["Vertices"]);
+        Assert.Equal("2", details["Faces"]);
+
+        var quake64 = new byte[124];
+        WriteInt32At(quake64, 0, 23);
+        Assert.Equal("Quake 64 BSP level", Inspected("q64.bsp", quake64)["Format"]);
+    }
+
+    [Fact]
+    public void ModernModelHeadersReportMd3AndMd5Metadata()
+    {
+        var md3 = new byte[216];
+        "IDP3"u8.CopyTo(md3);
+        WriteInt32At(md3, 4, 15);
+        "ogre"u8.CopyTo(md3.AsSpan(8));
+        WriteInt32At(md3, 76, 3);
+        WriteInt32At(md3, 80, 2);
+        WriteInt32At(md3, 84, 1);
+        WriteInt32At(md3, 100, 108);
+        "IDP3"u8.CopyTo(md3.AsSpan(108));
+        WriteInt32At(md3, 108 + 76, 2);
+        WriteInt32At(md3, 108 + 80, 24);
+        WriteInt32At(md3, 108 + 84, 12);
+        WriteInt32At(md3, 108 + 104, 108);
+
+        var md3Details = Inspected("ogre.md3", md3);
+        Assert.Equal("3", md3Details["Frames"]);
+        Assert.Equal("1", md3Details["Surfaces"]);
+        Assert.Equal("12", md3Details["Triangles"]);
+
+        var mesh = """
+            MD5Version 10
+            numJoints 4
+            numMeshes 2
+            numverts 12
+            numtris 6
+            numverts 8
+            numtris 4
+            """u8.ToArray();
+        var meshDetails = Inspected("ogre.md5mesh", mesh);
+        Assert.Equal("2", meshDetails["Meshes"]);
+        Assert.Equal("20", meshDetails["Vertices"]);
+        Assert.Equal("10", meshDetails["Triangles"]);
+
+        var animation = """
+            MD5Version 10
+            numFrames 48
+            numJoints 4
+            frameRate 24
+            numAnimatedComponents 16
+            """u8.ToArray();
+        var animationDetails = Inspected("ogre.md5anim", animation);
+        Assert.Equal("0:02", animationDetails["Duration"]);
+        Assert.Equal("24 fps", animationDetails["Frame Rate"]);
+    }
+
+    [Fact]
+    public void QuakeSidecarsAndAddedTextFormatsReportMetadata()
+    {
+        var lit = new byte[38];
+        "QLIT"u8.CopyTo(lit);
+        WriteInt32At(lit, 4, 1);
+        Assert.Equal("10", Inspected("e1m1.lit", lit)["Samples"]);
+
+        var vis = new byte[44];
+        "e1m1.bsp"u8.CopyTo(vis);
+        WriteInt32At(vis, 32, 8);
+        vis.AsSpan(36).Fill(1);
+        var visDetails = Inspected("e1m1.vis", vis);
+        Assert.Equal("e1m1.bsp", visDetails["Maps"]);
+        Assert.Equal("8 bytes", visDetails["Visibility Data"]);
+
+        var nav = new byte[16];
+        "NAV2"u8.CopyTo(nav);
+        Assert.Equal("NAV2", Inspected("e1m1.nav", nav)["Version"]);
+
+        var fgd = "// entity definitions\n@PointClass\n"u8.ToArray();
+        var fgdDetails = Inspected("quake.fgd", fgd);
+        Assert.Equal("Game definition", fgdDetails["Format"]);
+        Assert.Equal("2", fgdDetails["Lines"]);
+        Assert.True(fgdDetails.ContainsKey("Purpose"));
+    }
+
+    [Fact]
+    public void DdsAndModernAudioHeadersReportMetadata()
+    {
+        var dds = new byte[148];
+        "DDS "u8.CopyTo(dds);
+        WriteInt32At(dds, 4, 124);
+        WriteInt32At(dds, 12, 128);
+        WriteInt32At(dds, 16, 256);
+        WriteInt32At(dds, 28, 8);
+        WriteInt32At(dds, 76, 32);
+        "DX10"u8.CopyTo(dds.AsSpan(84));
+        WriteInt32At(dds, 128, 98);
+        var ddsDetails = Inspected("wall.dds", dds);
+        Assert.Equal("256 × 128 pixels", ddsDetails["Dimensions"]);
+        Assert.Equal("8", ddsDetails["Mipmaps"]);
+        Assert.Equal("DX10 (DXGI format 98)", ddsDetails["Compression"]);
+
+        var flac = new byte[42];
+        "fLaC"u8.CopyTo(flac);
+        flac[7] = 34;
+        var streamInfo = (ulong)44_100 << 44 |
+                         (ulong)1 << 41 |
+                         (ulong)15 << 36 |
+                         441_000UL;
+        BinaryPrimitives.WriteUInt64BigEndian(flac.AsSpan(18), streamInfo);
+        var flacDetails = Inspected("track.flac", flac);
+        Assert.Equal("Stereo", flacDetails["Channels"]);
+        Assert.Equal("16-bit", flacDetails["Bit Depth"]);
+        Assert.Equal("0:10", flacDetails["Duration"]);
+
+        var oggDetails = Inspected("track.ogg", MakeVorbis(48_000, 2, 480_000));
+        Assert.Equal("Ogg Vorbis audio", oggDetails["Format"]);
+        Assert.Equal("48,000 Hz", oggDetails["Sample Rate"]);
+        Assert.Equal("0:10", oggDetails["Duration"]);
+
+        var opusDetails = Inspected("track.opus", MakeOpus(480_312));
+        Assert.Equal("Ogg Opus audio", opusDetails["Format"]);
+        Assert.Equal("48,000 Hz", opusDetails["Sample Rate"]);
+        Assert.Equal("0:10", opusDetails["Duration"]);
+    }
+
+    [Fact]
+    public void TrackerAndUmxHeadersReportMetadata()
+    {
+        var xm = new byte[80];
+        "Extended Module: "u8.CopyTo(xm);
+        "Song"u8.CopyTo(xm.AsSpan(17));
+        xm[37] = 0x1a;
+        WriteUInt16At(xm, 58, 0x0104);
+        WriteUInt16At(xm, 64, 4);
+        WriteUInt16At(xm, 68, 8);
+        WriteUInt16At(xm, 70, 3);
+        WriteUInt16At(xm, 72, 5);
+        WriteUInt16At(xm, 78, 125);
+        Assert.Equal("8", Inspected("song.xm", xm)["Channels"]);
+
+        var s3m = Enumerable.Repeat((byte)255, 96).ToArray();
+        "Song"u8.CopyTo(s3m);
+        "SCRM"u8.CopyTo(s3m.AsSpan(44));
+        WriteUInt16At(s3m, 32, 4);
+        WriteUInt16At(s3m, 34, 2);
+        WriteUInt16At(s3m, 36, 3);
+        s3m[50] = 125;
+        s3m[64] = 0;
+        s3m[65] = 1;
+        Assert.Equal("2", Inspected("song.s3m", s3m)["Channels"]);
+
+        var it = Enumerable.Repeat((byte)255, 128).ToArray();
+        "IMPM"u8.CopyTo(it);
+        "Song"u8.CopyTo(it.AsSpan(4));
+        WriteUInt16At(it, 32, 4);
+        WriteUInt16At(it, 34, 2);
+        WriteUInt16At(it, 36, 6);
+        WriteUInt16At(it, 38, 3);
+        WriteUInt16At(it, 40, 0x0214);
+        it[51] = 125;
+        it[64] = 32;
+        Assert.Equal("6", Inspected("song.it", it)["Samples"]);
+
+        var mod = new byte[1_084];
+        "Song"u8.CopyTo(mod);
+        mod[950] = 2;
+        mod[952] = 0;
+        mod[953] = 3;
+        "M.K."u8.CopyTo(mod.AsSpan(1_080));
+        Assert.Equal("4", Inspected("song.mod", mod)["Patterns"]);
+
+        var umx = new byte[36];
+        BinaryPrimitives.WriteUInt32LittleEndian(umx, 0x9e2a83c1);
+        WriteUInt16At(umx, 4, 69);
+        WriteInt32At(umx, 12, 12);
+        WriteInt32At(umx, 20, 1);
+        Assert.Equal("Unreal music package", Inspected("song.umx", umx)["Format"]);
+    }
+
+    private static Dictionary<string, string> Inspected(string name, byte[] data) =>
+        ArchiveMetadataInspector.Inspect(new ArchiveFileNode(name, data)).Details
+            .ToDictionary(detail => detail.Label, detail => detail.Value);
+
+    private static byte[] MakeVorbis(int sampleRate, byte channels, ulong samples)
+    {
+        var packet = new List<byte> { 1 };
+        packet.AddRange("vorbis"u8.ToArray());
+        packet.AddRange(new byte[4]);
+        packet.Add(channels);
+        var sampleRateBytes = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(sampleRateBytes, sampleRate);
+        packet.AddRange(sampleRateBytes);
+        packet.AddRange(new byte[14]);
+
+        var firstPage = new byte[28];
+        "OggS"u8.CopyTo(firstPage);
+        firstPage[5] = 2;
+        firstPage[26] = 1;
+        firstPage[27] = (byte)packet.Count;
+        var data = new List<byte>(firstPage);
+        data.AddRange(packet);
+
+        var finalPage = new byte[28];
+        "OggS"u8.CopyTo(finalPage);
+        BinaryPrimitives.WriteUInt64LittleEndian(finalPage.AsSpan(6), samples);
+        finalPage[26] = 1;
+        data.AddRange(finalPage);
+        return data.ToArray();
+    }
+
+    private static byte[] MakeOpus(ulong samples)
+    {
+        var packet = new List<byte>("OpusHead"u8.ToArray())
+        {
+            1,
+            2,
+            0x38,
+            0x01,
+        };
+        var inputRate = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(inputRate, 44_100);
+        packet.AddRange(inputRate);
+        packet.AddRange([0, 0, 0]);
+
+        var firstPage = new byte[28];
+        "OggS"u8.CopyTo(firstPage);
+        firstPage[5] = 2;
+        firstPage[26] = 1;
+        firstPage[27] = (byte)packet.Count;
+        var data = new List<byte>(firstPage);
+        data.AddRange(packet);
+
+        var finalPage = new byte[28];
+        "OggS"u8.CopyTo(finalPage);
+        BinaryPrimitives.WriteUInt64LittleEndian(finalPage.AsSpan(6), samples);
+        finalPage[26] = 1;
+        data.AddRange(finalPage);
+        return data.ToArray();
+    }
+
+    private static void WriteInt32At(byte[] data, int offset, int value) =>
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset), value);
+
+    private static void WriteUInt16At(byte[] data, int offset, ushort value) =>
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(offset), value);
 
     [Fact]
     public void CommonImageMetadataProducesConciseDetails()

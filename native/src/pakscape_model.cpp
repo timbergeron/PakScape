@@ -24,13 +24,20 @@ constexpr int kMaxJoints = 4096;
 constexpr int kMaxWeights = 4'000'000;
 constexpr int kMaxRenderDimension = 4096;
 constexpr int kMaxRenderPixels = 6'000'000;
+/* All decoded poses share this budget; it prevents a small header from multiplying
+ * otherwise-valid per-frame limits into an unreasonable allocation. */
+constexpr int kMaxAnimatedVertices = 2'000'000;
+constexpr int kMaxAnimatedTriangles = 2'000'000;
 /* Every sprite frame is decoded up front, so the whole flipbook shares a budget. */
 constexpr int kMaxSpritePixels = 32'000'000;
 
 /* Sprites that store no intervals animate at the rate Quake plays them. */
 constexpr float kDefaultSpriteInterval = 0.1f;
+constexpr float kDefaultModelInterval = 0.1f;
 constexpr float kMinSpriteInterval = 0.02f;
 constexpr float kMaxSpriteInterval = 5.0f;
+constexpr float kMinAnimationSpeed = 0.05f;
+constexpr float kMaxAnimationSpeed = 8.0f;
 
 constexpr float kFieldOfView = 32.0f * kPi / 180.0f;
 constexpr float kDefaultYaw = 32.0f * kPi / 180.0f;
@@ -136,6 +143,7 @@ float clampf(float value, float low, float high) {
 }
 
 struct Texture {
+    std::string name;
     int width = 0;
     int height = 0;
     bool smooth = false;
@@ -353,28 +361,43 @@ struct pkm_model {
      * so the renderer stays the single-mesh path the other formats use.
      */
     std::vector<Surface> spriteFrames;
-    std::vector<float> spriteIntervals;
+    /* MDL/MD3 poses have identical surface topology and are decoded up front. */
+    std::vector<std::vector<Surface>> animationFrames;
+    std::vector<float> frameIntervals;
     int activeFrame = 0;
     /* Sprites start square to the camera and never drift into the turntable. */
     bool faceOn = false;
 
-    bool animates() const { return spriteFrames.size() > 1; }
-
-    float frameInterval() const {
-        if (spriteIntervals.empty()) {
-            return kDefaultSpriteInterval;
-        }
-        return spriteIntervals[static_cast<size_t>(activeFrame) % spriteIntervals.size()];
+    bool animates() const {
+        return spriteFrames.size() > 1 || animationFrames.size() > 1;
     }
 
-    /* Quads are four vertices, so swapping the playing frame is a trivial copy. */
+    float frameInterval() const {
+        if (frameIntervals.empty()) {
+            return format == PKM_FORMAT_SPR ? kDefaultSpriteInterval : kDefaultModelInterval;
+        }
+        return frameIntervals[static_cast<size_t>(activeFrame) % frameIntervals.size()];
+    }
+
+    const std::vector<Surface> &drawableSurfaces() const {
+        if (!animationFrames.empty()) {
+            return animationFrames[static_cast<size_t>(activeFrame) % animationFrames.size()];
+        }
+        return surfaces;
+    }
+
+    /* Sprite quads are tiny; mesh playback only changes which decoded pose is read. */
     void setFrame(int index) {
-        if (spriteFrames.empty() || surfaces.empty()) {
+        const int count = !animationFrames.empty()
+            ? static_cast<int>(animationFrames.size())
+            : static_cast<int>(spriteFrames.size());
+        if (count <= 0) {
             return;
         }
-        const int count = static_cast<int>(spriteFrames.size());
         activeFrame = ((index % count) + count) % count;
-        surfaces[0] = spriteFrames[static_cast<size_t>(activeFrame)];
+        if (!spriteFrames.empty() && !surfaces.empty()) {
+            surfaces[0] = spriteFrames[static_cast<size_t>(activeFrame)];
+        }
     }
 
     const Texture *textureFor(const Surface &surface) const {
@@ -482,93 +505,136 @@ bool parseMdl(const Reader &reader, pkm_model &model, std::string &error) {
     }
     cursor += static_cast<size_t>(triangleCount) * 16;
 
-    /* Frame layouts vary, so walk to the first pose rather than assuming one. */
-    int frameType = 0;
-    if (!reader.int32(cursor, frameType)) {
-        error = "The model frames are truncated.";
-        return false;
-    }
-    cursor += 4;
-    if (frameType != 0) {
-        int groupCount = 0;
-        if (!reader.int32(cursor, groupCount) || groupCount <= 0 || groupCount > kMaxFrames) {
-            error = "The model frame group is invalid.";
+    const float halfSkinWidth = static_cast<float>(skinWidth) * 0.5f;
+    const auto decodePose = [&](size_t poseOffset, Surface &surface) -> bool {
+        if (!reader.has(poseOffset, static_cast<size_t>(vertexCount) * 4)) {
+            error = "The model frames are truncated.";
+            return false;
+        }
+
+        surface.name = "mdl";
+        surface.texture = model.textures.empty() ? -1 : 0;
+        surface.vertices.reserve(static_cast<size_t>(triangleCount) * 3);
+        surface.indices.reserve(static_cast<size_t>(triangleCount) * 3);
+        std::vector<int> smoothingKeys;
+        smoothingKeys.reserve(static_cast<size_t>(triangleCount) * 3);
+
+        for (int triangle = 0; triangle < triangleCount; triangle++) {
+            const size_t offset = triangleOffset + static_cast<size_t>(triangle) * 16;
+            int facesFront = 0;
+            reader.int32(offset, facesFront);
+
+            for (int corner = 0; corner < 3; corner++) {
+                int vertexIndex = 0;
+                reader.int32(offset + 4 + static_cast<size_t>(corner) * 4, vertexIndex);
+                if (vertexIndex < 0 || vertexIndex >= vertexCount) {
+                    error = "The model references a vertex outside the file.";
+                    return false;
+                }
+
+                const size_t coordinateOffset =
+                    textureCoordinateOffset + static_cast<size_t>(vertexIndex) * 12;
+                int onSeam = 0;
+                int s = 0;
+                int t = 0;
+                reader.int32(coordinateOffset, onSeam);
+                reader.int32(coordinateOffset + 4, s);
+                reader.int32(coordinateOffset + 8, t);
+
+                const unsigned char *packed =
+                    reader.data() + poseOffset + static_cast<size_t>(vertexIndex) * 4;
+                Vertex vertex;
+                vertex.position.x = static_cast<float>(packed[0]) * scale.x + translate.x;
+                vertex.position.y = static_cast<float>(packed[1]) * scale.y + translate.y;
+                vertex.position.z = static_cast<float>(packed[2]) * scale.z + translate.z;
+
+                float coordinateS = static_cast<float>(s);
+                if (facesFront == 0 && onSeam != 0) {
+                    coordinateS += halfSkinWidth;
+                }
+                vertex.u = (coordinateS + 0.5f) / static_cast<float>(skinWidth);
+                vertex.v = (static_cast<float>(t) + 0.5f) / static_cast<float>(skinHeight);
+                surface.indices.push_back(static_cast<int>(surface.vertices.size()));
+                surface.vertices.push_back(vertex);
+                smoothingKeys.push_back(vertexIndex);
+            }
+        }
+        computeSmoothNormals(surface, smoothingKeys);
+        return true;
+    };
+
+    long long decodedVertices = 0;
+    long long decodedTriangles = 0;
+    for (int frame = 0; frame < frameCount; frame++) {
+        int frameType = 0;
+        if (!reader.int32(cursor, frameType)) {
+            error = "The model frames are truncated.";
             return false;
         }
         cursor += 4;
-        cursor += 8;  // group bounding box
-        if (!reader.has(cursor, static_cast<size_t>(groupCount) * 4)) {
-            error = "The model frame group is truncated.";
-            return false;
+
+        int poseCount = 1;
+        std::vector<float> intervals;
+        if (frameType != 0) {
+            if (!reader.int32(cursor, poseCount) || poseCount <= 0 || poseCount > kMaxFrames) {
+                error = "The model frame group is invalid.";
+                return false;
+            }
+            cursor += 4;
+            if (!reader.has(cursor, 8 + static_cast<size_t>(poseCount) * 4)) {
+                error = "The model frame group is truncated.";
+                return false;
+            }
+            cursor += 8;
+            intervals.resize(static_cast<size_t>(poseCount));
+            float previous = 0.0f;
+            for (int pose = 0; pose < poseCount; pose++) {
+                float cumulative = 0.0f;
+                if (!reader.float32(cursor + static_cast<size_t>(pose) * 4, cumulative)) {
+                    error = "The model frame group is truncated.";
+                    return false;
+                }
+                intervals[static_cast<size_t>(pose)] =
+                    clampf(cumulative - previous, kMinSpriteInterval, kMaxSpriteInterval);
+                previous = cumulative;
+            }
+            cursor += static_cast<size_t>(poseCount) * 4;
         }
-        cursor += static_cast<size_t>(groupCount) * 4;
-    }
-    cursor += 8;   // pose bounding box
-    cursor += 16;  // pose name
-    const size_t poseOffset = cursor;
-    if (!reader.has(poseOffset, static_cast<size_t>(vertexCount) * 4)) {
-        error = "The model frames are truncated.";
-        return false;
-    }
 
-    Surface surface;
-    surface.name = "mdl";
-    surface.texture = model.textures.empty() ? -1 : 0;
-    surface.vertices.reserve(static_cast<size_t>(triangleCount) * 3);
-    surface.indices.reserve(static_cast<size_t>(triangleCount) * 3);
+        for (int pose = 0; pose < poseCount; pose++) {
+            if (!reader.has(cursor, 24)) {
+                error = "The model frames are truncated.";
+                return false;
+            }
+            cursor += 8;   // pose bounding box
+            cursor += 16;  // pose name
 
-    std::vector<int> smoothingKeys;
-    smoothingKeys.reserve(static_cast<size_t>(triangleCount) * 3);
-
-    const float halfSkinWidth = static_cast<float>(skinWidth) * 0.5f;
-    for (int triangle = 0; triangle < triangleCount; triangle++) {
-        const size_t offset = triangleOffset + static_cast<size_t>(triangle) * 16;
-        int facesFront = 0;
-        reader.int32(offset, facesFront);
-
-        for (int corner = 0; corner < 3; corner++) {
-            int vertexIndex = 0;
-            reader.int32(offset + 4 + static_cast<size_t>(corner) * 4, vertexIndex);
-            if (vertexIndex < 0 || vertexIndex >= vertexCount) {
-                error = "The model references a vertex outside the file.";
+            decodedVertices += static_cast<long long>(triangleCount) * 3;
+            decodedTriangles += triangleCount;
+            if (decodedVertices > kMaxAnimatedVertices ||
+                decodedTriangles > kMaxAnimatedTriangles) {
+                error = "The model animation is too large to preview.";
                 return false;
             }
 
-            const size_t coordinateOffset =
-                textureCoordinateOffset + static_cast<size_t>(vertexIndex) * 12;
-            int onSeam = 0;
-            int s = 0;
-            int t = 0;
-            reader.int32(coordinateOffset, onSeam);
-            reader.int32(coordinateOffset + 4, s);
-            reader.int32(coordinateOffset + 8, t);
-
-            const size_t vertexOffset = poseOffset + static_cast<size_t>(vertexIndex) * 4;
-            const unsigned char *packed = reader.data() + vertexOffset;
-
-            Vertex vertex;
-            vertex.position.x = static_cast<float>(packed[0]) * scale.x + translate.x;
-            vertex.position.y = static_cast<float>(packed[1]) * scale.y + translate.y;
-            vertex.position.z = static_cast<float>(packed[2]) * scale.z + translate.z;
-
-            /* Seam vertices use the right half of the skin on back-facing triangles. */
-            float coordinateS = static_cast<float>(s);
-            if (facesFront == 0 && onSeam != 0) {
-                coordinateS += halfSkinWidth;
+            Surface surface;
+            if (!decodePose(cursor, surface)) {
+                return false;
             }
-            vertex.u = (coordinateS + 0.5f) / static_cast<float>(skinWidth);
-            vertex.v = (static_cast<float>(t) + 0.5f) / static_cast<float>(skinHeight);
-
-            surface.indices.push_back(static_cast<int>(surface.vertices.size()));
-            surface.vertices.push_back(vertex);
-            smoothingKeys.push_back(vertexIndex);
+            model.animationFrames.push_back({std::move(surface)});
+            model.frameIntervals.push_back(
+                intervals.empty() ? kDefaultModelInterval : intervals[static_cast<size_t>(pose)]);
+            cursor += static_cast<size_t>(vertexCount) * 4;
         }
     }
 
-    computeSmoothNormals(surface, smoothingKeys);
-    model.surfaces.push_back(std::move(surface));
+    if (model.animationFrames.empty()) {
+        error = "The model holds no animation frames.";
+        return false;
+    }
+    model.surfaces = model.animationFrames.front();
     model.format = PKM_FORMAT_MDL;
-    model.frameCount = frameCount;
+    model.frameCount = static_cast<int>(model.animationFrames.size());
     model.skinCount = static_cast<int>(model.textures.size());
     model.activeSkin = 0;
     return true;
@@ -609,6 +675,10 @@ bool parseMd3(const Reader &reader, pkm_model &model, std::string &error) {
     size_t cursor = static_cast<size_t>(surfaceOffset);
     int totalTriangles = 0;
     int totalVertices = 0;
+    model.animationFrames.resize(static_cast<size_t>(frameCount));
+    model.frameIntervals.assign(static_cast<size_t>(frameCount), kDefaultModelInterval);
+    long long decodedVertices = 0;
+    long long decodedTriangles = 0;
 
     for (int index = 0; index < surfaceCount; index++) {
         int surfaceIdent = 0;
@@ -637,7 +707,8 @@ bool parseMd3(const Reader &reader, pkm_model &model, std::string &error) {
             error = "The model contains a corrupt surface.";
             return false;
         }
-        if (vertexCount <= 0 || vertexCount > kMaxVertices || triangleCount <= 0 ||
+        if (surfaceFrames != frameCount || vertexCount <= 0 || vertexCount > kMaxVertices ||
+            triangleCount <= 0 ||
             triangleCount > kMaxTriangles || endOffset <= 0 || triangleOffset < 0 ||
             coordinateOffset < 0 || vertexOffset < 0 || shaderOffset < 0) {
             error = "The model contains an invalid surface.";
@@ -655,30 +726,9 @@ bool parseMd3(const Reader &reader, pkm_model &model, std::string &error) {
         surface.vertices.resize(static_cast<size_t>(vertexCount));
         surface.indices.reserve(static_cast<size_t>(triangleCount) * 3);
 
-        /* Frame 0 is the pose that is previewed; later frames are skipped. */
+        /* Texture coordinates and topology are shared by all surface poses. */
         for (int vertex = 0; vertex < vertexCount; vertex++) {
-            const size_t offset =
-                cursor + static_cast<size_t>(vertexOffset) + static_cast<size_t>(vertex) * 8;
-            int x = 0;
-            int y = 0;
-            int z = 0;
-            if (!reader.int16(offset, x) || !reader.int16(offset + 2, y) ||
-                !reader.int16(offset + 4, z) || !reader.has(offset + 6, 2)) {
-                error = "The model vertices are truncated.";
-                return false;
-            }
-
             Vertex &target = surface.vertices[static_cast<size_t>(vertex)];
-            target.position = {static_cast<float>(x) / 64.0f, static_cast<float>(y) / 64.0f,
-                               static_cast<float>(z) / 64.0f};
-
-            const float latitude =
-                static_cast<float>(reader.data()[offset + 6]) * (2.0f * kPi) / 255.0f;
-            const float longitude =
-                static_cast<float>(reader.data()[offset + 7]) * (2.0f * kPi) / 255.0f;
-            target.normal = {std::cos(longitude) * std::sin(latitude),
-                             std::sin(longitude) * std::sin(latitude), std::cos(latitude)};
-
             const size_t stOffset =
                 cursor + static_cast<size_t>(coordinateOffset) + static_cast<size_t>(vertex) * 8;
             if (!reader.float32(stOffset, target.u) || !reader.float32(stOffset + 4, target.v)) {
@@ -714,7 +764,44 @@ bool parseMd3(const Reader &reader, pkm_model &model, std::string &error) {
         model.requestNames.push_back(shaderName);
         model.textures.emplace_back();
 
-        model.surfaces.push_back(std::move(surface));
+        decodedVertices += static_cast<long long>(vertexCount) * frameCount;
+        decodedTriangles += static_cast<long long>(triangleCount) * frameCount;
+        if (decodedVertices > kMaxAnimatedVertices ||
+            decodedTriangles > kMaxAnimatedTriangles) {
+            error = "The model animation is too large to preview.";
+            return false;
+        }
+
+        for (int frame = 0; frame < frameCount; frame++) {
+            Surface pose = surface;
+            for (int vertex = 0; vertex < vertexCount; vertex++) {
+                const size_t offset =
+                    cursor + static_cast<size_t>(vertexOffset) +
+                    (static_cast<size_t>(frame) * static_cast<size_t>(vertexCount) +
+                     static_cast<size_t>(vertex)) * 8;
+                int x = 0;
+                int y = 0;
+                int z = 0;
+                if (!reader.int16(offset, x) || !reader.int16(offset + 2, y) ||
+                    !reader.int16(offset + 4, z) || !reader.has(offset + 6, 2)) {
+                    error = "The model vertices are truncated.";
+                    return false;
+                }
+
+                Vertex &target = pose.vertices[static_cast<size_t>(vertex)];
+                target.position = {static_cast<float>(x) / 64.0f,
+                                   static_cast<float>(y) / 64.0f,
+                                   static_cast<float>(z) / 64.0f};
+                const float latitude =
+                    static_cast<float>(reader.data()[offset + 6]) * (2.0f * kPi) / 255.0f;
+                const float longitude =
+                    static_cast<float>(reader.data()[offset + 7]) * (2.0f * kPi) / 255.0f;
+                target.normal = {std::cos(longitude) * std::sin(latitude),
+                                 std::sin(longitude) * std::sin(latitude),
+                                 std::cos(latitude)};
+            }
+            model.animationFrames[static_cast<size_t>(frame)].push_back(std::move(pose));
+        }
 
         const size_t nextCursor = cursor + static_cast<size_t>(endOffset);
         if (nextCursor <= cursor || nextCursor > reader.size()) {
@@ -727,6 +814,11 @@ bool parseMd3(const Reader &reader, pkm_model &model, std::string &error) {
         cursor = nextCursor;
     }
 
+    if (model.animationFrames.empty() || model.animationFrames.front().empty()) {
+        error = "The model holds no animation frames.";
+        return false;
+    }
+    model.surfaces = model.animationFrames.front();
     model.format = PKM_FORMAT_MD3;
     model.frameCount = frameCount;
     model.skinCount = 0;
@@ -1208,7 +1300,7 @@ bool parseSpr(const Reader &reader, pkm_model &model, std::string &error) {
         model.textures.push_back(std::move(texture));
         model.spriteFrames.push_back(makeSpriteQuad(static_cast<int>(model.textures.size()) - 1,
                                                     originX, originY, width, height));
-        model.spriteIntervals.push_back(clampf(interval, kMinSpriteInterval, kMaxSpriteInterval));
+        model.frameIntervals.push_back(clampf(interval, kMinSpriteInterval, kMaxSpriteInterval));
         return true;
     };
 
@@ -1470,6 +1562,7 @@ bool parseBsp(const Reader &reader, pkm_model &model, std::string &error) {
             continue;
         }
 
+        texture.name = name;
         model.textures.push_back(std::move(texture));
         miptexTexture[static_cast<size_t>(index)] = static_cast<int>(model.textures.size()) - 1;
         miptexName[static_cast<size_t>(index)] = name;
@@ -1652,35 +1745,53 @@ bool parseBsp(const Reader &reader, pkm_model &model, std::string &error) {
 /* ------------------------------------------------------------ post-load --- */
 
 void computeBounds(pkm_model &model) {
-    /* A sprite is framed by every pose it flips through, so playback never rescales. */
-    const std::vector<Surface> &geometry =
-        model.spriteFrames.empty() ? model.surfaces : model.spriteFrames;
-
     bool first = true;
-    for (const Surface &surface : geometry) {
-        for (const Vertex &vertex : surface.vertices) {
-            if (first) {
-                model.boundsMin = vertex.position;
-                model.boundsMax = vertex.position;
-                first = false;
-                continue;
+    const auto include = [&](const std::vector<Surface> &geometry) {
+        for (const Surface &surface : geometry) {
+            for (const Vertex &vertex : surface.vertices) {
+                if (first) {
+                    model.boundsMin = vertex.position;
+                    model.boundsMax = vertex.position;
+                    first = false;
+                    continue;
+                }
+                model.boundsMin.x = std::min(model.boundsMin.x, vertex.position.x);
+                model.boundsMin.y = std::min(model.boundsMin.y, vertex.position.y);
+                model.boundsMin.z = std::min(model.boundsMin.z, vertex.position.z);
+                model.boundsMax.x = std::max(model.boundsMax.x, vertex.position.x);
+                model.boundsMax.y = std::max(model.boundsMax.y, vertex.position.y);
+                model.boundsMax.z = std::max(model.boundsMax.z, vertex.position.z);
             }
-            model.boundsMin.x = std::min(model.boundsMin.x, vertex.position.x);
-            model.boundsMin.y = std::min(model.boundsMin.y, vertex.position.y);
-            model.boundsMin.z = std::min(model.boundsMin.z, vertex.position.z);
-            model.boundsMax.x = std::max(model.boundsMax.x, vertex.position.x);
-            model.boundsMax.y = std::max(model.boundsMax.y, vertex.position.y);
-            model.boundsMax.z = std::max(model.boundsMax.z, vertex.position.z);
         }
+    };
+    if (!model.spriteFrames.empty()) {
+        include(model.spriteFrames);
+    } else if (!model.animationFrames.empty()) {
+        for (const std::vector<Surface> &frame : model.animationFrames) {
+            include(frame);
+        }
+    } else {
+        include(model.surfaces);
     }
 
     model.center = (model.boundsMin + model.boundsMax) * 0.5f;
     float radius = 0.0f;
-    for (const Surface &surface : model.surfaces) {
-        for (const Vertex &vertex : surface.vertices) {
-            radius = std::max(radius, std::sqrt(dot(vertex.position - model.center,
-                                                    vertex.position - model.center)));
+    const auto measure = [&](const std::vector<Surface> &geometry) {
+        for (const Surface &surface : geometry) {
+            for (const Vertex &vertex : surface.vertices) {
+                radius = std::max(radius, std::sqrt(dot(vertex.position - model.center,
+                                                        vertex.position - model.center)));
+            }
         }
+    };
+    if (!model.spriteFrames.empty()) {
+        measure(model.spriteFrames);
+    } else if (!model.animationFrames.empty()) {
+        for (const std::vector<Surface> &frame : model.animationFrames) {
+            measure(frame);
+        }
+    } else {
+        measure(model.surfaces);
     }
     model.radius = radius > 1e-4f ? radius : 1.0f;
 }
@@ -1719,6 +1830,8 @@ struct pkm_view {
     bool interacting = false;
     bool hasInteracted = false;
     bool autoRotate = true;
+    bool animationEnabled = true;
+    float animationSpeed = 1.0f;
     bool dark = true;
     bool dirty = true;
     bool settled = false;
@@ -2261,7 +2374,7 @@ pkm_model *pkm_model_create(const void *model_data, size_t model_size, const cha
                      error.empty() ? "The model could not be read." : error.c_str());
             return nullptr;
         }
-        if (model.surfaces.empty()) {
+        if (model.drawableSurfaces().empty()) {
             setError(error_message, error_message_size, "The model contains no geometry.");
             return nullptr;
         }
@@ -2291,7 +2404,8 @@ int pkm_model_get_stats(const pkm_model *model, pkm_model_stats *stats) {
     int vertices = 0;
     int triangles = 0;
     int textured = 0;
-    for (const Surface &surface : model->surfaces) {
+    const std::vector<Surface> &surfaces = model->drawableSurfaces();
+    for (const Surface &surface : surfaces) {
         vertices += static_cast<int>(surface.vertices.size());
         triangles += static_cast<int>(surface.indices.size() / 3);
         if (model->textureFor(surface) != nullptr) {
@@ -2300,7 +2414,7 @@ int pkm_model_get_stats(const pkm_model *model, pkm_model_stats *stats) {
     }
 
     stats->format = model->format;
-    stats->surface_count = static_cast<int>(model->surfaces.size());
+    stats->surface_count = static_cast<int>(surfaces.size());
     stats->vertex_count = vertices;
     stats->triangle_count = triangles;
     stats->frame_count = model->frameCount;
@@ -2365,6 +2479,86 @@ int pkm_model_set_skin(pkm_model *model, int skin_index) {
     for (Surface &surface : model->surfaces) {
         surface.texture = skin_index;
     }
+    for (std::vector<Surface> &frame : model->animationFrames) {
+        for (Surface &surface : frame) {
+            surface.texture = skin_index;
+        }
+    }
+    return PKM_OK;
+}
+
+int pkm_model_get_skin_size(const pkm_model *model, int skin_index, int *width, int *height) {
+    if (model == nullptr || model->format != PKM_FORMAT_MDL || width == nullptr ||
+        height == nullptr || skin_index < 0 || skin_index >= model->skinCount ||
+        static_cast<size_t>(skin_index) >= model->textures.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    const Texture &texture = model->textures[static_cast<size_t>(skin_index)];
+    if (!texture.valid()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    *width = texture.width;
+    *height = texture.height;
+    return PKM_OK;
+}
+
+int pkm_model_copy_skin_rgba(const pkm_model *model, int skin_index, void *rgba_pixels,
+                             size_t rgba_size) {
+    if (model == nullptr || model->format != PKM_FORMAT_MDL || rgba_pixels == nullptr ||
+        skin_index < 0 || skin_index >= model->skinCount ||
+        static_cast<size_t>(skin_index) >= model->textures.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    const Texture &texture = model->textures[static_cast<size_t>(skin_index)];
+    if (!texture.valid() || rgba_size < texture.rgba.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    std::memcpy(rgba_pixels, texture.rgba.data(), texture.rgba.size());
+    return PKM_OK;
+}
+
+int pkm_model_texture_count(const pkm_model *model) {
+    return model != nullptr && model->format == PKM_FORMAT_BSP
+               ? static_cast<int>(model->textures.size())
+               : 0;
+}
+
+int pkm_model_texture_name(const pkm_model *model, int texture_index, char *name,
+                           size_t name_size) {
+    if (model == nullptr || model->format != PKM_FORMAT_BSP || texture_index < 0 ||
+        static_cast<size_t>(texture_index) >= model->textures.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    return copyName(model->textures[static_cast<size_t>(texture_index)].name, name, name_size);
+}
+
+int pkm_model_get_texture_size(const pkm_model *model, int texture_index, int *width,
+                               int *height) {
+    if (model == nullptr || model->format != PKM_FORMAT_BSP || width == nullptr ||
+        height == nullptr || texture_index < 0 ||
+        static_cast<size_t>(texture_index) >= model->textures.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    const Texture &texture = model->textures[static_cast<size_t>(texture_index)];
+    if (!texture.valid()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    *width = texture.width;
+    *height = texture.height;
+    return PKM_OK;
+}
+
+int pkm_model_copy_texture_rgba(const pkm_model *model, int texture_index, void *rgba_pixels,
+                                size_t rgba_size) {
+    if (model == nullptr || model->format != PKM_FORMAT_BSP || rgba_pixels == nullptr ||
+        texture_index < 0 || static_cast<size_t>(texture_index) >= model->textures.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    const Texture &texture = model->textures[static_cast<size_t>(texture_index)];
+    if (!texture.valid() || rgba_size < texture.rgba.size()) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+    std::memcpy(rgba_pixels, texture.rgba.data(), texture.rgba.size());
     return PKM_OK;
 }
 
@@ -2415,6 +2609,27 @@ void pkm_view_set_auto_rotate(pkm_view *view, int enabled) {
     }
     view->autoRotate = enabled != 0;
     view->idleSeconds = 0.0;
+}
+
+void pkm_view_set_animation_enabled(pkm_view *view, int enabled) {
+    if (view == nullptr) {
+        return;
+    }
+    const bool value = enabled != 0;
+    if (view->animationEnabled != value) {
+        view->animationEnabled = value;
+        view->settled = false;
+        view->dirty = true;
+    }
+    view->frameClock = 0.0;
+}
+
+void pkm_view_set_animation_speed(pkm_view *view, float speed) {
+    if (view == nullptr || !std::isfinite(speed)) {
+        return;
+    }
+    view->animationSpeed = clampf(speed, kMinAnimationSpeed, kMaxAnimationSpeed);
+    view->frameClock = 0.0;
 }
 
 void pkm_view_begin_interaction(pkm_view *view) {
@@ -2544,9 +2759,9 @@ int pkm_view_advance(pkm_view *view, double elapsed_seconds) {
         return view->dirty ? 1 : 0;
     }
 
-    /* Sprite playback runs on its own clock, so a still camera keeps flipping frames. */
-    if (view->model->animates()) {
-        view->frameClock += dt;
+    /* Playback runs on its own clock, so a still camera keeps changing poses. */
+    if (view->animationEnabled && view->model->animates()) {
+        view->frameClock += static_cast<double>(dt * view->animationSpeed);
         for (int step = 0; step < kMaxFrames; step++) {
             const double interval = static_cast<double>(view->model->frameInterval());
             if (view->frameClock < interval) {
@@ -2639,7 +2854,9 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
             view->dirty = true;
         }
 
-        int scale = view->supersample ? 2 : 1;
+        /* A playing animation favors cadence; a paused pose gets the clean still pass. */
+        const bool playing = view->animationEnabled && model.animates();
+        int scale = view->supersample && !playing ? 2 : 1;
         while (scale > 1 && static_cast<long long>(width) * scale * height * scale >
                                 static_cast<long long>(kMaxRenderPixels)) {
             scale--;
@@ -2699,7 +2916,7 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
             Rasterizer rasterizer(view->color.data(), view->depth.data(), renderWidth, rowBegin,
                                   rowEnd);
 
-        for (const Surface &surface : model.surfaces) {
+        for (const Surface &surface : model.drawableSurfaces()) {
             const Texture *texture = model.textureFor(surface);
 
             auto shadeSurface = [&](int, int, const Vec3 &world, const Vec3 &rawNormal, float u,

@@ -7,6 +7,7 @@ using PakStudio.App.Commands;
 using PakStudio.App.Services;
 using PakStudio.Core.Documents;
 using PakStudio.Core.Interfaces;
+using PakStudio.Core.Models;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
 using PakStudio.Core.Playback;
@@ -85,6 +86,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         SaveImageAsCommand = new AsyncRelayCommand<string>(
             SaveSelectedImageAsAsync,
             CanSaveSelectedImageAs);
+        SaveModelSkinAsCommand = new AsyncRelayCommand<string>(
+            SaveSelectedModelSkinAsAsync,
+            CanSaveSelectedModelSkinAs);
+        SaveBspTexturesAsCommand = new AsyncRelayCommand<string>(
+            SaveSelectedBspTexturesAsAsync,
+            CanSaveSelectedBspTexturesAs);
+        SaveWadTexturesAsCommand = new AsyncRelayCommand<string>(
+            SaveSelectedWadTexturesAsAsync,
+            CanSaveSelectedWadTexturesAs);
         PlayDemoInBrowserCommand = new RelayCommand(PlayDemoInBrowser, CanPlayDemoInBrowser);
         OpenSelectedCommand = new RelayCommand(OpenSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
         UpCommand = new RelayCommand(NavigateUp, () => _currentFolder?.Parent is not null && !IsBusy);
@@ -250,6 +260,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand ExportCommand { get; }
 
     public AsyncRelayCommand<string> SaveImageAsCommand { get; }
+
+    public AsyncRelayCommand<string> SaveModelSkinAsCommand { get; }
+
+    public AsyncRelayCommand<string> SaveBspTexturesAsCommand { get; }
+
+    public AsyncRelayCommand<string> SaveWadTexturesAsCommand { get; }
 
     public RelayCommand PlayDemoInBrowserCommand { get; }
 
@@ -769,6 +785,225 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private async Task SaveSelectedModelSkinAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            _selectedItems is not [var item] ||
+            item.Node is not ArchiveFileNode file ||
+            !Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Reading skins from {file.Name}...";
+            var convertedSkins = await Task.Run(() =>
+            {
+                using var viewer = NativeModelViewer.Create(file.Data, ".mdl");
+                var outputs = new List<byte[]>();
+                for (var skinIndex = 0; skinIndex < viewer.Statistics.SkinCount; skinIndex++)
+                {
+                    var skin = viewer.GetSkin(skinIndex) ??
+                        throw new InvalidDataException("The model contains an unreadable skin.");
+                    outputs.Add(ImageFormatConverter.EncodeRgba(
+                        skin.Width, skin.Height, skin.RgbaPixels, format));
+                }
+                return outputs.Count > 0
+                    ? outputs
+                    : throw new InvalidDataException("The model does not contain a readable skin.");
+            }).ConfigureAwait(true);
+
+            var extension = ImageFormatConverter.ExtensionFor(format);
+            var baseName = Path.GetFileNameWithoutExtension(file.Name);
+            if (convertedSkins.Count == 1)
+            {
+                var outputPath = _fileDialogService.PickImageSavePath(
+                    baseName + "_skin" + extension,
+                    extension.TrimStart('.'));
+                if (string.IsNullOrWhiteSpace(outputPath))
+                {
+                    return;
+                }
+                await File.WriteAllBytesAsync(outputPath, convertedSkins[0]).ConfigureAwait(true);
+                StatusText = $"Saved {Path.GetFileName(outputPath)}";
+            }
+            else
+            {
+                var directory = _fileDialogService.PickExportDirectory();
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    return;
+                }
+                var paths = convertedSkins
+                    .Select((_, index) => Path.Combine(
+                        directory, $"{baseName}_skin{index + 1}{extension}"))
+                    .ToList();
+                if (paths.Any(File.Exists))
+                {
+                    throw new IOException("One or more model skin files already exist in that folder.");
+                }
+                for (var skinIndex = 0; skinIndex < convertedSkins.Count; skinIndex++)
+                {
+                    await File.WriteAllBytesAsync(
+                        paths[skinIndex], convertedSkins[skinIndex]).ConfigureAwait(true);
+                }
+                StatusText = $"Saved {convertedSkins.Count} skins to {directory}";
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Model skin export failed.";
+            _messageBoxService.ShowError("Save Model Skins As Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveSelectedBspTexturesAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            _selectedItems is not [var item] ||
+            item.Node is not ArchiveFileNode file ||
+            !Path.GetExtension(file.Name).Equals(".bsp", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var directory = _fileDialogService.PickExportDirectory();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Reading textures from {file.Name}...";
+            var textures = await Task.Run(() =>
+            {
+                using var viewer = NativeModelViewer.Create(file.Data, ".bsp");
+                var outputs = new List<(string Name, byte[] Data)>();
+                var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (var textureIndex = 0; textureIndex < viewer.EmbeddedTextureCount; textureIndex++)
+                {
+                    var texture = viewer.GetEmbeddedTexture(textureIndex) ??
+                        throw new InvalidDataException("The BSP contains an unreadable texture.");
+                    var baseName = ImageFormatConverter.SafeTextureFileStem(
+                        texture.Name, textureIndex);
+                    var uniqueName = baseName;
+                    for (var duplicate = 2; !usedNames.Add(uniqueName); duplicate++)
+                    {
+                        uniqueName = $"{baseName}_{duplicate}";
+                    }
+                    outputs.Add((
+                        uniqueName,
+                        ImageFormatConverter.EncodeRgba(
+                            texture.Width, texture.Height, texture.RgbaPixels, format)));
+                }
+                return outputs.Count > 0
+                    ? outputs
+                    : throw new InvalidDataException("The BSP does not contain readable textures.");
+            }).ConfigureAwait(true);
+
+            var extension = ImageFormatConverter.ExtensionFor(format);
+            var paths = textures
+                .Select(texture => Path.Combine(directory, texture.Name + extension))
+                .ToList();
+            if (paths.Any(File.Exists))
+            {
+                throw new IOException("One or more BSP texture files already exist in that folder.");
+            }
+            for (var index = 0; index < textures.Count; index++)
+            {
+                await File.WriteAllBytesAsync(paths[index], textures[index].Data).ConfigureAwait(true);
+            }
+            StatusText = $"Saved {textures.Count} textures to {directory}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "BSP texture export failed.";
+            _messageBoxService.ShowError("Save BSP Textures As Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveSelectedWadTexturesAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            _selectedItems is not [var item] ||
+            item.Node is not ArchiveFileNode file ||
+            !Path.GetExtension(file.Name).Equals(".wad", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var directory = _fileDialogService.PickExportDirectory();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Reading textures from {file.Name}...";
+            var textures = await Task.Run(() =>
+            {
+                var outputs = new List<(string Name, byte[] Data)>();
+                var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var extracted = WadTextureExtractor.Extract(file.Data);
+                for (var textureIndex = 0; textureIndex < extracted.Count; textureIndex++)
+                {
+                    var texture = extracted[textureIndex];
+                    var baseName = ImageFormatConverter.SafeTextureFileStem(
+                        texture.Name, textureIndex);
+                    var uniqueName = baseName;
+                    for (var duplicate = 2; !usedNames.Add(uniqueName); duplicate++)
+                    {
+                        uniqueName = $"{baseName}_{duplicate}";
+                    }
+                    outputs.Add((
+                        uniqueName,
+                        ImageFormatConverter.EncodeRgba(
+                            texture.Width, texture.Height, texture.RgbaPixels, format)));
+                }
+                return outputs.Count > 0
+                    ? outputs
+                    : throw new InvalidDataException("The WAD does not contain readable mip textures.");
+            }).ConfigureAwait(true);
+
+            var extension = ImageFormatConverter.ExtensionFor(format);
+            var paths = textures
+                .Select(texture => Path.Combine(directory, texture.Name + extension))
+                .ToList();
+            if (paths.Any(File.Exists))
+            {
+                throw new IOException("One or more WAD texture files already exist in that folder.");
+            }
+            for (var index = 0; index < textures.Count; index++)
+            {
+                await File.WriteAllBytesAsync(paths[index], textures[index].Data).ConfigureAwait(true);
+            }
+            StatusText = $"Saved {textures.Count} textures to {directory}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "WAD texture export failed.";
+            _messageBoxService.ShowError("Save WAD Textures As Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private void OpenSelectedItem()
     {
         OpenItem(SelectedItem);
@@ -1155,6 +1390,33 @@ public sealed class MainWindowViewModel : ViewModelBase
                _selectedItems is [var item] &&
                item.Node is ArchiveFileNode file &&
                ImageFormatConverter.IsSupportedSource(file.Name);
+    }
+
+    private bool CanSaveSelectedModelSkinAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanSaveSelectedBspTexturesAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               Path.GetExtension(file.Name).Equals(".bsp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanSaveSelectedWadTexturesAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               _selectedItems is [var item] &&
+               item.Node is ArchiveFileNode file &&
+               Path.GetExtension(file.Name).Equals(".wad", StringComparison.OrdinalIgnoreCase);
     }
 
     private void RefreshCurrentFolder()

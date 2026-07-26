@@ -159,6 +159,8 @@ public sealed class ModelPreviewSession : IDisposable
         return true;
     }
 
+    public ModelSkin? GetSelectedSkin() => _viewer.GetSkin(_skinIndex);
+
     public bool DarkBackground
     {
         set => _viewer.DarkBackground = value;
@@ -167,6 +169,16 @@ public sealed class ModelPreviewSession : IDisposable
     public bool AutoRotate
     {
         set => _viewer.AutoRotate = value;
+    }
+
+    public bool AnimationEnabled
+    {
+        set => _viewer.AnimationEnabled = value;
+    }
+
+    public double AnimationSpeed
+    {
+        set => _viewer.AnimationSpeed = value;
     }
 
     public void BeginInteraction() => _viewer.BeginInteraction();

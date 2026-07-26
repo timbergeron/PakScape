@@ -100,6 +100,8 @@ final class PakViewModel: NSObject, ObservableObject {
     private var audioPreviewNodeID: PakNode.ID?
     private var audioPreviewProgress: Double = 0
     private var previewImageCacheVersion: UUID?
+    private var previewImageCacheUsesDarkAppearance: Bool?
+    private var previewImageCacheBspOptions: BspLevelPreviewOptions?
     private var previewImageCache: [PakNode.ID: NSImage] = [:]
     private var previewImageMisses: Set<PakNode.ID> = []
     private var previewImageRequests: [PakNode.ID: Task<Void, Never>] = [:]
@@ -216,6 +218,11 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     func toggleQuickLook(for nodes: [PakNode]) {
+        if SkyboxPreviewPresenter.shared.isVisible {
+            SkyboxPreviewPresenter.shared.hide()
+            return
+        }
+
         if ModelPreviewPresenter.shared.isVisible {
             ModelPreviewPresenter.shared.hide()
             return
@@ -245,6 +252,66 @@ final class PakViewModel: NSObject, ObservableObject {
         }
     }
 
+    func canPreviewSkybox(_ node: PakNode) -> Bool {
+        skyboxFaceSet(for: node) != nil
+    }
+
+    func showSkyboxPreview(for node: PakNode) {
+        guard let faceSet = skyboxFaceSet(for: node) else { return }
+
+        do {
+            let images = try faceSet.sceneKitFaceNodes.map { faceNode -> NSImage in
+                let data = try PakNodeData.data(for: faceNode, originalData: pakFile?.data)
+                guard let image = renderPreviewImage(fileName: faceNode.name, data: data) else {
+                    throw PakImageConversionError.invalidImage
+                }
+                return image
+            }
+
+            let imageSizes = images.compactMap { image -> NSSize? in
+                guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                    return nil
+                }
+                return NSSize(width: cgImage.width, height: cgImage.height)
+            }
+            guard images.count == PakSkyboxFaceSet.Face.allCases.count,
+                  imageSizes.count == images.count,
+                  let firstSize = imageSizes.first,
+                  firstSize.width == firstSize.height,
+                  imageSizes.allSatisfy({ $0 == firstSize }) else {
+                throw PakError.unknown("Skybox faces must be square images with matching dimensions.")
+            }
+
+            PakQuickLook.shared.hide()
+            ModelPreviewPresenter.shared.hide()
+            SkyboxPreviewPresenter.shared.show(
+                item: SkyboxPreviewItem(name: faceSet.name, images: images)
+            )
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Preview Skybox"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func skyboxFaceSet(for node: PakNode) -> PakSkyboxFaceSet? {
+        guard let root = pakFile?.root,
+              let folder = findParent(of: node, in: root) else {
+            return nil
+        }
+        guard let faceSet = PakSkyboxFaceSet(selected: node, siblings: folder.children ?? []) else {
+            return nil
+        }
+        let sizes = faceSet.faces.values.map(\.fileSize)
+        guard sizes.allSatisfy({ $0 <= Self.maximumPreviewFileSize }),
+              sizes.reduce(0, +) <= Self.maximumQuickLookSelectionSize else {
+            return nil
+        }
+        return faceSet
+    }
+
     /// Handles opening formats PakScape has a better destination for than whichever
     /// application happens to claim the extension. Models use the interactive viewer, LMP
     /// images use the rendered Quick Look path, and demos go to the web player. Returns
@@ -270,6 +337,7 @@ final class PakViewModel: NSObject, ObservableObject {
         do {
             let items = try prepareQuickLookItems(for: [node])
             ModelPreviewPresenter.shared.hide()
+            SkyboxPreviewPresenter.shared.hide()
             PakQuickLook.shared.show(items: items)
         } catch {
             let alert = NSAlert()
@@ -290,6 +358,7 @@ final class PakViewModel: NSObject, ObservableObject {
         if PakQuickLook.shared.isVisible {
             PakQuickLook.shared.hide()
         }
+        SkyboxPreviewPresenter.shared.hide()
         ModelPreviewPresenter.shared.show(items: items)
         return true
     }
@@ -1031,6 +1100,18 @@ final class PakViewModel: NSObject, ObservableObject {
         return PakImageConverter.supportedSourceExtensions.contains(sourceExtension)
     }
 
+    func canSaveModelSkinAs(_ node: PakNode) -> Bool {
+        !node.isFolder && (node.name as NSString).pathExtension.lowercased() == "mdl"
+    }
+
+    func canSaveBspTexturesAs(_ node: PakNode) -> Bool {
+        !node.isFolder && (node.name as NSString).pathExtension.lowercased() == "bsp"
+    }
+
+    func canSaveWadTexturesAs(_ node: PakNode) -> Bool {
+        !node.isFolder && (node.name as NSString).pathExtension.lowercased() == "wad"
+    }
+
     func saveImageAs(_ node: PakNode, format: PakImageFormat) {
         do {
             let sourceData = try PakNodeData.data(for: node, originalData: pakFile?.data)
@@ -1060,6 +1141,194 @@ final class PakViewModel: NSObject, ObservableObject {
         } catch {
             NSAlert(error: error).runModal()
         }
+    }
+
+    func saveModelSkinsAs(_ node: PakNode, format: PakImageFormat) {
+        do {
+            let sourceData = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let viewer = try QuakeModelViewer(
+                data: sourceData,
+                fileExtension: "mdl",
+                resolver: nil
+            )
+            guard viewer.skinCount > 0 else {
+                throw PakImageConversionError.invalidImage
+            }
+            var convertedSkins: [Data] = []
+            for skinIndex in 0 ..< viewer.skinCount {
+                if skinIndex > 0 {
+                    _ = viewer.selectSkin(skinIndex)
+                }
+                guard let image = viewer.selectedSkinImage() else {
+                    throw PakImageConversionError.invalidImage
+                }
+                convertedSkins.append(try PakImageConverter.convert(image: image, to: format))
+            }
+
+            let sourceName = node.name as NSString
+            let suffix = convertedSkins.count == 1 ? "_skin" : "_skins"
+            let outputName = sourceName.deletingPathExtension + suffix + "." + format.pathExtension
+            let save = NSSavePanel()
+            save.title = convertedSkins.count == 1 ? "Save Model Skin As" : "Save Model Skins As"
+            save.nameFieldStringValue = outputName
+            if let contentType = UTType(filenameExtension: format.pathExtension) {
+                save.allowedContentTypes = [contentType]
+            }
+            save.canCreateDirectories = true
+            save.begin { response in
+                guard response == .OK, let outputURL = save.url else { return }
+                do {
+                    if convertedSkins.count == 1 {
+                        try convertedSkins[0].write(to: outputURL, options: .atomic)
+                    } else {
+                        let folder = outputURL.deletingLastPathComponent()
+                        let baseName = outputURL.deletingPathExtension().lastPathComponent
+                        let outputURLs = convertedSkins.indices.map { skinIndex in
+                            folder.appendingPathComponent(
+                                "\(baseName)_\(skinIndex + 1).\(format.pathExtension)"
+                            )
+                        }
+                        guard !outputURLs.contains(where: {
+                            FileManager.default.fileExists(atPath: $0.path)
+                        }) else {
+                            throw PakError.unknown(
+                                "One or more model skin files already exist in that folder."
+                            )
+                        }
+                        for (skinIndex, data) in convertedSkins.enumerated() {
+                            try data.write(to: outputURLs[skinIndex], options: .atomic)
+                        }
+                    }
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    func saveBspTexturesAs(_ node: PakNode, format: PakImageFormat) {
+        do {
+            let sourceData = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let viewer = try QuakeModelViewer(
+                data: sourceData,
+                fileExtension: "bsp",
+                resolver: nil
+            )
+            let textures = viewer.embeddedTextures()
+            guard !textures.isEmpty else {
+                throw PakImageConversionError.invalidImage
+            }
+            let converted = try textures.map {
+                (name: $0.name, data: try PakImageConverter.convert(image: $0.image, to: format))
+            }
+
+            let panel = NSOpenPanel()
+            panel.title = "Save BSP Textures As"
+            panel.prompt = "Save"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.begin { response in
+                guard response == .OK, let folder = panel.url else { return }
+                do {
+                    var usedNames: Set<String> = []
+                    let outputs = converted.enumerated().map { index, texture in
+                        var baseName = Self.safeTextureFileName(texture.name, fallbackIndex: index)
+                        var candidate = baseName
+                        var duplicate = 2
+                        while usedNames.contains(candidate.lowercased()) {
+                            candidate = "\(baseName)_\(duplicate)"
+                            duplicate += 1
+                        }
+                        usedNames.insert(candidate.lowercased())
+                        baseName = candidate
+                        return folder.appendingPathComponent(
+                            "\(baseName).\(format.pathExtension)"
+                        )
+                    }
+                    guard !outputs.contains(where: {
+                        FileManager.default.fileExists(atPath: $0.path)
+                    }) else {
+                        throw PakError.unknown(
+                            "One or more BSP texture files already exist in that folder."
+                        )
+                    }
+                    for (index, texture) in converted.enumerated() {
+                        try texture.data.write(to: outputs[index], options: .atomic)
+                    }
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    func saveWadTexturesAs(_ node: PakNode, format: PakImageFormat) {
+        do {
+            let sourceData = try PakNodeData.data(for: node, originalData: pakFile?.data)
+            let textures = WadPreviewRenderer.textureImages(data: sourceData)
+            guard !textures.isEmpty else {
+                throw PakError.unknown("The WAD does not contain readable mip textures.")
+            }
+            let converted = try textures.map {
+                (name: $0.name, data: try PakImageConverter.convert(image: $0.image, to: format))
+            }
+
+            let panel = NSOpenPanel()
+            panel.title = "Save WAD Textures As"
+            panel.prompt = "Save"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.begin { response in
+                guard response == .OK, let folder = panel.url else { return }
+                do {
+                    var usedNames: Set<String> = []
+                    let outputs = converted.enumerated().map { index, texture in
+                        let baseName = Self.safeTextureFileName(
+                            texture.name, fallbackIndex: index)
+                        var candidate = baseName
+                        var duplicate = 2
+                        while usedNames.contains(candidate.lowercased()) {
+                            candidate = "\(baseName)_\(duplicate)"
+                            duplicate += 1
+                        }
+                        usedNames.insert(candidate.lowercased())
+                        return folder.appendingPathComponent(
+                            "\(candidate).\(format.pathExtension)"
+                        )
+                    }
+                    guard !outputs.contains(where: {
+                        FileManager.default.fileExists(atPath: $0.path)
+                    }) else {
+                        throw PakError.unknown(
+                            "One or more WAD texture files already exist in that folder."
+                        )
+                    }
+                    for (index, texture) in converted.enumerated() {
+                        try texture.data.write(to: outputs[index], options: .atomic)
+                    }
+                } catch {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    private static func safeTextureFileName(_ name: String, fallbackIndex: Int) -> String {
+        let invalid = CharacterSet(charactersIn: "<>:\"/\\|?*").union(.controlCharacters)
+        let pieces = name.components(separatedBy: invalid)
+        let cleaned = pieces.joined(separator: "_")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "texture\(fallbackIndex + 1)" : cleaned
     }
     
     func extractData(for node: PakNode) -> Data? {
@@ -1120,7 +1389,8 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     func previewImage(for node: PakNode) -> NSImage? {
-        invalidatePreviewImageCacheIfNeeded()
+        let previewAppearance = NSApp.effectiveAppearance
+        invalidatePreviewImageCacheIfNeeded(appearance: previewAppearance)
 
         if let cachedImage = previewImageCache[node.id] {
             return cachedImage
@@ -1164,7 +1434,11 @@ final class PakViewModel: NSObject, ObservableObject {
                 previewImageMisses.insert(node.id)
                 return nil
             }
-            if let preview = renderPreviewImage(fileName: node.name, data: data) {
+            if let preview = renderPreviewImage(
+                fileName: node.name,
+                data: data,
+                appearance: previewAppearance
+            ) {
                 previewImageCache[node.id] = preview
                 return preview
             }
@@ -1332,7 +1606,11 @@ final class PakViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func renderPreviewImage(fileName: String, data: Data) -> NSImage? {
+    private func renderPreviewImage(
+        fileName: String,
+        data: Data,
+        appearance: NSAppearance = NSApp.effectiveAppearance
+    ) -> NSImage? {
         let ext = (fileName as NSString).pathExtension.lowercased()
         if ext == "lmp" {
             return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
@@ -1346,7 +1624,11 @@ final class PakViewModel: NSObject, ObservableObject {
             return SprPreviewRenderer.renderImage(data: data)
         } else if ext == "bsp" {
             return BspPreviewRenderer.renderImage(fileName: fileName, data: data)
-                ?? BspLevelPreviewRenderer.renderImage(data: data)
+                ?? BspLevelPreviewRenderer.renderImage(
+                    data: data,
+                    appearance: appearance,
+                    options: .stored()
+                )
         } else if ext == "wad" {
             return WadPreviewRenderer.renderImage(fileName: fileName, data: data)
         }
@@ -1508,13 +1790,22 @@ final class PakViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func invalidatePreviewImageCacheIfNeeded() {
+    private func invalidatePreviewImageCacheIfNeeded(appearance: NSAppearance) {
         let currentVersion = pakFile?.version
-        guard previewImageCacheVersion != currentVersion else { return }
+        let usesDarkAppearance =
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let bspOptions = BspLevelPreviewOptions.stored()
+        guard previewImageCacheVersion != currentVersion
+                || previewImageCacheUsesDarkAppearance != usesDarkAppearance
+                || previewImageCacheBspOptions != bspOptions else {
+            return
+        }
 
         previewImageRequests.values.forEach { $0.cancel() }
         previewImageRequests.removeAll(keepingCapacity: true)
         previewImageCacheVersion = currentVersion
+        previewImageCacheUsesDarkAppearance = usesDarkAppearance
+        previewImageCacheBspOptions = bspOptions
         previewImageCache.removeAll(keepingCapacity: true)
         previewImageMisses.removeAll(keepingCapacity: true)
     }
@@ -2139,12 +2430,35 @@ private enum WadPreviewRenderer {
         let dsize: Int
         let size: Int
         let type: UInt8
+        let compression: UInt8
         let name: String
     }
 
     static func renderImage(fileName: String, data: Data) -> NSImage? {
         guard fileName.lowercased() == "gfx.wad" else { return nil }
+        guard let entries = entries(in: data) else { return nil }
+        let images = entries.prefix(64).compactMap { decodeImage(entry: $0, data: data) }
+        guard !images.isEmpty else { return nil }
+        return contactSheet(from: images)
+    }
+
+    static func textureImages(data: Data) -> [(name: String, image: NSImage)] {
+        guard let entries = entries(in: data) else { return [] }
+        let isWad3 = String(data: data.prefix(4), encoding: .ascii) == "WAD3"
+        return entries.compactMap { entry in
+            guard entry.type == Character("D").asciiValue,
+                  entry.compression == 0,
+                  let image = decodeMiptex(entry: entry, data: data, isWad3: isWad3) else {
+                return nil
+            }
+            return (entry.name, image)
+        }
+    }
+
+    private static func entries(in data: Data) -> [Entry]? {
         guard data.count >= 12 else { return nil }
+        let magic = String(data: data.prefix(4), encoding: .ascii)
+        guard magic == "WAD2" || magic == "WAD3" else { return nil }
 
         guard let dirEntries = BspPreviewRenderer.readInt32LE(data, offset: 4),
               let dirOffset = BspPreviewRenderer.readInt32LE(data, offset: 8),
@@ -2172,17 +2486,23 @@ private enum WadPreviewRenderer {
                 continue
             }
             let type = data[base + 12]
-            // base+13 compression, base+14 padding(2 bytes)
+            let compression = data[base + 13]
             let nameData = data.subdata(in: base + 16 ..< base + 32)
             let name = asciiStringFromNullTerminated(nameData)
 
-            guard offset >= 0, size > 0, offset + size <= data.count else { continue }
-            entries.append(Entry(offset: offset, dsize: dsize, size: size, type: type, name: name))
+            let lumpEnd = offset.addingReportingOverflow(dsize)
+            guard offset >= 0, dsize > 0, !lumpEnd.overflow,
+                  lumpEnd.partialValue <= data.count else { continue }
+            entries.append(Entry(
+                offset: offset,
+                dsize: dsize,
+                size: size,
+                type: type,
+                compression: compression,
+                name: name
+            ))
         }
-
-        let images = entries.prefix(64).compactMap { decodeImage(entry: $0, data: data) }
-        guard !images.isEmpty else { return nil }
-        return contactSheet(from: images)
+        return entries
     }
 
     private static func decodeImage(entry: Entry, data: Data) -> NSImage? {
@@ -2190,7 +2510,7 @@ private enum WadPreviewRenderer {
         if entry.type == Character("@").asciiValue { return nil }
 
         if entry.type == Character("D").asciiValue {
-            return decodeMiptex(entry: entry, data: data)
+            return decodeMiptex(entry: entry, data: data, isWad3: false)
         }
 
         // Treat others as simple header (width, height, then palettized pixels).
@@ -2205,14 +2525,17 @@ private enum WadPreviewRenderer {
         guard pixelCount > 0 else { return nil }
 
         let pixelStart = entry.offset + 8
-        guard pixelStart + pixelCount <= entry.offset + entry.size,
-              pixelStart + pixelCount <= data.count else { return nil }
+        let pixelEnd = pixelStart.addingReportingOverflow(pixelCount)
+        let lumpEnd = entry.offset.addingReportingOverflow(entry.dsize)
+        guard !pixelEnd.overflow, !lumpEnd.overflow,
+              pixelEnd.partialValue <= lumpEnd.partialValue,
+              pixelEnd.partialValue <= data.count else { return nil }
 
         let pixels = data.subdata(in: pixelStart ..< pixelStart + pixelCount)
         return image(from: pixels, width: width, height: height)
     }
 
-    private static func decodeMiptex(entry: Entry, data: Data) -> NSImage? {
+    private static func decodeMiptex(entry: Entry, data: Data, isWad3: Bool) -> NSImage? {
         let base = entry.offset
         guard base + 40 <= data.count else { return nil }
 
@@ -2231,15 +2554,49 @@ private enum WadPreviewRenderer {
         let pixelStartResult = base.addingReportingOverflow(ofs1)
         guard !pixelStartResult.overflow else { return nil }
         let pixelStart = pixelStartResult.partialValue
-        guard pixelStart + pixelCount <= base + entry.size,
-              pixelStart + pixelCount <= data.count else { return nil }
+        let pixelEnd = pixelStart.addingReportingOverflow(pixelCount)
+        let lumpEnd = base.addingReportingOverflow(entry.dsize)
+        guard !pixelEnd.overflow, !lumpEnd.overflow,
+              pixelEnd.partialValue <= lumpEnd.partialValue,
+              pixelEnd.partialValue <= data.count else { return nil }
 
         let pixels = data.subdata(in: pixelStart ..< pixelStart + pixelCount)
-        return image(from: pixels, width: width, height: height)
+        let palette: [UInt8]
+        if isWad3,
+           let ofs4 = BspPreviewRenderer.readInt32LE(data, offset: base + 36) {
+            let paletteBase = base.addingReportingOverflow(ofs4)
+            let paletteCount = paletteBase.partialValue.addingReportingOverflow(pixelCount / 64)
+            let paletteEnd = paletteCount.partialValue.addingReportingOverflow(770)
+            if !paletteBase.overflow, !paletteCount.overflow, !paletteEnd.overflow,
+               paletteCount.partialValue >= base,
+               paletteEnd.partialValue <= lumpEnd.partialValue,
+               paletteEnd.partialValue <= data.count,
+               (Int(data[paletteCount.partialValue]) |
+                (Int(data[paletteCount.partialValue + 1]) << 8)) == 256 {
+                palette = Array(
+                    data[paletteCount.partialValue + 2 ..< paletteEnd.partialValue])
+            } else {
+                return nil
+            }
+        } else {
+            palette = QuakePalette.bytes
+        }
+        return image(
+            from: pixels,
+            width: width,
+            height: height,
+            palette: palette,
+            transparentIndex255: false
+        )
     }
 
-    private static func image(from pixels: Data, width: Int, height: Int) -> NSImage? {
-        let palette = QuakePalette.bytes
+    private static func image(
+        from pixels: Data,
+        width: Int,
+        height: Int,
+        palette: [UInt8] = QuakePalette.bytes,
+        transparentIndex255: Bool = true
+    ) -> NSImage? {
         guard palette.count >= 768,
               PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
 
@@ -2267,7 +2624,7 @@ private enum WadPreviewRenderer {
 
                 for i in 0..<pixelCount {
                     let paletteIndex = Int(src[i])
-                    if paletteIndex == 255 {
+                    if transparentIndex255 && paletteIndex == 255 {
                         let destIndex = i * 4
                         dest[destIndex] = 0
                         dest[destIndex + 1] = 0

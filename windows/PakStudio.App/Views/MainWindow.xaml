@@ -878,6 +878,48 @@
                                               Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="tga" />
                                 </MenuItem>
+                                <MenuItem Header="Save Model Skins As">
+                                    <MenuItem Header="LMP..."
+                                              Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="lmp" />
+                                    <MenuItem Header="JPEG..."
+                                              Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="jpg" />
+                                    <MenuItem Header="PNG..."
+                                              Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="png" />
+                                    <MenuItem Header="TGA..."
+                                              Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="tga" />
+                                </MenuItem>
+                                <MenuItem Header="Save BSP Textures As">
+                                    <MenuItem Header="LMP..."
+                                              Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="lmp" />
+                                    <MenuItem Header="JPEG..."
+                                              Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="jpg" />
+                                    <MenuItem Header="PNG..."
+                                              Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="png" />
+                                    <MenuItem Header="TGA..."
+                                              Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="tga" />
+                                </MenuItem>
+                                <MenuItem Header="Save WAD Textures As">
+                                    <MenuItem Header="LMP..."
+                                              Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="lmp" />
+                                    <MenuItem Header="JPEG..."
+                                              Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="jpg" />
+                                    <MenuItem Header="PNG..."
+                                              Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="png" />
+                                    <MenuItem Header="TGA..."
+                                              Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="tga" />
+                                </MenuItem>
                                 <MenuItem Header="Rename..."
                                           Command="{Binding Data.RenameCommand, Source={StaticResource ViewModelProxy}}" />
                                 <MenuItem Header="Delete"

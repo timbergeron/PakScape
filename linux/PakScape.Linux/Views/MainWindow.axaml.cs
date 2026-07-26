@@ -112,6 +112,39 @@ public partial class MainWindow : Window
                 SaveImageMenuItem("TGA...", "tga", viewModel),
             },
         };
+        var saveSkinAs = new MenuItem
+        {
+            Header = "Save Model Skins As",
+            ItemsSource = new[]
+            {
+                SaveModelSkinMenuItem("LMP...", "lmp", viewModel),
+                SaveModelSkinMenuItem("JPEG...", "jpg", viewModel),
+                SaveModelSkinMenuItem("PNG...", "png", viewModel),
+                SaveModelSkinMenuItem("TGA...", "tga", viewModel),
+            },
+        };
+        var saveBspTexturesAs = new MenuItem
+        {
+            Header = "Save BSP Textures As",
+            ItemsSource = new[]
+            {
+                SaveBspTextureMenuItem("LMP...", "lmp", viewModel),
+                SaveBspTextureMenuItem("JPEG...", "jpg", viewModel),
+                SaveBspTextureMenuItem("PNG...", "png", viewModel),
+                SaveBspTextureMenuItem("TGA...", "tga", viewModel),
+            },
+        };
+        var saveWadTexturesAs = new MenuItem
+        {
+            Header = "Save WAD Textures As",
+            ItemsSource = new[]
+            {
+                SaveWadTextureMenuItem("LMP...", "lmp", viewModel),
+                SaveWadTextureMenuItem("JPEG...", "jpg", viewModel),
+                SaveWadTextureMenuItem("PNG...", "png", viewModel),
+                SaveWadTextureMenuItem("TGA...", "tga", viewModel),
+            },
+        };
 
         return new ContextMenu
         {
@@ -131,6 +164,9 @@ public partial class MainWindow : Window
                 new Separator(),
                 new MenuItem { Header = "Export...", Command = viewModel.ExportCommand },
                 saveAs,
+                saveSkinAs,
+                saveBspTexturesAs,
+                saveWadTexturesAs,
                 new MenuItem { Header = "Rename...", Command = viewModel.RenameCommand },
                 new MenuItem { Header = "Delete", Command = viewModel.DeleteCommand },
             },
@@ -145,6 +181,39 @@ public partial class MainWindow : Window
         {
             Header = header,
             Command = viewModel.SaveImageAsCommand,
+            CommandParameter = formatId,
+        };
+
+    private static MenuItem SaveModelSkinMenuItem(
+        string header,
+        string formatId,
+        MainWindowViewModel viewModel) =>
+        new()
+        {
+            Header = header,
+            Command = viewModel.SaveModelSkinAsCommand,
+            CommandParameter = formatId,
+        };
+
+    private static MenuItem SaveBspTextureMenuItem(
+        string header,
+        string formatId,
+        MainWindowViewModel viewModel) =>
+        new()
+        {
+            Header = header,
+            Command = viewModel.SaveBspTexturesAsCommand,
+            CommandParameter = formatId,
+        };
+
+    private static MenuItem SaveWadTextureMenuItem(
+        string header,
+        string formatId,
+        MainWindowViewModel viewModel) =>
+        new()
+        {
+            Header = header,
+            Command = viewModel.SaveWadTexturesAsCommand,
             CommandParameter = formatId,
         };
 

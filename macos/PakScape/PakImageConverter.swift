@@ -37,6 +37,36 @@ final class PakImageSaveRequest: NSObject {
     }
 }
 
+final class PakModelSkinSaveRequest: NSObject {
+    let node: PakNode
+    let format: PakImageFormat
+
+    init(node: PakNode, format: PakImageFormat) {
+        self.node = node
+        self.format = format
+    }
+}
+
+final class PakBspTextureSaveRequest: NSObject {
+    let node: PakNode
+    let format: PakImageFormat
+
+    init(node: PakNode, format: PakImageFormat) {
+        self.node = node
+        self.format = format
+    }
+}
+
+final class PakWadTextureSaveRequest: NSObject {
+    let node: PakNode
+    let format: PakImageFormat
+
+    init(node: PakNode, format: PakImageFormat) {
+        self.node = node
+        self.format = format
+    }
+}
+
 enum PakImageConversionError: LocalizedError {
     case unsupportedSourceFormat
     case invalidImage
@@ -80,8 +110,15 @@ enum PakImageConverter {
             image = NSImage(data: data)
         }
 
-        guard let image,
-              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        guard let image else {
+            throw PakImageConversionError.invalidImage
+        }
+
+        return try convert(image: image, to: format)
+    }
+
+    static func convert(image: NSImage, to format: PakImageFormat) throws -> Data {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw PakImageConversionError.invalidImage
         }
 

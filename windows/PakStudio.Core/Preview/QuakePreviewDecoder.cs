@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 
 namespace PakStudio.Core.Preview;
 
@@ -7,6 +8,16 @@ internal static class QuakePreviewDecoder
     private const int MaximumDimension = 8_192;
     private const int MaximumPixelCount = 16_777_216;
     private const int MaximumGeometryElements = 1_000_000;
+    private const int MaximumBspEntityBytes = 4 * 1024 * 1024;
+    private const int MaximumBspEntityCount = 100_000;
+
+    private readonly record struct BspMarker(
+        float X,
+        float Y,
+        string Label,
+        byte Blue,
+        byte Green,
+        byte Red);
 
     private static readonly byte[] Palette = Convert.FromBase64String(
         "AAAADw8PHx8fLy8vPz8/S0tLW1tba2tre3t7i4uLm5ubq6uru7u7y8vL29vb6+vrDwsHFw8LHxcLJxsPLyMTNysXPy8XSzcbUzsbW0MfY0sfa1Mfc1cfe18jg2cjj28jCwsPExMbGxsnJyczLy8/NzdLPz9XR0dnT09zW1t/Y2OLa2uXc3Oje3uvg4O7i4vLAAAABwcACwsAExMAGxsAIyMAKysHLy8HNzcHPz8HR0cHS0sLU1MLW1sLY2MLa2sPBwAADwAAFwAAHwAAJwAALwAANwAAPwAARwAATwAAVwAAXwAAZwAAbwAAdwAAfwAAExMAGxsAIyMALysANy8AQzcASzsHV0MHX0cHa0sLd1MPg1cTi1sTl18bo2Mfr2cjIxMHLxcLOx8PSyMTVysXYy8fczcjfzsrj0Mzn08zr2Mvv3cvz48r36sn78sf//MbCwcAGxMAKyMPNysTRzMbUzcjYz8rb0czf1M/i19Hm2tTp3tft4drw5N706OL47OXq4ujn3+Xk3OHi2d7f1tvd1Nja0tXXz9LVzdDSy83QycvNx8jKxcbIxMTFwsLDwcHu3Ofr2uPo1+Dl1d3i09rf0tfc0NTaztLXzM/Uys3RyMrOx8jLxcbIxMTFwsLDwcH28O7y7Onv6Obr5eLo4d7l3tvh29fe2NTa1dHX0s7Uz8zQzMnNysfJx8XGxMPDwsHb4N7Z3tvX3NnV2tfT2NXR1tPP1NHN0s/L0M3KzsvIzMnHysfFyMXDxsTCxMLBwsH//Mb798X28sTy7cPu6cPq5cLm4MHi3MHe2MHa1MAW0cASzcAOysAKx8AGw8ACwcAAAD/CwvvExPfGxvPIyO/KyuvLy+fLy+PLy9/Ly9vLy9fKytPIyM/GxsvExMfCwsPKwAAOwAASwcAXwcAbw8AfxcHkx8HoycLtzMPw0sbz2Mr238745dP56tf779399OLp3s7t5s3x8M35+NXf7//q+f/1///ZwAAiwAAswAA1wAA/wAA//OT//fH////n1tT");
@@ -560,6 +571,19 @@ internal static class QuakePreviewDecoder
             return false;
         }
 
+        if (TryReadLump(data, 0, out var entityOffset, out var entityLength) &&
+            entityLength <= MaximumBspEntityBytes)
+        {
+            DrawBspMarkers(
+                pixels,
+                size,
+                ParseBspMarkers(data.AsSpan(entityOffset, entityLength)),
+                minX,
+                maxY,
+                scale,
+                padding);
+        }
+
         bitmap = new PreviewBitmap(size, size, pixels);
         return true;
     }
@@ -603,6 +627,297 @@ internal static class QuakePreviewDecoder
             }
         }
     }
+
+    private static IReadOnlyList<BspMarker> ParseBspMarkers(ReadOnlySpan<byte> entityBytes)
+    {
+        var nullIndex = entityBytes.IndexOf((byte)0);
+        if (nullIndex >= 0)
+        {
+            entityBytes = entityBytes[..nullIndex];
+        }
+
+        var source = Encoding.UTF8.GetString(entityBytes);
+        var entities = new List<BspMarker>();
+        var index = 0;
+        var entityCount = 0;
+        while (index < source.Length && entityCount < MaximumBspEntityCount)
+        {
+            SkipBspWhitespace(source, ref index);
+            if (index >= source.Length)
+            {
+                break;
+            }
+            if (source[index++] != '{')
+            {
+                continue;
+            }
+            entityCount++;
+
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            while (index < source.Length)
+            {
+                SkipBspWhitespace(source, ref index);
+                if (index < source.Length && source[index] == '}')
+                {
+                    index++;
+                    break;
+                }
+                if (!TryReadBspQuotedString(source, ref index, out var key) ||
+                    !TryReadBspQuotedString(source, ref index, out var value))
+                {
+                    while (index < source.Length && source[index] != '}')
+                    {
+                        index++;
+                    }
+                    if (index < source.Length)
+                    {
+                        index++;
+                    }
+                    break;
+                }
+                values[key] = value;
+            }
+
+            if (TryCreateBspMarker(values, out var marker))
+            {
+                entities.Add(marker);
+            }
+        }
+        return entities;
+    }
+
+    private static bool TryCreateBspMarker(
+        IReadOnlyDictionary<string, string> entity,
+        out BspMarker marker)
+    {
+        marker = default;
+        if (!entity.TryGetValue("classname", out var className) ||
+            !entity.TryGetValue("origin", out var origin) ||
+            !TryParseBspOrigin(origin, out var x, out var y))
+        {
+            return false;
+        }
+
+        className = className.ToLowerInvariant();
+        marker = className switch
+        {
+            "item_armor1" or "item_armor" or "item_armorgreen" or "item_armor_green" =>
+                new BspMarker(x, y, "GA", 74, 174, 35),
+            "item_armor2" or "item_armoryellow" or "item_armor_yellow" or "item_suit" =>
+                new BspMarker(x, y, "YA", 38, 190, 225),
+            "item_armor3" or "item_armorred" or "item_armor_red" or "item_armourred" or
+                "item_armorinv" =>
+                new BspMarker(x, y, "RA", 52, 52, 205),
+            "item_megahealth" =>
+                new BspMarker(x, y, "MH", 205, 192, 61),
+            "item_artifact_super_damage" or "item_quad" =>
+                new BspMarker(x, y, "Q", 230, 111, 74),
+            "item_artifact_invisibility" or "item_ring" =>
+                new BspMarker(x, y, "R", 212, 88, 164),
+            "item_artifact_invulnerability" or "item_pent" =>
+                new BspMarker(x, y, "P", 49, 49, 208),
+            "weapon_rocketlauncher" =>
+                new BspMarker(x, y, "RL", 32, 119, 240),
+            "weapon_lightning" or "weapon_thunderbolt" =>
+                new BspMarker(x, y, "LG", 241, 230, 221),
+            "item_flag_team1" =>
+                new BspMarker(x, y, "RF", 45, 45, 210),
+            "item_flag_team2" =>
+                new BspMarker(x, y, "BF", 218, 103, 54),
+            _ => default,
+        };
+
+        if (marker.Label is not null)
+        {
+            return true;
+        }
+
+        if (className == "item_health" &&
+            entity.TryGetValue("spawnflags", out var spawnFlagsText) &&
+            int.TryParse(spawnFlagsText, out var spawnFlags) &&
+            (spawnFlags & 2) != 0)
+        {
+            marker = new BspMarker(x, y, "MH", 205, 192, 61);
+            return true;
+        }
+
+        if (!className.Contains("flag", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        entity.TryGetValue("team", out var team);
+        if (className.Contains("red", StringComparison.Ordinal) ||
+            team is "1" || team?.Equals("red", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            marker = new BspMarker(x, y, "RF", 45, 45, 210);
+            return true;
+        }
+        if (className.Contains("blue", StringComparison.Ordinal) ||
+            team is "2" || team?.Equals("blue", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            marker = new BspMarker(x, y, "BF", 218, 103, 54);
+            return true;
+        }
+        return false;
+    }
+
+    private static bool TryParseBspOrigin(string origin, out float x, out float y)
+    {
+        x = 0;
+        y = 0;
+        var parts = origin.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 3 &&
+               float.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out x) &&
+               float.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out y) &&
+               float.IsFinite(x) && float.IsFinite(y);
+    }
+
+    private static void SkipBspWhitespace(string source, ref int index)
+    {
+        while (index < source.Length && char.IsWhiteSpace(source[index]))
+        {
+            index++;
+        }
+    }
+
+    private static bool TryReadBspQuotedString(string source, ref int index, out string value)
+    {
+        value = string.Empty;
+        SkipBspWhitespace(source, ref index);
+        if (index >= source.Length || source[index] != '"')
+        {
+            return false;
+        }
+        index++;
+        var builder = new StringBuilder();
+        while (index < source.Length)
+        {
+            var character = source[index++];
+            if (character == '"')
+            {
+                value = builder.ToString();
+                return true;
+            }
+            if (character == '\\' && index < source.Length)
+            {
+                character = source[index++];
+            }
+            builder.Append(character);
+        }
+        return false;
+    }
+
+    private static void DrawBspMarkers(
+        byte[] pixels,
+        int size,
+        IReadOnlyList<BspMarker> markers,
+        float minX,
+        float maxY,
+        double scale,
+        int padding)
+    {
+        foreach (var marker in markers)
+        {
+            var x = padding + (int)Math.Round(((double)marker.X - minX) * scale);
+            var y = padding + (int)Math.Round(((double)maxY - marker.Y) * scale);
+            var radius = marker.Label.Length == 1 ? 11 : 14;
+            if (x < radius || y < radius || x >= size - radius || y >= size - radius)
+            {
+                continue;
+            }
+
+            for (var offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (var offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    var distance = offsetX * offsetX + offsetY * offsetY;
+                    if (distance > radius * radius)
+                    {
+                        continue;
+                    }
+                    if (distance >= (radius - 2) * (radius - 2))
+                    {
+                        SetPixel(pixels, size, x + offsetX, y + offsetY, 0, 0, 0, 255);
+                    }
+                    else
+                    {
+                        SetPixel(
+                            pixels,
+                            size,
+                            x + offsetX,
+                            y + offsetY,
+                            marker.Blue,
+                            marker.Green,
+                            marker.Red,
+                            255);
+                    }
+                }
+            }
+
+            DrawBspMarkerLabel(pixels, size, x, y, marker.Label);
+        }
+    }
+
+    private static void DrawBspMarkerLabel(byte[] pixels, int size, int centerX, int centerY, string label)
+    {
+        const int glyphWidth = 3;
+        const int glyphHeight = 5;
+        const int glyphScale = 2;
+        const int gap = 1;
+        var labelWidth = label.Length * glyphWidth * glyphScale + (label.Length - 1) * gap;
+        var cursorX = centerX - labelWidth / 2;
+        var top = centerY - glyphHeight * glyphScale / 2;
+
+        foreach (var character in label)
+        {
+            var rows = BspMarkerGlyph(character);
+            for (var row = 0; row < glyphHeight; row++)
+            {
+                for (var column = 0; column < glyphWidth; column++)
+                {
+                    if ((rows[row] & (1 << (glyphWidth - 1 - column))) == 0)
+                    {
+                        continue;
+                    }
+                    for (var pixelY = 0; pixelY < glyphScale; pixelY++)
+                    {
+                        for (var pixelX = 0; pixelX < glyphScale; pixelX++)
+                        {
+                            SetPixel(
+                                pixels,
+                                size,
+                                cursorX + column * glyphScale + pixelX,
+                                top + row * glyphScale + pixelY,
+                                255,
+                                255,
+                                255,
+                                255);
+                        }
+                    }
+                }
+            }
+            cursorX += glyphWidth * glyphScale + gap;
+        }
+    }
+
+    private static byte[] BspMarkerGlyph(char character) => character switch
+    {
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
+        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        _ => [0, 0, 0, 0, 0],
+    };
 
     private static bool TryDecodeWad(byte[] data, out PreviewBitmap bitmap)
     {

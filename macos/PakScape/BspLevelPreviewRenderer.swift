@@ -2,9 +2,49 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+enum BspPreviewPreferencesKey {
+    static let showArmors = "bspPreviewShowArmors"
+    static let showMegaHealth = "bspPreviewShowMegaHealth"
+    static let showPowerups = "bspPreviewShowPowerups"
+    static let showMajorWeapons = "bspPreviewShowMajorWeapons"
+    static let showFlags = "bspPreviewShowFlags"
+}
+
+struct BspLevelPreviewOptions: Equatable {
+    var showArmors = true
+    var showMegaHealth = true
+    var showPowerups = true
+    var showMajorWeapons = true
+    var showFlags = true
+
+    static let all = BspLevelPreviewOptions()
+    static let geometryOnly = BspLevelPreviewOptions(
+        showArmors: false,
+        showMegaHealth: false,
+        showPowerups: false,
+        showMajorWeapons: false,
+        showFlags: false
+    )
+
+    static func stored(in defaults: UserDefaults = .standard) -> BspLevelPreviewOptions {
+        func value(forKey key: String) -> Bool {
+            defaults.object(forKey: key) as? Bool ?? true
+        }
+        return BspLevelPreviewOptions(
+            showArmors: value(forKey: BspPreviewPreferencesKey.showArmors),
+            showMegaHealth: value(forKey: BspPreviewPreferencesKey.showMegaHealth),
+            showPowerups: value(forKey: BspPreviewPreferencesKey.showPowerups),
+            showMajorWeapons: value(forKey: BspPreviewPreferencesKey.showMajorWeapons),
+            showFlags: value(forKey: BspPreviewPreferencesKey.showFlags)
+        )
+    }
+}
+
 enum BspLevelPreviewRenderer {
     private static let maximumGeometryElementCount = 1_000_000
     private static let maximumTextureCount = 4_096
+    private static let maximumEntityBytes = 4 * 1_024 * 1_024
+    private static let maximumEntityCount = 100_000
 
     private struct Lump {
         let offset: Int
@@ -61,6 +101,12 @@ enum BspLevelPreviewRenderer {
         let color: RGBColor
     }
 
+    private struct MapMarker {
+        let position: Vertex
+        let label: String
+        let color: RGBColor
+    }
+
     private struct RGBColor {
         let r: Int
         let g: Int
@@ -85,6 +131,7 @@ enum BspLevelPreviewRenderer {
     }
 
     private static let lumpCount = 15
+    private static let lumpEntities = 0
     private static let lumpPlanes = 1
     private static let lumpTextures = 2
     private static let lumpVertices = 3
@@ -98,7 +145,11 @@ enum BspLevelPreviewRenderer {
     private static let nodrawFlag = 0x800
     private static let supportedVersions: Set<Int> = [29, 30]
 
-    static func renderImage(data: Data) -> NSImage? {
+    static func renderImage(
+        data: Data,
+        appearance: NSAppearance = NSApp.effectiveAppearance,
+        options: BspLevelPreviewOptions = .all
+    ) -> NSImage? {
         guard let header = parseHeader(data) else { return nil }
 
         var faces = extractFaces(data, header: header)
@@ -108,6 +159,7 @@ enum BspLevelPreviewRenderer {
         let texInfo = extractTexInfo(data, header: header)
         let mipTextures = extractMipTextures(data, header: header)
         let planes = extractPlanes(data, header: header)
+        let markers = extractMapMarkers(data, header: header, options: options)
 
         guard !faces.isEmpty,
               !vertices.isEmpty,
@@ -131,7 +183,12 @@ enum BspLevelPreviewRenderer {
         let bounds = calculateBounds(from: vertices)
         guard bounds.maxX > bounds.minX, bounds.maxY > bounds.minY else { return nil }
 
-        return drawImage(renderableFaces, bounds: bounds)
+        return drawImage(
+            renderableFaces,
+            markers: markers,
+            bounds: bounds,
+            appearance: appearance
+        )
     }
 
     private static func parseHeader(_ data: Data) -> Header? {
@@ -549,7 +606,180 @@ enum BspLevelPreviewRenderer {
         return Bounds(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
     }
 
-    private static func drawImage(_ renderableFaces: [RenderableFace], bounds: Bounds) -> NSImage? {
+    private static func extractMapMarkers(
+        _ data: Data,
+        header: Header,
+        options: BspLevelPreviewOptions
+    ) -> [MapMarker] {
+        let lump = header.lumps[lumpEntities]
+        guard lump.size > 0, lump.size <= maximumEntityBytes else { return [] }
+
+        let entities = parseEntities(data[lump.offset ..< lump.offset + lump.size])
+        var markers: [MapMarker] = []
+        markers.reserveCapacity(min(entities.count, 64))
+
+        for entity in entities {
+            guard let origin = parseOrigin(entity["origin"]),
+                  let className = entity["classname"]?.lowercased(),
+                  let marker = marker(
+                    className: className,
+                    entity: entity,
+                    origin: origin,
+                    options: options
+                  ) else {
+                continue
+            }
+            markers.append(marker)
+        }
+        return markers
+    }
+
+    private static func parseEntities(_ bytes: Data.SubSequence) -> [[String: String]] {
+        let source = Array(bytes.prefix { $0 != 0 })
+        var entities: [[String: String]] = []
+        var index = 0
+
+        func skipWhitespace() {
+            while index < source.count, source[index] == 9 || source[index] == 10 ||
+                    source[index] == 13 || source[index] == 32 {
+                index += 1
+            }
+        }
+
+        func quotedString() -> String? {
+            skipWhitespace()
+            guard index < source.count, source[index] == 34 else { return nil }
+            index += 1
+            var value: [UInt8] = []
+            while index < source.count {
+                let byte = source[index]
+                index += 1
+                if byte == 34 {
+                    return String(bytes: value, encoding: .utf8)
+                }
+                if byte == 92, index < source.count {
+                    value.append(source[index])
+                    index += 1
+                } else {
+                    value.append(byte)
+                }
+            }
+            return nil
+        }
+
+        while index < source.count, entities.count < maximumEntityCount {
+            skipWhitespace()
+            guard index < source.count else { break }
+            guard source[index] == 123 else {
+                index += 1
+                continue
+            }
+            index += 1
+            var entity: [String: String] = [:]
+
+            while index < source.count {
+                skipWhitespace()
+                if index < source.count, source[index] == 125 {
+                    index += 1
+                    break
+                }
+                guard let key = quotedString(), let value = quotedString() else {
+                    while index < source.count, source[index] != 125 { index += 1 }
+                    if index < source.count { index += 1 }
+                    break
+                }
+                entity[key.lowercased()] = value
+            }
+            if !entity.isEmpty {
+                entities.append(entity)
+            }
+        }
+        return entities
+    }
+
+    private static func parseOrigin(_ value: String?) -> Vertex? {
+        guard let value else { return nil }
+        let parts = value.split(whereSeparator: \.isWhitespace)
+        guard parts.count >= 3,
+              let x = Double(parts[0]),
+              let y = Double(parts[1]),
+              let z = Double(parts[2]),
+              x.isFinite, y.isFinite, z.isFinite else {
+            return nil
+        }
+        return Vertex(x: x, y: y, z: z)
+    }
+
+    private static func marker(
+        className: String,
+        entity: [String: String],
+        origin: Vertex,
+        options: BspLevelPreviewOptions
+    ) -> MapMarker? {
+        if options.showArmors {
+            switch className {
+            case "item_armor1", "item_armor", "item_armorgreen", "item_armor_green":
+                return MapMarker(position: origin, label: "GA", color: RGBColor(r: 35, g: 174, b: 74))
+            case "item_armor2", "item_armoryellow", "item_armor_yellow", "item_suit":
+                return MapMarker(position: origin, label: "YA", color: RGBColor(r: 225, g: 190, b: 38))
+            case "item_armor3", "item_armorred", "item_armor_red", "item_armourred", "item_armorinv":
+                return MapMarker(position: origin, label: "RA", color: RGBColor(r: 205, g: 52, b: 52))
+            default:
+                break
+            }
+        }
+
+        if options.showMegaHealth,
+           className == "item_megahealth" ||
+            (className == "item_health" && (Int(entity["spawnflags"] ?? "0") ?? 0) & 2 != 0) {
+            return MapMarker(position: origin, label: "MH", color: RGBColor(r: 61, g: 192, b: 205))
+        }
+
+        if options.showPowerups {
+            switch className {
+            case "item_artifact_super_damage", "item_quad":
+                return MapMarker(position: origin, label: "Q", color: RGBColor(r: 74, g: 111, b: 230))
+            case "item_artifact_invisibility", "item_ring":
+                return MapMarker(position: origin, label: "R", color: RGBColor(r: 164, g: 88, b: 212))
+            case "item_artifact_invulnerability", "item_pent":
+                return MapMarker(position: origin, label: "P", color: RGBColor(r: 208, g: 49, b: 49))
+            default:
+                break
+            }
+        }
+
+        if options.showMajorWeapons {
+            switch className {
+            case "weapon_rocketlauncher":
+                return MapMarker(position: origin, label: "RL", color: RGBColor(r: 240, g: 119, b: 32))
+            case "weapon_lightning", "weapon_thunderbolt":
+                return MapMarker(position: origin, label: "LG", color: RGBColor(r: 221, g: 230, b: 241))
+            default:
+                break
+            }
+        }
+
+        if options.showFlags {
+            if className == "item_flag_team1" ||
+                (className.contains("flag") &&
+                    (className.contains("red") || entity["team"]?.lowercased() == "red" || entity["team"] == "1")) {
+                return MapMarker(position: origin, label: "RF", color: RGBColor(r: 210, g: 45, b: 45))
+            }
+            if className == "item_flag_team2" ||
+                (className.contains("flag") &&
+                    (className.contains("blue") || entity["team"]?.lowercased() == "blue" || entity["team"] == "2")) {
+                return MapMarker(position: origin, label: "BF", color: RGBColor(r: 54, g: 103, b: 218))
+            }
+        }
+        return nil
+    }
+
+    private static func drawImage(
+        _ renderableFaces: [RenderableFace],
+        markers: [MapMarker],
+        bounds: Bounds,
+        appearance: NSAppearance
+    ) -> NSImage? {
         let imageSize = NSSize(width: canvasSize, height: canvasSize)
         let image = NSImage(size: imageSize)
         image.lockFocus()
@@ -560,12 +790,14 @@ enum BspLevelPreviewRenderer {
         let frame = CGRect(origin: .zero, size: CGSize(width: canvasSize, height: canvasSize))
         context.setShouldAntialias(true)
         context.setAllowsAntialiasing(true)
-        context.setFillColor(NSColor(calibratedWhite: 0.965, alpha: 1).cgColor)
-        context.fill(frame)
+        appearance.performAsCurrentDrawingAppearance {
+            context.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            context.fill(frame)
 
-        context.setStrokeColor(NSColor(calibratedWhite: 0.78, alpha: 1).cgColor)
-        context.setLineWidth(1)
-        context.stroke(frame.insetBy(dx: 0.5, dy: 0.5))
+            context.setStrokeColor(NSColor.separatorColor.cgColor)
+            context.setLineWidth(1)
+            context.stroke(frame.insetBy(dx: 0.5, dy: 0.5))
+        }
 
         let mapWidth = max(100, bounds.maxX - bounds.minX)
         let mapHeight = max(100, bounds.maxY - bounds.minY)
@@ -605,7 +837,47 @@ enum BspLevelPreviewRenderer {
             context.setLineWidth(0.75)
             context.drawPath(using: .fillStroke)
         }
+
+        for marker in markers {
+            let point = transform(marker.position)
+            guard frame.insetBy(dx: 3, dy: 3).contains(point) else { continue }
+            drawMarker(marker, at: point, in: context)
+        }
         return image
+    }
+
+    private static func drawMarker(_ marker: MapMarker, at point: CGPoint, in context: CGContext) {
+        let radius: CGFloat = marker.label.count == 1 ? 5.5 : 7
+        let badge = CGRect(
+            x: point.x - radius,
+            y: point.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: -1), blur: 2, color: NSColor.black.withAlphaComponent(0.65).cgColor)
+        context.setFillColor(marker.color.nsColor(alpha: 0.96).cgColor)
+        context.fillEllipse(in: badge)
+        context.restoreGState()
+
+        context.setStrokeColor(NSColor.black.withAlphaComponent(0.8).cgColor)
+        context.setLineWidth(1)
+        context.strokeEllipse(in: badge.insetBy(dx: 0.5, dy: 0.5))
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: marker.label.count == 1 ? 7 : 6, weight: .bold),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+        ]
+        let textRect = CGRect(
+            x: badge.minX,
+            y: badge.midY - 4,
+            width: badge.width,
+            height: 9
+        )
+        (marker.label as NSString).draw(in: textRect, withAttributes: attributes)
     }
 
     private static func baseColor(for face: Face, texInfo: [TexInfo]) -> RGBColor {
