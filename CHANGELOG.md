@@ -39,7 +39,7 @@ Notable user-visible changes are documented here.
 - `.spr` and `.spr32` sprites open in the model viewer on macOS, Windows, and Linux, playing every frame at the intervals stored in the file as a fullbright card the camera starts square to and can still be orbited. Frame groups and eight-way angled frames are unrolled into the same flipbook, and a sprite the viewer cannot read — a Half-Life sprite, for one — still falls back to its flat first frame.
 - Multi-frame MDL and MD3 models animate in the model viewer, with a play/pause control and speeds from 0.25× to 4× on macOS, Windows, and Linux.
 - BSP level overviews can mark green, yellow, and red armor, megahealth, Quad, Ring, Pentagram, rocket launchers, lightning guns, and CTF flags. Markers stay out of archive thumbnails by default; Quick Preview checkboxes turn each group on when wanted.
-- Complete Quake skybox image sets on macOS can be opened from any face in an interactive drag-to-look preview with scroll zoom and view reset.
+- Complete Quake skybox image sets on macOS can be opened from any face through its context menu or the **View Skybox** button in Quick Look, using an interactive drag-to-look preview with scroll zoom and view reset.
 - Get Info and the Details column now recognize BSP2 and Quake 64 levels, MD3 and MD5 models, LIT and VIS map sidecars, NAV2 bot navigation, DDS images, Ogg/Opus/FLAC audio, IT/S3M/XM/MOD/UMX music, and additional Quake text formats such as FGD, PTS, RTLIGHTS, SCR, and SKIN.
 
 ### Changed

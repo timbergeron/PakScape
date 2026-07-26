@@ -479,6 +479,7 @@ final class PakViewModel: NSObject, ObservableObject {
 
             let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
             let ext = (node.name as NSString).pathExtension.lowercased()
+            let viewSkybox = quickLookSkyboxAction(for: node)
 
             if Self.textQuickLookExtensions.contains(ext) {
                 let destination = base.appendingPathComponent("preview.txt")
@@ -497,7 +498,8 @@ final class PakViewModel: NSObject, ObservableObject {
                     url: destination,
                     title: node.name,
                     cleanupURL: base,
-                    bspLevelData: bspLevelData
+                    bspLevelData: bspLevelData,
+                    viewSkybox: viewSkybox
                 )
             }
 
@@ -506,7 +508,8 @@ final class PakViewModel: NSObject, ObservableObject {
             return PakQuickLookItem(
                 url: destination,
                 title: node.name,
-                cleanupURL: base
+                cleanupURL: base,
+                viewSkybox: viewSkybox
             )
         } catch {
             try? fileManager.removeItem(at: base)
@@ -536,6 +539,13 @@ final class PakViewModel: NSObject, ObservableObject {
         autoreleasepool {
             guard let image = renderPreviewImage(fileName: fileName, data: data) else { return nil }
             return pngData(for: image)
+        }
+    }
+
+    private func quickLookSkyboxAction(for node: PakNode) -> (() -> Void)? {
+        guard canPreviewSkybox(node) else { return nil }
+        return { [weak self] in
+            self?.showSkyboxPreview(for: node)
         }
     }
 

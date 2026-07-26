@@ -6,17 +6,20 @@ final class PakQuickLookItem: NSObject, QLPreviewItem {
     let previewItemTitle: String?
     let cleanupURL: URL
     let bspLevelData: Data?
+    let viewSkybox: (() -> Void)?
 
     init(
         url: URL,
         title: String,
         cleanupURL: URL,
-        bspLevelData: Data? = nil
+        bspLevelData: Data? = nil,
+        viewSkybox: (() -> Void)? = nil
     ) {
         self.previewItemURL = url
         self.previewItemTitle = title
         self.cleanupURL = cleanupURL
         self.bspLevelData = bspLevelData
+        self.viewSkybox = viewSkybox
     }
 
     func updateBspPreview(options: BspLevelPreviewOptions) -> Bool {
@@ -53,6 +56,7 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
     private weak var previewControls: NSView?
     private weak var controlsLabel: NSView?
     private var markerButtons: [NSButton] = []
+    private weak var skyboxButton: NSButton?
 
     var isVisible: Bool {
         QLPreviewPanel.shared()?.isVisible == true
@@ -147,6 +151,7 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
         previewControls?.removeFromSuperview()
         controlsLabel = nil
         markerButtons = []
+        skyboxButton = nil
         stopMonitoringCloseKeys()
         cleanUpCurrentItems()
     }
@@ -164,7 +169,13 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
 
         let label = NSTextField(labelWithString: "Show:")
         label.textColor = .labelColor
-        let stack = NSStackView(views: [label] + markerButtons)
+        let viewSkybox = NSButton(
+            title: "View Skybox",
+            target: self,
+            action: #selector(viewSkyboxFromQuickLook(_:))
+        )
+        viewSkybox.bezelStyle = .rounded
+        let stack = NSStackView(views: [label] + markerButtons + [viewSkybox])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
@@ -193,6 +204,7 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
         ])
         previewControls = background
         controlsLabel = label
+        skyboxButton = viewSkybox
         updatePreviewControls(for: panel)
         currentItemObservation = panel.observe(
             \.currentPreviewItemIndex,
@@ -215,9 +227,11 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
         let index = panel.currentPreviewItemIndex
         let item = items.indices.contains(index) ? items[index] : nil
         let showsMarkers = item?.bspLevelData != nil
+        let showsSkybox = item?.viewSkybox != nil
         controlsLabel?.isHidden = !showsMarkers
         markerButtons.forEach { $0.isHidden = !showsMarkers }
-        previewControls?.isHidden = !showsMarkers
+        skyboxButton?.isHidden = !showsSkybox
+        previewControls?.isHidden = !showsMarkers && !showsSkybox
     }
 
     @objc private func markerOptionChanged(_ sender: NSButton) {
@@ -234,5 +248,12 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
         guard items[index].updateBspPreview(options: options) else { return }
         panel.reloadData()
         panel.currentPreviewItemIndex = index
+    }
+
+    @objc private func viewSkyboxFromQuickLook(_ sender: NSButton) {
+        guard let panel = QLPreviewPanel.shared() else { return }
+        let index = panel.currentPreviewItemIndex
+        guard items.indices.contains(index), let action = items[index].viewSkybox else { return }
+        action()
     }
 }
