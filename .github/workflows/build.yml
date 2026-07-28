@@ -78,7 +78,7 @@ jobs:
   windows:
     name: Build and test Windows app
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     defaults:
       run:
@@ -108,6 +108,21 @@ jobs:
           $nativeDirectory = (Resolve-Path ../native/build/windows/Release).Path
           $env:PATH = "$nativeDirectory;$env:PATH"
           dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: PakScape-Windows
+          path: windows/artifacts/PakScape-*-win-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 14
 
   linux:
     name: Build Ubuntu app (${{ matrix.architecture }})

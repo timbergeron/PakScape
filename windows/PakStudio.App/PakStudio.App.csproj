@@ -10,6 +10,11 @@
     <Version>1.0.1</Version>
     <Authors>Tim Bergeron</Authors>
     <ApplicationIcon>Assets\PakScape.ico</ApplicationIcon>
+    <PlatformTarget>x64</PlatformTarget>
+    <NativeBuildScript>$(MSBuildProjectDirectory)\..\..\native\scripts\build-windows.ps1</NativeBuildScript>
+    <NativeBuildDirectory>$(MSBuildProjectDirectory)\..\..\native\build\windows\Release</NativeBuildDirectory>
+    <NativeAudioLibrary>$(NativeBuildDirectory)\pakscape_audio.dll</NativeAudioLibrary>
+    <NativeModelLibrary>$(NativeBuildDirectory)\pakscape_model.dll</NativeModelLibrary>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,18 +25,35 @@
   <ItemGroup>
     <Resource Include="Assets\PakScape.ico" />
     <Resource Include="Assets\PakScape.png" />
-    <None Include="..\..\native\build\windows\Release\pakscape_audio.dll"
+    <None Include="$(NativeAudioLibrary)"
           Link="pakscape_audio.dll"
           CopyToOutputDirectory="PreserveNewest"
-          Condition="Exists('..\..\native\build\windows\Release\pakscape_audio.dll')" />
-    <None Include="..\..\native\build\windows\Release\pakscape_model.dll"
+          Condition="'$(OS)' == 'Windows_NT'" />
+    <None Include="$(NativeModelLibrary)"
           Link="pakscape_model.dll"
           CopyToOutputDirectory="PreserveNewest"
-          Condition="Exists('..\..\native\build\windows\Release\pakscape_model.dll')" />
+          Condition="'$(OS)' == 'Windows_NT'" />
     <None Include="..\..\native\THIRD_PARTY_NOTICES.md"
           Link="THIRD_PARTY_NOTICES.md"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <NativeBuildInput Include="$(MSBuildProjectDirectory)\..\..\native\CMakeLists.txt" />
+    <NativeBuildInput Include="$(MSBuildProjectDirectory)\..\..\native\src\**\*" />
+    <NativeBuildInput Include="$(MSBuildProjectDirectory)\..\..\native\include\**\*" />
+    <NativeBuildInput Include="$(MSBuildProjectDirectory)\..\..\native\third_party\**\*" />
+    <NativeBuildInput Include="$(NativeBuildScript)" />
+  </ItemGroup>
+
+  <Target Name="BuildNativeLibraries"
+          BeforeTargets="PrepareForBuild"
+          Inputs="@(NativeBuildInput)"
+          Outputs="$(NativeAudioLibrary);$(NativeModelLibrary)"
+          Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">
+    <Message Importance="High" Text="Building PakScape native libraries..." />
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(NativeBuildScript)&quot;" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />

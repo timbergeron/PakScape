@@ -16,6 +16,7 @@ linux/**/bin/
 linux/**/obj/
 linux/TestResults/
 linux/artifacts/
+windows/artifacts/
 *.user
 *.suo
 # Native audio build output
