@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PakScape.Linux.Models;
@@ -16,6 +17,8 @@ namespace PakScape.Linux.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    private const int MaximumHistoryEntries = 100;
+
     private readonly IArchiveService _archiveService;
     private readonly IArchiveFileTransferService _fileTransferService;
     private readonly IUserInteractionService _interactionService;
@@ -24,6 +27,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly Dictionary<ArchiveFolderNode, FolderNodeViewModel> _folderLookup = [];
     private readonly Stack<ArchiveFolderNode> _backHistory = [];
     private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
+    private readonly List<ArchiveHistoryEntry> _undoHistory = [];
+    private readonly List<ArchiveHistoryEntry> _redoHistory = [];
     private ArchiveDocument? _document;
     private FolderNodeViewModel? _selectedFolder;
     private ArchiveItemViewModel? _selectedItem;
@@ -38,6 +43,11 @@ public partial class MainWindowViewModel : ObservableObject
     private IReadOnlyList<string> _clipboardExportedPaths = [];
     private IReadOnlyList<string> _pendingClipboardExportedPaths = [];
     private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
+    private ArchiveNode? _contextTarget;
+    private int _iconZoomLevel = 1;
+    private int _nextRevision;
+    private int _currentRevision;
+    private int _savedRevision;
 
     public MainWindowViewModel(
         IArchiveService archiveService,
@@ -54,6 +64,14 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public event EventHandler? CloseRequested;
+
+    public event EventHandler? GetInfoRequested;
+
+    public event EventHandler? RenameRequested;
+
+    public event Action<string>? NewWindowRequested;
+
+    public event Action<string>? OpenWindowRequested;
 
     public ObservableCollection<FolderNodeViewModel> FolderRoots { get; } = [];
 
@@ -72,6 +90,7 @@ public partial class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ArchiveDisplayName));
                 OnPropertyChanged(nameof(SearchPlaceholder));
                 OnPropertyChanged(nameof(CurrentFolderPath));
+                OpenPakFolderCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -113,7 +132,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public string ArchiveDisplayName => Document?.DisplayName ?? "PakScape";
 
-    public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
+    public string SearchPlaceholder => $"Search all paths in {ArchiveDisplayName}";
 
     public bool IsSearchActive => !string.IsNullOrWhiteSpace(SearchText);
 
@@ -160,6 +179,8 @@ public partial class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsSmallIconsView));
                 OnPropertyChanged(nameof(IsListView));
                 OnPropertyChanged(nameof(IsDetailsView));
+                ZoomInIconsCommand.NotifyCanExecuteChanged();
+                ZoomOutIconsCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -171,6 +192,14 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsListView => ActiveViewMode == ArchiveViewMode.List;
 
     public bool IsDetailsView => ActiveViewMode == ArchiveViewMode.Details;
+
+    public double LargeIconCardWidth => _iconZoomLevel switch { 0 => 104, 2 => 164, _ => 128 };
+
+    public double LargeIconPreviewWidth => _iconZoomLevel switch { 0 => 64, 2 => 120, _ => 88 };
+
+    public double LargeIconPreviewHeight => _iconZoomLevel switch { 0 => 54, 2 => 96, _ => 72 };
+
+    public double LargeIconFontSize => _iconZoomLevel switch { 0 => 32, 2 => 54, _ => 42 };
 
     public string WindowTitle
     {
@@ -188,10 +217,28 @@ public partial class MainWindowViewModel : ObservableObject
 
     public string CurrentFolderPath => _currentFolder?.FullPath ?? "/";
 
-    public async Task InitializeAsync(string? archivePath)
+    public bool HasModelSkinSaveOptions =>
+        _selectedItems is [var item] &&
+        item.Node is ArchiveFileNode file &&
+        Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasBspTextureSaveOptions =>
+        _selectedItems is [var item] &&
+        item.Node is ArchiveFileNode file &&
+        Path.GetExtension(file.Name).Equals(".bsp", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasWadTextureSaveOptions =>
+        _selectedItems is [var item] &&
+        item.Node is ArchiveFileNode file &&
+        Path.GetExtension(file.Name).Equals(".wad", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasSkyboxPreview =>
+        _selectedItems is [var item] && SkyboxFaceSet.Find(item.Node) is not null;
+
+    public async Task InitializeAsync(string? archivePath, string initialFormatId = "pak")
     {
         RefreshRecentFiles();
-        LoadDocument(CreateEmptyDocument("pak"));
+        LoadDocument(CreateEmptyDocument(initialFormatId));
 
         if (!string.IsNullOrWhiteSpace(archivePath))
         {
@@ -218,10 +265,24 @@ public partial class MainWindowViewModel : ObservableObject
         SaveBspTexturesAsCommand.NotifyCanExecuteChanged();
         SaveWadTexturesAsCommand.NotifyCanExecuteChanged();
         PlayDemoInBrowserCommand.NotifyCanExecuteChanged();
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
+        GetInfoCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasModelSkinSaveOptions));
+        OnPropertyChanged(nameof(HasBspTextureSaveOptions));
+        OnPropertyChanged(nameof(HasWadTextureSaveOptions));
+        OnPropertyChanged(nameof(HasSkyboxPreview));
     }
 
     public IReadOnlyList<ArchiveNode> SelectedNodes =>
         _selectedItems.Select(item => item.Node).ToList();
+
+    public IReadOnlyList<ArchiveNode> InfoNodes =>
+        _selectedItems.Count > 0
+            ? SelectedNodes
+            : _currentFolder is { } folder ? [folder] : [];
+
+    public void SetContextTarget(ArchiveNode? node) => _contextTarget = node;
 
     public async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
     {
@@ -322,6 +383,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         try
         {
+            var history = CaptureHistory(payload.IsCut ? "Move" : "Paste");
             if (payload.IsCut && payload.Originals.All(node => ReferenceEquals(node.Parent, _currentFolder)))
             {
                 ClearInternalClipboard();
@@ -341,6 +403,7 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 ClearInternalClipboard();
             }
+            RecordMutation(history);
             MarkDirty(payload.IsCut
                 ? $"Moved {inserted.Count} item(s)."
                 : $"Pasted {inserted.Count} item(s).");
@@ -410,16 +473,10 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task NewAsync()
-    {
-        await CreateNewArchiveAsync("pak");
-    }
+    private void New() => NewWindowRequested?.Invoke("pak");
 
     [RelayCommand]
-    private async Task NewPk3Async()
-    {
-        await CreateNewArchiveAsync("pk3");
-    }
+    private void NewPk3() => NewWindowRequested?.Invoke("pk3");
 
     [RelayCommand]
     private async Task OpenAsync()
@@ -432,7 +489,7 @@ public partial class MainWindowViewModel : ObservableObject
         var path = await _interactionService.PickArchiveToOpenAsync();
         if (!string.IsNullOrWhiteSpace(path))
         {
-            await OpenPathAsync(path, confirmReplacement: true);
+            OpenWindowRequested?.Invoke(path);
         }
     }
 
@@ -452,7 +509,7 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await OpenPathAsync(path, confirmReplacement: true);
+        OpenWindowRequested?.Invoke(path);
     }
 
     [RelayCommand]
@@ -473,22 +530,126 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    [RelayCommand(CanExecute = nameof(CanOpenPakFolder))]
+    private async Task OpenPakFolderAsync()
+    {
+        if (!CanOpenPakFolder() || Document?.FilePath is not { } archivePath)
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(archivePath));
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                UseShellExecute = false,
+                ArgumentList = { directory },
+            });
+            if (process is null)
+            {
+                throw new InvalidOperationException("The desktop file manager could not be started.");
+            }
+            StatusText = $"Opened {directory}";
+        }
+        catch (Exception exception)
+        {
+            await _interactionService.ShowErrorAsync("Open PAK Folder failed", exception.Message);
+        }
+    }
+
+    private bool CanOpenPakFolder()
+    {
+        if (IsBusy || Document?.FilePath is not { } path)
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+        return !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory);
+    }
+
     [RelayCommand]
     private void Exit()
     {
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    [RelayCommand]
-    private async Task NewFolderAsync()
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo()
     {
-        if (!CanModifyCurrentFolder() || _currentFolder is null)
+        if (Document is null || _undoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var target = TakeLast(_undoHistory);
+        _redoHistory.Add(new ArchiveHistoryEntry(
+            target.Action,
+            ArchiveTreeEditor.CreateFolderSnapshot(Document.Root),
+            _currentRevision));
+        TrimHistory(_redoHistory);
+        RestoreHistory(target);
+        StatusText = $"Undid {target.Action.ToLowerInvariant()}.";
+    }
+
+    private bool CanUndo() => _undoHistory.Count > 0 && !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void Redo()
+    {
+        if (Document is null || _redoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var target = TakeLast(_redoHistory);
+        _undoHistory.Add(new ArchiveHistoryEntry(
+            target.Action,
+            ArchiveTreeEditor.CreateFolderSnapshot(Document.Root),
+            _currentRevision));
+        TrimHistory(_undoHistory);
+        RestoreHistory(target);
+        StatusText = $"Redid {target.Action.ToLowerInvariant()}.";
+    }
+
+    private bool CanRedo() => _redoHistory.Count > 0 && !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanGetInfo))]
+    private void GetInfo() => GetInfoRequested?.Invoke(this, EventArgs.Empty);
+
+    private bool CanGetInfo() => !IsBusy && InfoNodes.Count > 0;
+
+    [RelayCommand]
+    private async Task ContextNewFolderAsync() =>
+        await CreateFolderInAsync(ResolveContextDestination());
+
+    [RelayCommand]
+    private async Task ContextAddFilesAsync() =>
+        await AddFilesToAsync(ResolveContextDestination());
+
+    [RelayCommand]
+    private async Task ContextAddFolderAsync() =>
+        await AddFolderToAsync(ResolveContextDestination());
+
+    [RelayCommand]
+    private async Task NewFolderAsync() => await CreateFolderInAsync(_currentFolder);
+
+    private async Task CreateFolderInAsync(ArchiveFolderNode? destination)
+    {
+        if (!CanModifyCurrentFolder() || destination is null)
         {
             return;
         }
 
         var initialName = ArchiveTreeEditor.GetAvailableName(
-            _currentFolder,
+            destination,
             "New Folder",
             preserveExtension: false);
         var name = (await _interactionService.PromptAsync(
@@ -502,8 +663,14 @@ public partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            var folder = ArchiveTreeEditor.CreateFolder(_currentFolder, name);
+            var history = CaptureHistory("Create Folder");
+            var folder = ArchiveTreeEditor.CreateFolder(destination, name);
+            RecordMutation(history);
             MarkDirty($"Created folder '{folder.Name}'.");
+            if (!ReferenceEquals(destination, _currentFolder))
+            {
+                NavigateToFolder(destination);
+            }
             RefreshAfterMutation(folder);
         }
         catch (Exception exception)
@@ -513,9 +680,11 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task AddFilesAsync()
+    private async Task AddFilesAsync() => await AddFilesToAsync(_currentFolder);
+
+    private async Task AddFilesToAsync(ArchiveFolderNode? destination)
     {
-        if (!CanModifyCurrentFolder())
+        if (!CanModifyCurrentFolder() || destination is null)
         {
             return;
         }
@@ -523,14 +692,16 @@ public partial class MainWindowViewModel : ObservableObject
         var paths = await _interactionService.PickFilesToAddAsync();
         if (paths.Count > 0)
         {
-            await ImportPathsAsync(paths);
+            await ImportPathsAsync(paths, destination);
         }
     }
 
     [RelayCommand]
-    private async Task AddFolderAsync()
+    private async Task AddFolderAsync() => await AddFolderToAsync(_currentFolder);
+
+    private async Task AddFolderToAsync(ArchiveFolderNode? destination)
     {
-        if (!CanModifyCurrentFolder())
+        if (!CanModifyCurrentFolder() || destination is null)
         {
             return;
         }
@@ -538,12 +709,12 @@ public partial class MainWindowViewModel : ObservableObject
         var path = await _interactionService.PickFolderToAddAsync();
         if (!string.IsNullOrWhiteSpace(path))
         {
-            await ImportPathsAsync([path]);
+            await ImportPathsAsync([path], destination);
         }
     }
 
     [RelayCommand]
-    private async Task RenameAsync()
+    private void Rename()
     {
         if (_selectedItems.Count != 1 || IsBusy)
         {
@@ -551,24 +722,33 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         var item = _selectedItems[0];
-        var name = (await _interactionService.PromptAsync(
-            "Rename item",
-            $"Enter a new name for '{item.Name}':",
-            item.Name))?.Trim();
+        item.BeginRenaming();
+        RenameRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task<bool> CommitItemRenameAsync(ArchiveItemViewModel item, string proposedName)
+    {
+        var name = proposedName.Trim();
         if (string.IsNullOrEmpty(name))
         {
-            return;
+            await _interactionService.ShowErrorAsync("Rename failed", "The name cannot be empty.");
+            return false;
         }
 
         try
         {
+            var history = CaptureHistory("Rename");
             ArchiveTreeEditor.Rename(item.Node, name);
+            RecordMutation(history);
             MarkDirty($"Renamed item to '{name}'.");
+            item.EndRenaming();
             RefreshAfterMutation(item.Node);
+            return true;
         }
         catch (Exception exception)
         {
             await _interactionService.ShowErrorAsync("Rename failed", exception.Message);
+            return false;
         }
     }
 
@@ -586,7 +766,7 @@ public partial class MainWindowViewModel : ObservableObject
             : $"these {items.Count} items";
         var confirmed = await _interactionService.ConfirmAsync(
             items.Count == 1 ? "Delete item" : "Delete items",
-            $"Delete {description} from this archive? Folder contents will also be removed.\n\nThis cannot be undone.",
+            $"Delete {description} from this archive? Folder contents will also be removed.",
             "Delete");
         if (!confirmed)
         {
@@ -595,10 +775,12 @@ public partial class MainWindowViewModel : ObservableObject
 
         try
         {
+            var history = CaptureHistory("Delete");
             foreach (var item in items)
             {
                 ArchiveTreeEditor.Remove(item.Node);
             }
+            RecordMutation(history);
             MarkDirty(items.Count == 1 ? $"Deleted '{items[0].Name}'." : $"Deleted {items.Count} items.");
             RefreshAfterMutation();
         }
@@ -1130,21 +1312,34 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void ShowDetails() => SetViewMode(ArchiveViewMode.Details);
 
+    [RelayCommand(CanExecute = nameof(CanZoomInIcons))]
+    private void ZoomInIcons() => SetIconZoomLevel(_iconZoomLevel + 1);
+
+    private bool CanZoomInIcons() =>
+        ActiveViewMode == ArchiveViewMode.LargeIcons && _iconZoomLevel < 2 && !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanZoomOutIcons))]
+    private void ZoomOutIcons() => SetIconZoomLevel(_iconZoomLevel - 1);
+
+    private bool CanZoomOutIcons() =>
+        ActiveViewMode == ArchiveViewMode.LargeIcons && _iconZoomLevel > 0 && !IsBusy;
+
+    private void SetIconZoomLevel(int level)
+    {
+        _iconZoomLevel = Math.Clamp(level, 0, 2);
+        OnPropertyChanged(nameof(LargeIconCardWidth));
+        OnPropertyChanged(nameof(LargeIconPreviewWidth));
+        OnPropertyChanged(nameof(LargeIconPreviewHeight));
+        OnPropertyChanged(nameof(LargeIconFontSize));
+        ZoomInIconsCommand.NotifyCanExecuteChanged();
+        ZoomOutIconsCommand.NotifyCanExecuteChanged();
+        StatusText = $"Large icon size: {(_iconZoomLevel == 0 ? "Small" : _iconZoomLevel == 2 ? "Large" : "Medium")}";
+    }
+
     [RelayCommand]
     private async Task AboutAsync()
     {
         await _interactionService.ShowAboutAsync();
-    }
-
-    private async Task CreateNewArchiveAsync(string formatId)
-    {
-        if (IsBusy || !await ConfirmDocumentReplacementAsync())
-        {
-            return;
-        }
-
-        LoadDocument(CreateEmptyDocument(formatId));
-        StatusText = $"Created a new empty {formatId.ToUpperInvariant()} archive.";
     }
 
     private async Task OpenPathAsync(string path, bool confirmReplacement)
@@ -1205,11 +1400,13 @@ public partial class MainWindowViewModel : ObservableObject
             IsBusy = true;
             StatusText = "Saving archive...";
             await _archiveService.SaveAsync(Document, path);
+            _savedRevision = _currentRevision;
             RecordRecentFile(path);
             RebuildFolderTree(_currentFolder ?? Document.Root);
             OnPropertyChanged(nameof(WindowTitle));
             OnPropertyChanged(nameof(ArchiveDisplayName));
             OnPropertyChanged(nameof(SearchPlaceholder));
+            OpenPakFolderCommand.NotifyCanExecuteChanged();
             StatusText = $"Saved {Path.GetFileName(path)}";
             return true;
         }
@@ -1243,6 +1440,10 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void LoadDocument(ArchiveDocument document)
     {
+        _undoHistory.Clear();
+        _redoHistory.Clear();
+        _currentRevision = 0;
+        _savedRevision = 0;
         _backHistory.Clear();
         _forwardHistory.Clear();
         _currentFolder = null;
@@ -1307,23 +1508,24 @@ public partial class MainWindowViewModel : ObservableObject
     private void RebuildCurrentItems(ArchiveNode? nodeToSelect = null)
     {
         CurrentItems.Clear();
-        if (_currentFolder is null)
+        if (_currentFolder is null || Document is null)
         {
             OnPropertyChanged(nameof(SearchResultText));
             return;
         }
 
-        var items = _currentFolder.Folders.Cast<ArchiveNode>()
-            .Concat(_currentFolder.Files)
+        var query = SearchText.Trim();
+        var searchAllPaths = query.Length > 0;
+        var nodes = searchAllPaths
+            ? EnumerateDescendants(Document.Root)
+            : _currentFolder.Children;
+        var items = nodes
             .Select(node => new ArchiveItemViewModel(
                 node,
                 ArchiveThumbnailService.CanCreateThumbnail(node)
                     ? () => _thumbnailService.GetThumbnail(node)
                     : null))
-            .Where(item => string.IsNullOrWhiteSpace(SearchText) ||
-                           item.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                           item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                           item.SearchableMetadata.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+            .Where(item => !searchAllPaths || MatchesArchiveSearch(item, query))
             .OrderByDescending(item => item.IsFolder)
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase);
         foreach (var item in items)
@@ -1337,10 +1539,69 @@ public partial class MainWindowViewModel : ObservableObject
             ? null
             : CurrentItems.FirstOrDefault(item => ReferenceEquals(item.Node, nodeToSelect));
         SetSelectedItems(selectedItem is null ? [] : [selectedItem]);
-        StatusText = string.IsNullOrWhiteSpace(SearchText)
-            ? $"{CurrentItems.Count} item(s) in {CurrentFolderPath}"
-            : $"{CurrentItems.Count} matching item(s)";
+        StatusText = searchAllPaths
+            ? $"{CurrentItems.Count} search result(s) in {ArchiveDisplayName}"
+            : $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
     }
+
+    private static IEnumerable<ArchiveNode> EnumerateDescendants(ArchiveFolderNode root)
+    {
+        var pending = new Stack<ArchiveNode>(root.Children.Reverse());
+        while (pending.TryPop(out var node))
+        {
+            yield return node;
+            if (node is ArchiveFolderNode folder)
+            {
+                foreach (var child in folder.Children.Reverse())
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+    }
+
+    private static bool MatchesArchiveSearch(ArchiveItemViewModel item, string query)
+    {
+        var searchable = string.Join(
+            " ",
+            item.Name,
+            Path.GetFileNameWithoutExtension(item.Name),
+            item.TypeText,
+            item.Node.FullPath,
+            item.SearchableMetadata);
+        var compactSearchable = CompactSearchText(searchable);
+
+        return query
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(term =>
+            {
+                if (term.Contains('*') || term.Contains('?'))
+                {
+                    var pattern = "^" + Regex.Escape(term)
+                        .Replace(@"\*", ".*", StringComparison.Ordinal)
+                        .Replace(@"\?", ".", StringComparison.Ordinal) + "$";
+                    return searchable
+                        .Split([' ', '/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+                        .Append(item.Node.FullPath)
+                        .Any(part => Regex.IsMatch(
+                            part,
+                            pattern,
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                            TimeSpan.FromMilliseconds(100)));
+                }
+
+                var compactTerm = CompactSearchText(term);
+                return searchable.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                       compactTerm.Length > 0 &&
+                       compactSearchable.Contains(compactTerm, StringComparison.Ordinal);
+            });
+    }
+
+    private static string CompactSearchText(string value) =>
+        new(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
 
     private void RefreshAfterMutation(ArchiveNode? nodeToSelect = null)
     {
@@ -1387,6 +1648,9 @@ public partial class MainWindowViewModel : ObservableObject
         return Document is not null && _currentFolder is not null && !IsBusy;
     }
 
+    private ArchiveFolderNode? ResolveContextDestination() =>
+        _contextTarget as ArchiveFolderNode ?? _currentFolder;
+
     private void NotifyNavigationStateChanged()
     {
         OnPropertyChanged(nameof(CanGoBack));
@@ -1396,6 +1660,12 @@ public partial class MainWindowViewModel : ObservableObject
         SaveBspTexturesAsCommand.NotifyCanExecuteChanged();
         SaveWadTexturesAsCommand.NotifyCanExecuteChanged();
         PlayDemoInBrowserCommand.NotifyCanExecuteChanged();
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
+        OpenPakFolderCommand.NotifyCanExecuteChanged();
+        GetInfoCommand.NotifyCanExecuteChanged();
+        ZoomInIconsCommand.NotifyCanExecuteChanged();
+        ZoomOutIconsCommand.NotifyCanExecuteChanged();
     }
 
     private void SetViewMode(ArchiveViewMode mode)
@@ -1419,14 +1689,17 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task ImportPathsAsync(IReadOnlyList<string> paths)
+    private async Task ImportPathsAsync(
+        IReadOnlyList<string> paths,
+        ArchiveFolderNode? requestedDestination = null)
     {
-        if (_currentFolder is null)
+        var destination = requestedDestination ?? _currentFolder;
+        if (destination is null)
         {
             return;
         }
 
-        var destination = _currentFolder;
+        var history = CaptureHistory(paths.Count == 1 ? "Add Item" : "Add Items");
         var imported = new List<ArchiveNode>();
         var failures = new List<string>();
         try
@@ -1459,7 +1732,12 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (imported.Count > 0)
         {
+            RecordMutation(history);
             MarkDirty(imported.Count == 1 ? "Added 1 item." : $"Added {imported.Count} items.");
+            if (!ReferenceEquals(destination, _currentFolder))
+            {
+                NavigateToFolder(destination);
+            }
             RefreshAfterMutation(imported[0]);
         }
         await ReportFailuresAsync("Some items were not added", failures);
@@ -1485,9 +1763,72 @@ public partial class MainWindowViewModel : ObservableObject
         return new ArchiveDocument { FormatId = formatId };
     }
 
+    private ArchiveHistoryEntry CaptureHistory(string action)
+    {
+        var document = Document
+            ?? throw new InvalidOperationException("No archive is open.");
+        return new ArchiveHistoryEntry(
+            action,
+            ArchiveTreeEditor.CreateFolderSnapshot(document.Root),
+            _currentRevision);
+    }
+
+    private void RecordMutation(ArchiveHistoryEntry history)
+    {
+        _undoHistory.Add(history);
+        TrimHistory(_undoHistory);
+        _redoHistory.Clear();
+        _currentRevision = ++_nextRevision;
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RestoreHistory(ArchiveHistoryEntry entry)
+    {
+        if (Document is null)
+        {
+            return;
+        }
+
+        ArchiveTreeEditor.RestoreFolderSnapshot(Document.Root, entry.Root);
+        _currentRevision = entry.Revision;
+        Document.IsDirty = _currentRevision != _savedRevision;
+        ClearInternalClipboard();
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(IsSearchActive));
+        RebuildFolderTree(Document.Root);
+        SetSelectedItems([]);
+        OnPropertyChanged(nameof(WindowTitle));
+        NotifyNavigationStateChanged();
+    }
+
+    private static T TakeLast<T>(List<T> items)
+    {
+        var index = items.Count - 1;
+        var item = items[index];
+        items.RemoveAt(index);
+        return item;
+    }
+
+    private static void TrimHistory(List<ArchiveHistoryEntry> history)
+    {
+        if (history.Count > MaximumHistoryEntries)
+        {
+            history.RemoveAt(0);
+        }
+    }
+
     private sealed record ArchiveClipboardPayload(
         Guid Id,
         IReadOnlyList<ArchiveNode> Templates,
         IReadOnlyList<ArchiveNode> Originals,
         bool IsCut);
+
+    private sealed record ArchiveHistoryEntry(
+        string Action,
+        ArchiveFolderNode Root,
+        int Revision);
 }

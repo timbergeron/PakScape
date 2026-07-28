@@ -33,7 +33,23 @@ An archive path may be supplied on the command line. The installed desktop entry
 The desktop UI follows the Linux system light/dark preference. Archive browsing includes
 inline image and Quake-format thumbnails, sortable name/type/size/modified columns,
 back/forward/up navigation, cut/copy/paste/select-all shortcuts, and file drag-and-drop
-both into and out of PakScape.
+both into and out of PakScape. Archive edits support up to 100 levels of Undo/Redo,
+including adds, pastes and moves, folder creation, renames, and deletion.
+Context menus expose model-skin, BSP-texture, and WAD-texture conversion only for
+the matching selected file type.
+Search spans the entire archive, including item names, full paths, types, and
+format metadata; multiple terms and `*`/`?` wildcards are supported.
+For saved archives, **File > Open PAK Folder** opens the containing directory in
+the desktop's default file manager.
+**Get Info** (`Alt+Enter`) opens modeless per-item windows with exact sizes,
+folder summaries, paths, timestamps, and format-specific metadata. Context menus
+can add files, add a folder, or create a folder inside the selected folder.
+Renaming is inline in every view, and the Large Icons view has three zoom levels.
+Complete six-face Quake skyboxes can be opened from the context menu in an
+interactive viewer with drag-to-look, wheel zoom, and reset controls.
+New, Open, and Open Recent create independent archive windows; opening an archive
+that is already open activates its existing window. Each window owns its document,
+undo history, preview caches, dialogs, and temporary transfers.
 
 ## Quick Preview
 

@@ -23,7 +23,10 @@
     <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenCommand}" />
     <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
-    <KeyBinding Gesture="Ctrl+Q" Command="{Binding ExitCommand}" />
+    <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+    <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
+    <KeyBinding Gesture="Ctrl+W" Command="{Binding ExitCommand}" />
     <KeyBinding Gesture="Alt+Up" Command="{Binding UpCommand}" />
     <KeyBinding Gesture="Alt+Left" Command="{Binding BackCommand}" />
     <KeyBinding Gesture="Alt+Right" Command="{Binding ForwardCommand}" />
@@ -32,6 +35,7 @@
     <KeyBinding Gesture="F2" Command="{Binding RenameCommand}" />
     <KeyBinding Gesture="F5" Command="{Binding RefreshCommand}" />
     <KeyBinding Gesture="Delete" Command="{Binding DeleteCommand}" />
+    <KeyBinding Gesture="Alt+Enter" Command="{Binding GetInfoCommand}" />
   </Window.KeyBindings>
 
   <Grid RowDefinitions="44,*" Background="{DynamicResource WindowBackgroundBrush}">
@@ -102,9 +106,14 @@
           <MenuItem Header="Add _Folder…" Command="{Binding AddFolderCommand}" />
           <MenuItem Header="_Export Selected…" Command="{Binding ExportCommand}" />
           <Separator />
-          <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGesture="Ctrl+Q" />
+          <MenuItem Header="Open PAK _Folder" Command="{Binding OpenPakFolderCommand}" />
+          <Separator />
+          <MenuItem Header="_Close Window" Command="{Binding ExitCommand}" InputGesture="Ctrl+W" />
         </MenuItem>
         <MenuItem Header="_Edit">
+          <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGesture="Ctrl+Z" />
+          <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGesture="Ctrl+Y" />
+          <Separator />
           <MenuItem Header="Cu_t" InputGesture="Ctrl+X" Click="OnCutClick" />
           <MenuItem Header="_Copy" InputGesture="Ctrl+C" Click="OnCopyClick" />
           <MenuItem Header="_Paste" InputGesture="Ctrl+V" Click="OnPasteClick" />
@@ -114,6 +123,7 @@
           <Separator />
           <MenuItem Header="_Rename…" Command="{Binding RenameCommand}" InputGesture="F2" />
           <MenuItem Header="_Delete" Command="{Binding DeleteCommand}" InputGesture="Delete" />
+          <MenuItem Header="Get _Info" Command="{Binding GetInfoCommand}" InputGesture="Alt+Enter" />
         </MenuItem>
         <MenuItem Header="_Go">
           <MenuItem Header="_Back" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" InputGesture="Alt+Left" />
@@ -127,6 +137,9 @@
           <MenuItem Header="_Small Icons" Command="{Binding ShowSmallIconsCommand}" />
           <MenuItem Header="_List" Command="{Binding ShowListCommand}" />
           <MenuItem Header="_Details" Command="{Binding ShowDetailsCommand}" />
+          <Separator />
+          <MenuItem Header="Zoom _In" Command="{Binding ZoomInIconsCommand}" />
+          <MenuItem Header="Zoom _Out" Command="{Binding ZoomOutIconsCommand}" />
           <Separator />
           <MenuItem Header="_Quick Preview" InputGesture="Space" Click="OnQuickPreviewClick" />
           <Separator />
@@ -287,7 +300,8 @@
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="models:ArchiveItemViewModel">
                   <Border Classes="icon-card"
-                          Width="128"
+                          x:CompileBindings="False"
+                          Width="{Binding $parent[Window].DataContext.LargeIconCardWidth}"
                           Padding="12"
                           Background="{DynamicResource PanelBackgroundBrush}"
                           BorderBrush="{DynamicResource PanelBorderBrush}"
@@ -295,10 +309,12 @@
                           CornerRadius="10"
                           ToolTip.Tip="{Binding Node.FullPath}">
                     <StackPanel Spacing="8">
-                      <Grid Width="88" Height="72" HorizontalAlignment="Center">
+                      <Grid Width="{Binding $parent[Window].DataContext.LargeIconPreviewWidth}"
+                            Height="{Binding $parent[Window].DataContext.LargeIconPreviewHeight}"
+                            HorizontalAlignment="Center">
                         <TextBlock IsVisible="{Binding IsFile}"
                                    Text="{Binding Icon}"
-                                   FontSize="42"
+                                   FontSize="{Binding $parent[Window].DataContext.LargeIconFontSize}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center" />
                         <Path IsVisible="{Binding IsFolder}"
@@ -310,9 +326,18 @@
                               StrokeJoin="Round"
                               StrokeThickness="1.25"
                               Stretch="Uniform" />
-                        <Image Source="{Binding Thumbnail}" MaxWidth="88" MaxHeight="72" Stretch="Uniform" />
+                        <Image Source="{Binding Thumbnail}"
+                               MaxWidth="{Binding $parent[Window].DataContext.LargeIconPreviewWidth}"
+                               MaxHeight="{Binding $parent[Window].DataContext.LargeIconPreviewHeight}"
+                               Stretch="Uniform" />
                       </Grid>
-                      <TextBlock Text="{Binding Name}" TextAlignment="Center" TextWrapping="Wrap" />
+                      <TextBlock IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextAlignment="Center" TextWrapping="Wrap" />
+                      <TextBox Classes="inline-rename"
+                               IsVisible="{Binding IsRenaming}"
+                               Text="{Binding EditName, Mode=TwoWay}"
+                               TextAlignment="Center"
+                               KeyDown="OnInlineRenameKeyDown"
+                               LostFocus="OnInlineRenameLostFocus" />
                       <TextBlock Text="{Binding TypeText}"
                                  HorizontalAlignment="Center"
                                  FontSize="11"
@@ -367,7 +392,12 @@
                         <Image Source="{Binding Thumbnail}" MaxWidth="30" MaxHeight="30" Stretch="Uniform" />
                       </Grid>
                       <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBox Classes="inline-rename"
+                                 IsVisible="{Binding IsRenaming}"
+                                 Text="{Binding EditName, Mode=TwoWay}"
+                                 KeyDown="OnInlineRenameKeyDown"
+                                 LostFocus="OnInlineRenameLostFocus" />
                         <TextBlock Text="{Binding TypeText}"
                                    FontSize="11"
                                    Foreground="{DynamicResource MutedForegroundBrush}" />
@@ -411,7 +441,13 @@
                             Stretch="Uniform" />
                       <Image Source="{Binding Thumbnail}" Width="20" Height="20" Stretch="Uniform" />
                     </Grid>
-                    <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBox Grid.Column="1"
+                             Classes="inline-rename"
+                             IsVisible="{Binding IsRenaming}"
+                             Text="{Binding EditName, Mode=TwoWay}"
+                             KeyDown="OnInlineRenameKeyDown"
+                             LostFocus="OnInlineRenameLostFocus" />
                     <TextBlock Grid.Column="2"
                                Text="{Binding TypeText}"
                                VerticalAlignment="Center"
@@ -461,10 +497,18 @@
                 <DataGridTemplateColumn Header="Name" SortMemberPath="Name" Width="3*" MinWidth="180">
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate x:DataType="models:ArchiveItemViewModel">
-                      <TextBlock Text="{Binding Name}"
+                      <Grid>
+                        <TextBlock IsVisible="{Binding !IsRenaming}"
+                                 Text="{Binding Name}"
                                  VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis"
                                  ToolTip.Tip="{Binding Node.FullPath}" />
+                        <TextBox Classes="inline-rename"
+                                 IsVisible="{Binding IsRenaming}"
+                                 Text="{Binding EditName, Mode=TwoWay}"
+                                 KeyDown="OnInlineRenameKeyDown"
+                                 LostFocus="OnInlineRenameLostFocus" />
+                      </Grid>
                     </DataTemplate>
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>

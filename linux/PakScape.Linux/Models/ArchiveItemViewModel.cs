@@ -14,6 +14,8 @@ public sealed class ArchiveItemViewModel : ObservableObject
     private readonly ArchiveMetadata _metadata;
     private Bitmap? _thumbnail;
     private int _thumbnailLoadStarted;
+    private bool _isRenaming;
+    private string _editName = string.Empty;
 
     public ArchiveItemViewModel(ArchiveNode node, Func<Bitmap?>? thumbnailFactory)
     {
@@ -73,6 +75,26 @@ public sealed class ArchiveItemViewModel : ObservableObject
     };
 
     public string Name => Node.Name;
+
+    public bool IsRenaming
+    {
+        get => _isRenaming;
+        private set => SetProperty(ref _isRenaming, value);
+    }
+
+    public string EditName
+    {
+        get => _editName;
+        set => SetProperty(ref _editName, value);
+    }
+
+    public void BeginRenaming()
+    {
+        EditName = Name;
+        IsRenaming = true;
+    }
+
+    public void EndRenaming() => IsRenaming = false;
 
     public bool IsFolder => Node is ArchiveFolderNode;
 

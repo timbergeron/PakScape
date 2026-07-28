@@ -1,9 +1,11 @@
 using System.Collections.Specialized;
+using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using PakScape.Linux.Models;
 using PakScape.Linux.ViewModels;
@@ -17,22 +19,30 @@ public partial class MainWindow : Window
 {
     private const double FolderPaneCollapseThreshold = 120;
     private const double FolderPaneReopenWidth = 220;
+    private static readonly TimeSpan TypeSelectionResetInterval = TimeSpan.FromSeconds(1);
 
     private static readonly DataFormat<byte[]> ArchiveClipboardFormat =
         DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-clipboard-id");
     private MainWindowViewModel? _viewModel;
     private IArchiveFileTransferService? _fileTransferService;
     private string? _startupPath;
+    private string _initialFormatId = "pak";
     private bool _closeConfirmed;
     private bool _isCloseConfirmationPending;
     private PreviewWindow? _previewWindow;
+    private SkyboxPreviewWindow? _skyboxPreviewWindow;
     private PointerPressedEventArgs? _dragTriggerEvent;
     private Point? _dragStartPoint;
     private Control? _dragSource;
     private bool _isStartingDrag;
     private bool _isSynchronizingSelection;
     private bool _folderPaneWasCollapsedAtDragStart;
+    private bool _isCommittingRename;
     private double _lastExpandedFolderPaneWidth = 280;
+    private string _typeSelectionBuffer = string.Empty;
+    private DateTimeOffset _lastTypeSelectionInput;
+    private readonly Dictionary<ArchiveNode, ItemInfoWindow> _itemInfoWindows =
+        new(ReferenceEqualityComparer.Instance);
 
     public MainWindow()
     {
@@ -60,7 +70,8 @@ public partial class MainWindow : Window
     public void Configure(
         MainWindowViewModel viewModel,
         IArchiveFileTransferService fileTransferService,
-        string? startupPath)
+        string? startupPath,
+        string initialFormatId = "pak")
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(fileTransferService);
@@ -72,12 +83,17 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _fileTransferService = fileTransferService;
         _startupPath = startupPath;
+        _initialFormatId = initialFormatId;
         DataContext = viewModel;
         AttachArchiveContextMenus(viewModel);
 
         Opened += OnOpened;
         Closing += OnClosing;
         viewModel.CloseRequested += OnCloseRequested;
+        viewModel.GetInfoRequested += OnGetInfoRequested;
+        viewModel.RenameRequested += OnRenameRequested;
+        viewModel.NewWindowRequested += OnNewWindowRequested;
+        viewModel.OpenWindowRequested += OnOpenWindowRequested;
         viewModel.RecentFiles.CollectionChanged += OnRecentFilesChanged;
         RebuildRecentFilesMenu();
     }
@@ -94,6 +110,8 @@ public partial class MainWindow : Window
     {
         var quickPreview = new MenuItem { Header = "Quick Preview" };
         quickPreview.Click += OnQuickPreviewClick;
+        var viewSkybox = new MenuItem { Header = "View Skybox" };
+        viewSkybox.Click += OnViewSkyboxClick;
         var cut = new MenuItem { Header = "Cut" };
         cut.Click += OnCutClick;
         var copy = new MenuItem { Header = "Copy" };
@@ -101,17 +119,6 @@ public partial class MainWindow : Window
         var paste = new MenuItem { Header = "Paste" };
         paste.Click += OnPasteClick;
 
-        var saveAs = new MenuItem
-        {
-            Header = "Save As",
-            ItemsSource = new[]
-            {
-                SaveImageMenuItem("LMP...", "lmp", viewModel),
-                SaveImageMenuItem("JPEG...", "jpg", viewModel),
-                SaveImageMenuItem("PNG...", "png", viewModel),
-                SaveImageMenuItem("TGA...", "tga", viewModel),
-            },
-        };
         var saveSkinAs = new MenuItem
         {
             Header = "Save Model Skins As",
@@ -146,12 +153,13 @@ public partial class MainWindow : Window
             },
         };
 
-        return new ContextMenu
+        var contextMenu = new ContextMenu
         {
             ItemsSource = new object[]
             {
                 new MenuItem { Header = "Open", Command = viewModel.OpenSelectedCommand },
                 quickPreview,
+                viewSkybox,
                 new MenuItem
                 {
                     Header = "Play Demo in Browser...",
@@ -162,27 +170,176 @@ public partial class MainWindow : Window
                 copy,
                 paste,
                 new Separator(),
+                new MenuItem { Header = "Add Files...", Command = viewModel.ContextAddFilesCommand },
+                new MenuItem { Header = "Add Folder...", Command = viewModel.ContextAddFolderCommand },
+                new MenuItem { Header = "New Folder...", Command = viewModel.ContextNewFolderCommand },
+                new Separator(),
                 new MenuItem { Header = "Export...", Command = viewModel.ExportCommand },
-                saveAs,
                 saveSkinAs,
                 saveBspTexturesAs,
                 saveWadTexturesAs,
                 new MenuItem { Header = "Rename...", Command = viewModel.RenameCommand },
                 new MenuItem { Header = "Delete", Command = viewModel.DeleteCommand },
+                new MenuItem { Header = "Get Info", Command = viewModel.GetInfoCommand },
             },
         };
+        contextMenu.Opened += (_, _) =>
+        {
+            viewModel.SetContextTarget(
+                viewModel.SelectedNodes.Count == 1 ? viewModel.SelectedNodes[0] : null);
+            saveSkinAs.IsVisible = viewModel.HasModelSkinSaveOptions;
+            saveBspTexturesAs.IsVisible = viewModel.HasBspTextureSaveOptions;
+            saveWadTexturesAs.IsVisible = viewModel.HasWadTextureSaveOptions;
+            viewSkybox.IsVisible = viewModel.HasSkyboxPreview;
+        };
+        return contextMenu;
     }
 
-    private static MenuItem SaveImageMenuItem(
-        string header,
-        string formatId,
-        MainWindowViewModel viewModel) =>
-        new()
+    private void OnViewSkyboxClick(object? sender, RoutedEventArgs e)
+    {
+        var faceSet = ViewModel.SelectedNodes.Count == 1
+            ? SkyboxFaceSet.Find(ViewModel.SelectedNodes[0])
+            : null;
+        if (faceSet is null)
         {
-            Header = header,
-            Command = viewModel.SaveImageAsCommand,
-            CommandParameter = formatId,
-        };
+            return;
+        }
+        try
+        {
+            _skyboxPreviewWindow?.Close();
+            var window = new SkyboxPreviewWindow(faceSet);
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_skyboxPreviewWindow, window))
+                {
+                    _skyboxPreviewWindow = null;
+                }
+            };
+            _skyboxPreviewWindow = window;
+            window.Show(this);
+        }
+        catch (Exception exception)
+        {
+            var dialog = new MessageDialogWindow(
+                "Unable to Preview Skybox",
+                exception.Message,
+                MessageDialogButtons.Ok);
+            _ = dialog.ShowDialog<MessageDialogResult>(this);
+        }
+    }
+
+    private void OnGetInfoRequested(object? sender, EventArgs e)
+    {
+        const int maximumWindows = 32;
+        var nodes = ViewModel.InfoNodes
+            .Distinct()
+            .Take(maximumWindows + 1)
+            .ToList();
+        if (nodes.Count > maximumWindows)
+        {
+            var dialog = new MessageDialogWindow(
+                "Too Many Get Info Windows",
+                $"Select no more than {maximumWindows:N0} items at once.",
+                MessageDialogButtons.Ok);
+            _ = dialog.ShowDialog<MessageDialogResult>(this);
+            return;
+        }
+
+        foreach (var node in nodes)
+        {
+            if (_itemInfoWindows.TryGetValue(node, out var existing))
+            {
+                existing.Activate();
+                continue;
+            }
+
+            var window = new ItemInfoWindow(node, ViewModel.ArchiveDisplayName);
+            window.Closed += (_, _) => _itemInfoWindows.Remove(node);
+            _itemInfoWindows[node] = window;
+            window.Show(this);
+        }
+    }
+
+    private static void OnNewWindowRequested(string formatId)
+    {
+        if (Application.Current is App app)
+        {
+            app.OpenArchiveWindow(null, formatId);
+        }
+    }
+
+    private static void OnOpenWindowRequested(string path)
+    {
+        if (Application.Current is App app)
+        {
+            app.OpenArchiveWindow(path);
+        }
+    }
+
+    private void OnRenameRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var editor = this.GetVisualDescendants()
+                .OfType<TextBox>()
+                .FirstOrDefault(textBox =>
+                    textBox.Classes.Contains("inline-rename") &&
+                    textBox.IsVisible &&
+                    textBox.DataContext is ArchiveItemViewModel { IsRenaming: true });
+            if (editor is not null)
+            {
+                editor.Focus();
+                editor.SelectAll();
+            }
+        });
+    }
+
+    private async void OnInlineRenameKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: ArchiveItemViewModel item } editor)
+        {
+            return;
+        }
+        if (e.Key == Key.Escape)
+        {
+            item.EndRenaming();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await CommitInlineRenameAsync(item, editor.Text ?? string.Empty);
+        }
+    }
+
+    private async void OnInlineRenameLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: ArchiveItemViewModel { IsRenaming: true } item } editor)
+        {
+            await CommitInlineRenameAsync(item, editor.Text ?? string.Empty);
+        }
+    }
+
+    private async Task CommitInlineRenameAsync(ArchiveItemViewModel item, string name)
+    {
+        if (_isCommittingRename)
+        {
+            return;
+        }
+        _isCommittingRename = true;
+        try
+        {
+            if (!await ViewModel.CommitItemRenameAsync(item, name))
+            {
+                item.BeginRenaming();
+                OnRenameRequested(this, EventArgs.Empty);
+            }
+        }
+        finally
+        {
+            _isCommittingRename = false;
+        }
+    }
 
     private static MenuItem SaveModelSkinMenuItem(
         string header,
@@ -220,7 +377,7 @@ public partial class MainWindow : Window
     private async void OnOpened(object? sender, EventArgs e)
     {
         Opened -= OnOpened;
-        await ViewModel.InitializeAsync(_startupPath);
+        await ViewModel.InitializeAsync(_startupPath, _initialFormatId);
     }
 
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
@@ -459,9 +616,20 @@ public partial class MainWindow : Window
 
     private async void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Source is TextBox)
+        {
+            return;
+        }
+
         if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.None)
         {
             ToggleQuickPreview();
+            e.Handled = true;
+            return;
+        }
+
+        if (TryTypeSelect(sender, e))
+        {
             e.Handled = true;
             return;
         }
@@ -489,6 +657,99 @@ public partial class MainWindow : Window
                 SelectAllVisibleItems(sender);
                 e.Handled = true;
                 break;
+        }
+    }
+
+    private bool TryTypeSelect(object? sender, KeyEventArgs e)
+    {
+        const KeyModifiers shortcutModifiers =
+            KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta;
+        if ((e.KeyModifiers & shortcutModifiers) != KeyModifiers.None ||
+            string.IsNullOrEmpty(e.KeySymbol) ||
+            e.KeySymbol.Any(character =>
+                char.IsControl(character) || char.IsWhiteSpace(character)))
+        {
+            return false;
+        }
+
+        var input = e.KeySymbol.ToLowerInvariant();
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastTypeSelectionInput > TypeSelectionResetInterval)
+        {
+            _typeSelectionBuffer = string.Empty;
+        }
+        else if (_typeSelectionBuffer.Length == 1 &&
+                 string.Equals(_typeSelectionBuffer, input, StringComparison.Ordinal))
+        {
+            // Repeatedly pressing one key cycles through every matching item.
+            _typeSelectionBuffer = string.Empty;
+        }
+
+        _typeSelectionBuffer += input;
+        _lastTypeSelectionInput = now;
+
+        var items = ViewModel.CurrentItems;
+        if (items.Count == 0)
+        {
+            return true;
+        }
+
+        var selectedIndex = ViewModel.SelectedItem is { } selected
+            ? items.IndexOf(selected)
+            : -1;
+        var matchIndex = FindTypeSelectionMatch(items, selectedIndex + 1);
+        if (matchIndex < 0)
+        {
+            return true;
+        }
+
+        var match = items[matchIndex];
+        UpdateSelection([match]);
+        ScrollSelectionIntoView(sender, match);
+        return true;
+    }
+
+    private int FindTypeSelectionMatch(
+        ObservableCollection<ArchiveItemViewModel> items,
+        int startIndex)
+    {
+        for (var offset = 0; offset < items.Count; offset++)
+        {
+            var index = (startIndex + offset) % items.Count;
+            if (items[index].Name.StartsWith(
+                    _typeSelectionBuffer,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private void ScrollSelectionIntoView(object? sender, ArchiveItemViewModel item)
+    {
+        if (sender is ListBox sourceList)
+        {
+            sourceList.ScrollIntoView(item);
+            return;
+        }
+
+        if (ArchiveGrid.IsVisible)
+        {
+            ArchiveGrid.ScrollIntoView(item, null);
+        }
+        else if (LargeIconsList.IsVisible)
+        {
+            LargeIconsList.ScrollIntoView(item);
+        }
+        else if (SmallIconsList.IsVisible)
+        {
+            SmallIconsList.ScrollIntoView(item);
+        }
+        else
+        {
+            ArchiveList.ScrollIntoView(item);
         }
     }
 
