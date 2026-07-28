@@ -1,5 +1,24 @@
 # Changelog
 
+- Added Linux Undo/Redo parity with bounded history for archive additions, pastes,
+  moves, folder creation, renames, and deletion, including saved-revision tracking.
+- Made Linux contextual conversion menus file-specific and removed the generic
+  contextual Save As submenu.
+- Expanded Linux search from the current folder to every archive path, with
+  metadata, multi-term, compact-text, and wildcard matching.
+- Added Linux **File > Open PAK Folder** integration through the desktop's
+  default file manager.
+- Added modeless Linux Get Info windows with multi-selection support and shared
+  format metadata, available from context menus and `Alt+Enter`.
+- Added Linux contextual Add Files, Add Folder, and New Folder actions that
+  target the selected folder.
+- Replaced Linux's rename prompt with inline rename across all four views and
+  added three-level Large Icons zoom controls.
+- Added Linux interactive six-face skybox preview with drag look, wheel zoom,
+  bounded decoding, and view reset.
+- Added Linux multi-window document support with isolated per-window state,
+  last-window shutdown, duplicate-open activation, and `Ctrl+W` close behavior.
+
 Notable user-visible changes are documented here.
 
 ## Unreleased
@@ -8,6 +27,9 @@ Notable user-visible changes are documented here.
 
 - Portable Swift tests for PAK round trips, unsafe paths, missing payloads, format limits, document mutation, and PK3 preflight checks.
 - Windows regression tests for unsafe paths, unsupported PAK names, and atomic replacement.
+- Archive-wide Windows search now matches names, full paths, types, metadata, compact names, and wildcard patterns.
+- Windows Undo and Redo retain up to 50 archive mutations while tracking the last saved revision.
+- A self-contained Windows installer bundles the native preview libraries and registers PakScape as a PAK/PK3 opener.
 - Native Windows PK3 read/write support with path, symlink, duplicate, and expanded-size validation.
 - Windows build-and-test coverage in GitHub Actions.
 - Registered macOS Finder Services and an app Settings window.
@@ -40,6 +62,11 @@ Notable user-visible changes are documented here.
 - Multi-frame MDL and MD3 models animate in the model viewer, with a play/pause control and speeds from 0.25× to 4× on macOS, Windows, and Linux.
 - BSP level overviews can mark green, yellow, and red armor, megahealth, Quad, Ring, Pentagram, rocket launchers, lightning guns, and CTF flags. Markers stay out of archive thumbnails by default; Quick Preview checkboxes turn each group on when wanted.
 - Complete Quake skybox image sets on macOS can be opened from any face through its context menu or the **View Skybox** button in Quick Look, using an interactive drag-to-look preview with scroll zoom, view reset, and a direct return to the original image.
+- Complete Quake skybox image sets on Windows now offer the same **View Skybox** context-menu and Quick Preview actions, with drag-to-look, scroll zoom, view reset, and a direct return to the original image.
+- Windows Get Info now opens modeless per-item windows with thumbnails, exact sizes, archive paths, folder summaries, modified dates, and format metadata; multiple selections open offset windows for side-by-side comparison.
+- The Windows item context menu now includes destination-aware **Add Files**, **Add Folder**, and **New Folder** actions; invoking them on a folder targets that folder, while files and empty space target the current folder.
+- Windows renaming now happens inline in every view: F2 or **Rename** edits the visible name, Enter commits, Escape cancels, and new folders enter rename mode immediately. Large-icon view also has three zoom levels via **View > Zoom In/Out** or Ctrl++/Ctrl+-.
+- Windows now supports multiple archive windows. New and Open create independent document windows with separate undo history, previews, temporary files, and unsaved-change handling; reopening an already-open archive activates its existing window.
 - Get Info and the Details column now recognize BSP2 and Quake 64 levels, MD3 and MD5 models, LIT and VIS map sidecars, NAV2 bot navigation, DDS images, Ogg/Opus/FLAC audio, IT/S3M/XM/MOD/UMX music, and additional Quake text formats such as FGD, PTS, RTLIGHTS, SCR, and SKIN.
 
 ### Changed
