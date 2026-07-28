@@ -30,7 +30,9 @@ public sealed class ItemInfoWindowService
     public void Show(IEnumerable<ArchiveNode> nodes, string archiveName)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        var requested = nodes.Distinct(ReferenceEqualityComparer.Instance).ToList();
+        var requested = nodes
+            .Distinct<ArchiveNode>(ReferenceEqualityComparer.Instance)
+            .ToList();
         if (requested.Count > MaximumWindowsPerRequest)
         {
             _messageBoxService.ShowError(
