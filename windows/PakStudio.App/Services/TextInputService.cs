@@ -10,7 +10,7 @@ public sealed class TextInputService : ITextInputService
     {
         var dialog = new TextInputDialog(title, message, initialValue)
         {
-            Owner = Application.Current.MainWindow,
+            Owner = WindowOwnership.ActiveMainWindow(),
         };
 
         return dialog.ShowDialog() == true ? dialog.Value : null;

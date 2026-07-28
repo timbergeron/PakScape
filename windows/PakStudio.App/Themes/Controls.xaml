@@ -444,8 +444,9 @@
 
     <Style TargetType="Separator">
         <Setter Property="Height" Value="1" />
-        <Setter Property="Margin" Value="8,5" />
-        <Setter Property="Background" Value="{DynamicResource MenuDividerBrush}" />
+        <Setter Property="Margin" Value="0,5" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Template">
             <Setter.Value>

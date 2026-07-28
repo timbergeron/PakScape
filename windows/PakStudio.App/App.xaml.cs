@@ -25,12 +25,13 @@ public partial class App : Application
 
         _serviceProvider = services.BuildServiceProvider();
 
-        var window = _serviceProvider.GetRequiredService<MainWindow>();
         var startupArchive = e.Args.FirstOrDefault(argument =>
             !string.IsNullOrWhiteSpace(argument) && !argument.StartsWith("-", StringComparison.Ordinal));
-        window.ConfigureStartupArchive(startupArchive);
+        var windowService = _serviceProvider.GetRequiredService<IArchiveWindowService>();
+        var window = string.IsNullOrWhiteSpace(startupArchive)
+            ? windowService.ShowNewArchive("pak")
+            : windowService.ShowArchive(startupArchive);
         MainWindow = window;
-        window.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -53,10 +54,12 @@ public partial class App : Application
         services.AddSingleton<ITextInputService, TextInputService>();
         services.AddSingleton<IRecentFilesService, JsonRecentFilesService>();
         services.AddSingleton<IIconService, GlyphIconService>();
-        services.AddSingleton<IArchiveFileTransferService, ArchiveFileTransferService>();
-        services.AddSingleton<ArchiveThumbnailService>();
+        services.AddScoped<IArchiveFileTransferService, ArchiveFileTransferService>();
+        services.AddScoped<ArchiveThumbnailService>();
+        services.AddScoped<ItemInfoWindowService>();
 
-        services.AddSingleton<MainWindowViewModel>();
-        services.AddSingleton<MainWindow>();
+        services.AddSingleton<IArchiveWindowService, ArchiveWindowService>();
+        services.AddScoped<MainWindowViewModel>();
+        services.AddScoped<MainWindow>();
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using PakStudio.App.Commands;
@@ -18,24 +19,29 @@ namespace PakStudio.App.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase
 {
     private const string ClipboardFormat = "PakScape.ArchiveClipboardId";
+    private const int MaximumHistoryEntries = 50;
 
     private readonly IArchiveService _archiveService;
+    private readonly IArchiveWindowService _archiveWindowService;
     private readonly IArchiveFileTransferService _fileTransferService;
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
-    private readonly ITextInputService _textInputService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly IIconService _iconService;
     private readonly ArchiveThumbnailService _thumbnailService;
+    private readonly ItemInfoWindowService _itemInfoWindowService;
     private readonly Dictionary<ArchiveFolderNode, FolderTreeNodeViewModel> _folderLookup = [];
     private readonly Stack<ArchiveFolderNode> _backHistory = [];
     private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
+    private readonly List<ArchiveHistoryEntry> _undoHistory = [];
+    private readonly List<ArchiveHistoryEntry> _redoHistory = [];
 
     private ArchiveDocument? _document;
     private FolderTreeNodeViewModel? _selectedFolder;
     private ArchiveItemViewModel? _selectedItem;
     private IReadOnlyList<ArchiveItemViewModel> _selectedItems = [];
     private ArchiveFolderNode? _currentFolder;
+    private ArchiveNode? _contextTarget;
     private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
     private ArchiveSortColumn _sortColumn = ArchiveSortColumn.Name;
     private bool _sortDescending;
@@ -46,25 +52,31 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _selectionStatus = "0 selected";
     private bool _isBusy;
     private bool _isInitialized;
+    private int _currentRevision;
+    private int _savedRevision;
+    private int _nextRevision;
+    private int _iconZoomLevel = 1;
 
     public MainWindowViewModel(
         IArchiveService archiveService,
+        IArchiveWindowService archiveWindowService,
         IArchiveFileTransferService fileTransferService,
         IFileDialogService fileDialogService,
         IMessageBoxService messageBoxService,
-        ITextInputService textInputService,
         IRecentFilesService recentFilesService,
         IIconService iconService,
-        ArchiveThumbnailService thumbnailService)
+        ArchiveThumbnailService thumbnailService,
+        ItemInfoWindowService itemInfoWindowService)
     {
         _archiveService = archiveService;
+        _archiveWindowService = archiveWindowService;
         _fileTransferService = fileTransferService;
         _fileDialogService = fileDialogService;
         _messageBoxService = messageBoxService;
-        _textInputService = textInputService;
         _recentFilesService = recentFilesService;
         _iconService = iconService;
         _thumbnailService = thumbnailService;
+        _itemInfoWindowService = itemInfoWindowService;
 
         NewCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("pak"), () => !IsBusy);
         NewPk3Command = new AsyncRelayCommand(() => CreateNewArchiveAsync("pk3"), () => !IsBusy);
@@ -73,19 +85,36 @@ public sealed class MainWindowViewModel : ViewModelBase
             !IsBusy && !string.IsNullOrWhiteSpace(path));
         SaveCommand = new AsyncRelayCommand(SaveAsync, CanSave);
         SaveAsCommand = new AsyncRelayCommand(SaveAsAsync, () => Document is not null && !IsBusy);
+        OpenPakFolderCommand = new RelayCommand(OpenPakFolder, CanOpenPakFolder);
+        UndoCommand = new RelayCommand(
+            Undo,
+            () => _undoHistory.Count > 0 && !IsInlineRenameActive && !IsBusy);
+        RedoCommand = new RelayCommand(
+            Redo,
+            () => _redoHistory.Count > 0 && !IsInlineRenameActive && !IsBusy);
         RefreshCommand = new RelayCommand(RefreshCurrentFolder, () => Document is not null && !IsBusy);
-        ExitCommand = new RelayCommand(() => Application.Current.MainWindow?.Close());
+        ExitCommand = new RelayCommand(() => CloseRequested?.Invoke(this, EventArgs.Empty));
         AboutCommand = new RelayCommand(ShowAbout);
 
         NewFolderCommand = new RelayCommand(CreateFolder, CanModifyCurrentFolder);
         AddFilesCommand = new AsyncRelayCommand(AddFilesAsync, CanModifyCurrentFolder);
         AddFolderCommand = new AsyncRelayCommand(AddFolderAsync, CanModifyCurrentFolder);
-        RenameCommand = new RelayCommand(RenameSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
-        DeleteCommand = new RelayCommand(DeleteSelectedItems, CanModifySelectedItems);
+        ContextNewFolderCommand = new RelayCommand(
+            CreateFolderInContext,
+            CanModifyContextDestination);
+        ContextAddFilesCommand = new AsyncRelayCommand(
+            AddFilesInContextAsync,
+            CanModifyContextDestination);
+        ContextAddFolderCommand = new AsyncRelayCommand(
+            AddFolderInContextAsync,
+            CanModifyContextDestination);
+        RenameCommand = new RelayCommand(
+            RequestSelectedItemRename,
+            () => _selectedItems.Count == 1 && !IsInlineRenameActive && !IsBusy);
+        DeleteCommand = new RelayCommand(
+            DeleteSelectedItems,
+            () => !IsInlineRenameActive && CanModifySelectedItems());
         ExportCommand = new AsyncRelayCommand(ExportSelectedItemsAsync, CanModifySelectedItems);
-        SaveImageAsCommand = new AsyncRelayCommand<string>(
-            SaveSelectedImageAsAsync,
-            CanSaveSelectedImageAs);
         SaveModelSkinAsCommand = new AsyncRelayCommand<string>(
             SaveSelectedModelSkinAsAsync,
             CanSaveSelectedModelSkinAs);
@@ -96,8 +125,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             SaveSelectedWadTexturesAsAsync,
             CanSaveSelectedWadTexturesAs);
         PlayDemoInBrowserCommand = new RelayCommand(PlayDemoInBrowser, CanPlayDemoInBrowser);
-        OpenSelectedCommand = new RelayCommand(OpenSelectedItem, () => _selectedItems.Count == 1 && !IsBusy);
-        UpCommand = new RelayCommand(NavigateUp, () => _currentFolder?.Parent is not null && !IsBusy);
+        GetInfoCommand = new RelayCommand(
+            ShowSelectedItemInfo,
+            () => !IsBusy && (_selectedItems.Count > 0 || _currentFolder is not null));
+        OpenSelectedCommand = new RelayCommand(
+            OpenSelectedItem,
+            () => _selectedItems.Count == 1 && !IsInlineRenameActive && !IsBusy);
+        UpCommand = new RelayCommand(
+            NavigateUp,
+            () => _currentFolder?.Parent is not null && !IsInlineRenameActive && !IsBusy);
         BackCommand = new RelayCommand(NavigateBack, CanNavigateBack);
         ForwardCommand = new RelayCommand(NavigateForward, CanNavigateForward);
         CutCommand = new RelayCommand(() => CopySelection(isCut: true), CanModifySelectedItems);
@@ -108,7 +144,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         ShowSmallIconsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.SmallIcons));
         ShowListCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.List));
         ShowDetailsCommand = new RelayCommand(() => SetViewMode(ArchiveViewMode.Details));
+        ZoomInIconsCommand = new RelayCommand(
+            () => SetIconZoomLevel(_iconZoomLevel + 1),
+            () => ActiveViewMode == ArchiveViewMode.LargeIcons && _iconZoomLevel < 2 && !IsBusy);
+        ZoomOutIconsCommand = new RelayCommand(
+            () => SetIconZoomLevel(_iconZoomLevel - 1),
+            () => ActiveViewMode == ArchiveViewMode.LargeIcons && _iconZoomLevel > 0 && !IsBusy);
     }
+
+    public event EventHandler? RenameRequested;
+
+    public event EventHandler? CloseRequested;
 
     public ObservableCollection<FolderTreeNodeViewModel> FolderRoots { get; } = [];
 
@@ -153,6 +199,48 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _activeViewMode;
         private set => SetProperty(ref _activeViewMode, value);
     }
+
+    public double LargeIconTileWidth => _iconZoomLevel switch
+    {
+        0 => 104,
+        2 => 164,
+        _ => 128,
+    };
+
+    public double LargeIconPreviewWidth => _iconZoomLevel switch
+    {
+        0 => 64,
+        2 => 120,
+        _ => 88,
+    };
+
+    public double LargeIconPreviewHeight => _iconZoomLevel switch
+    {
+        0 => 54,
+        2 => 98,
+        _ => 72,
+    };
+
+    public double LargeIconGlyphSize => _iconZoomLevel switch
+    {
+        0 => 34,
+        2 => 54,
+        _ => 42,
+    };
+
+    public double LargeFolderWidth => _iconZoomLevel switch
+    {
+        0 => 40,
+        2 => 64,
+        _ => 48,
+    };
+
+    public double LargeFolderHeight => _iconZoomLevel switch
+    {
+        0 => 30,
+        2 => 48,
+        _ => 36,
+    };
 
     public bool IsBusy
     {
@@ -229,6 +317,20 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string ModifiedSortHeader => SortHeader("Modified", ArchiveSortColumn.Modified);
 
+    public bool HasModelSkinSaveOptions =>
+        SelectedFile is { } file &&
+        Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasBspTextureSaveOptions =>
+        SelectedFile is { } file &&
+        Path.GetExtension(file.Name).Equals(".bsp", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasWadTextureSaveOptions =>
+        SelectedFile is { } file &&
+        Path.GetExtension(file.Name).Equals(".wad", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasSkyboxPreview => SkyboxFaceSet.Find(SelectedFile) is not null;
+
     public AsyncRelayCommand NewCommand { get; }
 
     public AsyncRelayCommand NewPk3Command { get; }
@@ -240,6 +342,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand SaveCommand { get; }
 
     public AsyncRelayCommand SaveAsCommand { get; }
+
+    public RelayCommand OpenPakFolderCommand { get; }
+
+    public RelayCommand UndoCommand { get; }
+
+    public RelayCommand RedoCommand { get; }
 
     public RelayCommand RefreshCommand { get; }
 
@@ -253,13 +361,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public AsyncRelayCommand AddFolderCommand { get; }
 
+    public RelayCommand ContextNewFolderCommand { get; }
+
+    public AsyncRelayCommand ContextAddFilesCommand { get; }
+
+    public AsyncRelayCommand ContextAddFolderCommand { get; }
+
     public RelayCommand RenameCommand { get; }
 
     public RelayCommand DeleteCommand { get; }
 
     public AsyncRelayCommand ExportCommand { get; }
-
-    public AsyncRelayCommand<string> SaveImageAsCommand { get; }
 
     public AsyncRelayCommand<string> SaveModelSkinAsCommand { get; }
 
@@ -268,6 +380,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand<string> SaveWadTexturesAsCommand { get; }
 
     public RelayCommand PlayDemoInBrowserCommand { get; }
+
+    public RelayCommand GetInfoCommand { get; }
 
     public RelayCommand OpenSelectedCommand { get; }
 
@@ -291,7 +405,13 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public RelayCommand ShowDetailsCommand { get; }
 
-    public async Task InitializeAsync(string? archivePath = null)
+    public RelayCommand ZoomInIconsCommand { get; }
+
+    public RelayCommand ZoomOutIconsCommand { get; }
+
+    public async Task InitializeAsync(
+        string? archivePath = null,
+        string initialFormatId = "pak")
     {
         if (_isInitialized)
         {
@@ -299,11 +419,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         _isInitialized = true;
-        LoadDocument(CreateEmptyDocument("pak"));
+        LoadDocument(CreateEmptyDocument(initialFormatId));
         StatusText = "Ready. Open an archive or add files to a new one.";
         if (!string.IsNullOrWhiteSpace(archivePath))
         {
-            await OpenPathAsync(archivePath, confirmReplacement: false).ConfigureAwait(true);
+            await OpenPathAsync(archivePath).ConfigureAwait(true);
         }
     }
 
@@ -366,6 +486,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _selectedItems = items.Distinct().ToList();
         SelectedItem = _selectedItems.FirstOrDefault();
+        OnPropertyChanged(nameof(HasModelSkinSaveOptions));
+        OnPropertyChanged(nameof(HasBspTextureSaveOptions));
+        OnPropertyChanged(nameof(HasWadTextureSaveOptions));
+        OnPropertyChanged(nameof(HasSkyboxPreview));
         SelectionStatus = _selectedItems.Count switch
         {
             0 => $"{CurrentItems.Count} item(s)",
@@ -383,6 +507,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         await ImportPathsAsync(paths).ConfigureAwait(true);
+    }
+
+    public void SetContextTarget(ArchiveNode? node)
+    {
+        _contextTarget = node;
+        CommandManager.InvalidateRequerySuggested();
     }
 
     public IReadOnlyList<string> PrepareSelectedItemsForDrag()
@@ -435,15 +565,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         return await ConfirmDocumentReplacementAsync().ConfigureAwait(true);
     }
 
-    private async Task CreateNewArchiveAsync(string formatId)
+    private Task CreateNewArchiveAsync(string formatId)
     {
-        if (!await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
-        {
-            return;
-        }
-
-        LoadDocument(CreateEmptyDocument(formatId));
-        StatusText = $"Created a new empty {formatId.ToUpperInvariant()} archive.";
+        _archiveWindowService.ShowNewArchive(formatId);
+        return Task.CompletedTask;
     }
 
     private async Task OpenAsync()
@@ -451,8 +576,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         var path = _fileDialogService.PickArchiveToOpen();
         if (!string.IsNullOrWhiteSpace(path))
         {
-            await OpenPathAsync(path, confirmReplacement: true).ConfigureAwait(true);
+            _archiveWindowService.ShowArchive(path);
         }
+        await Task.CompletedTask;
     }
 
     private async Task OpenRecentAsync(string? path)
@@ -468,16 +594,12 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        await OpenPathAsync(path, confirmReplacement: true).ConfigureAwait(true);
+        _archiveWindowService.ShowArchive(path);
+        await Task.CompletedTask;
     }
 
-    private async Task OpenPathAsync(string path, bool confirmReplacement)
+    private async Task OpenPathAsync(string path)
     {
-        if (confirmReplacement && !await ConfirmDocumentReplacementAsync().ConfigureAwait(true))
-        {
-            return;
-        }
-
         try
         {
             IsBusy = true;
@@ -537,6 +659,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             IsBusy = true;
             StatusText = "Saving archive...";
             await _archiveService.SaveAsync(Document, path).ConfigureAwait(true);
+            _savedRevision = _currentRevision;
             RecordRecentFile(path);
             RebuildFolderTree(_currentFolder ?? Document.Root);
             OnPropertyChanged(nameof(WindowTitle));
@@ -554,6 +677,34 @@ public sealed class MainWindowViewModel : ViewModelBase
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private bool CanOpenPakFolder()
+    {
+        return !IsBusy &&
+               Document?.FilePath is { Length: > 0 } path &&
+               File.Exists(path);
+    }
+
+    private void OpenPakFolder()
+    {
+        if (!CanOpenPakFolder() || Document?.FilePath is not { } path)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = Process.Start(new ProcessStartInfo("explorer.exe")
+            {
+                Arguments = $"/select,\"{path}\"",
+                UseShellExecute = true,
+            }) ?? throw new InvalidOperationException("Windows could not open File Explorer.");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _messageBoxService.ShowError("Open PAK Folder Failed", exception.Message);
         }
     }
 
@@ -575,26 +726,37 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void CreateFolder()
     {
-        if (_currentFolder is null)
+        CreateFolderIn(_currentFolder);
+    }
+
+    private void CreateFolderInContext()
+    {
+        CreateFolderIn(ResolveContextDestination());
+    }
+
+    private void CreateFolderIn(ArchiveFolderNode? destination)
+    {
+        if (destination is null)
         {
             return;
         }
 
         var initialName = ArchiveTreeEditor.GetAvailableName(
-            _currentFolder,
+            destination,
             "New Folder",
             preserveExtension: false);
-        var name = _textInputService.Prompt("New Folder", "Enter a name for the folder:", initialName)?.Trim();
-        if (string.IsNullOrEmpty(name))
-        {
-            return;
-        }
-
         try
         {
-            var folder = ArchiveTreeEditor.CreateFolder(_currentFolder, name);
+            var history = CaptureHistory("Create Folder");
+            var folder = ArchiveTreeEditor.CreateFolder(destination, initialName);
+            RecordMutation(history);
             MarkDirty($"Created folder '{folder.Name}'.");
+            if (!ReferenceEquals(destination, _currentFolder))
+            {
+                NavigateToFolder(destination);
+            }
             RefreshAfterMutation(folder);
+            RenameRequested?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
         {
@@ -604,7 +766,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private async Task AddFilesAsync()
     {
-        if (_currentFolder is null)
+        await AddFilesToAsync(_currentFolder).ConfigureAwait(true);
+    }
+
+    private async Task AddFilesInContextAsync()
+    {
+        await AddFilesToAsync(ResolveContextDestination()).ConfigureAwait(true);
+    }
+
+    private async Task AddFilesToAsync(ArchiveFolderNode? destination)
+    {
+        if (destination is null)
         {
             return;
         }
@@ -615,12 +787,22 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        await ImportPathsAsync(paths).ConfigureAwait(true);
+        await ImportPathsAsync(paths, destination).ConfigureAwait(true);
     }
 
     private async Task AddFolderAsync()
     {
-        if (_currentFolder is null)
+        await AddFolderToAsync(_currentFolder).ConfigureAwait(true);
+    }
+
+    private async Task AddFolderInContextAsync()
+    {
+        await AddFolderToAsync(ResolveContextDestination()).ConfigureAwait(true);
+    }
+
+    private async Task AddFolderToAsync(ArchiveFolderNode? destination)
+    {
+        if (destination is null)
         {
             return;
         }
@@ -631,35 +813,41 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        await ImportPathsAsync([path]).ConfigureAwait(true);
+        await ImportPathsAsync([path], destination).ConfigureAwait(true);
     }
 
-    private void RenameSelectedItem()
+    private void RequestSelectedItemRename()
     {
-        var item = SelectedItem;
-        if (item is null)
+        RenameRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public bool CommitItemRename(ArchiveItemViewModel item, string newName)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (string.IsNullOrWhiteSpace(newName))
         {
-            return;
+            _messageBoxService.ShowError("Rename Failed", "The name cannot be empty.");
+            return false;
         }
 
-        var name = _textInputService.Prompt(
-            "Rename Item",
-            $"Enter a new name for '{item.Name}':",
-            item.Name)?.Trim();
-        if (string.IsNullOrEmpty(name))
+        if (string.Equals(item.Name, newName, StringComparison.Ordinal))
         {
-            return;
+            return true;
         }
 
         try
         {
-            ArchiveTreeEditor.Rename(item.Node, name);
-            MarkDirty($"Renamed item to '{name}'.");
+            var history = CaptureHistory("Rename");
+            ArchiveTreeEditor.Rename(item.Node, newName);
+            RecordMutation(history);
+            MarkDirty($"Renamed item to '{newName}'.");
             RefreshAfterMutation(item.Node);
+            return true;
         }
         catch (Exception exception)
         {
             _messageBoxService.ShowError("Rename Failed", exception.Message);
+            return false;
         }
     }
 
@@ -676,17 +864,19 @@ public sealed class MainWindowViewModel : ViewModelBase
             : $"these {items.Count} items";
         if (!_messageBoxService.Confirm(
                 items.Count == 1 ? "Delete Item" : "Delete Items",
-                $"Delete {description} from this archive? Folder contents will also be removed.\n\nThis cannot be undone."))
+                $"Delete {description} from this archive? Folder contents will also be removed."))
         {
             return;
         }
 
         try
         {
+            var history = CaptureHistory("Delete");
             foreach (var item in items)
             {
                 ArchiveTreeEditor.Remove(item.Node);
             }
+            RecordMutation(history);
             MarkDirty(items.Count == 1 ? $"Deleted '{items[0].Name}'." : $"Deleted {items.Count} items.");
             RefreshAfterMutation();
         }
@@ -738,46 +928,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             StatusText = "Export failed.";
             _messageBoxService.ShowError("Export Failed", exception.Message);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private async Task SaveSelectedImageAsAsync(string? formatId)
-    {
-        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
-            _selectedItems is not [var item] ||
-            item.Node is not ArchiveFileNode file ||
-            !ImageFormatConverter.IsSupportedSource(file.Name))
-        {
-            return;
-        }
-
-        var extension = ImageFormatConverter.ExtensionFor(format);
-        var suggestedName = Path.GetFileNameWithoutExtension(file.Name) + extension;
-        var outputPath = _fileDialogService.PickImageSavePath(
-            suggestedName,
-            extension.TrimStart('.'));
-        if (string.IsNullOrWhiteSpace(outputPath))
-        {
-            return;
-        }
-
-        try
-        {
-            IsBusy = true;
-            StatusText = $"Converting {file.Name}...";
-            var converted = await Task.Run(() =>
-                ImageFormatConverter.Convert(file.Name, file.Data, format)).ConfigureAwait(true);
-            await File.WriteAllBytesAsync(outputPath, converted).ConfigureAwait(true);
-            StatusText = $"Saved {Path.GetFileName(outputPath)}";
-        }
-        catch (Exception exception)
-        {
-            StatusText = "Image conversion failed.";
-            _messageBoxService.ShowError("Save Image As Failed", exception.Message);
         }
         finally
         {
@@ -1009,6 +1159,21 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenItem(SelectedItem);
     }
 
+    private void ShowSelectedItemInfo()
+    {
+        var nodes = _selectedItems.Count > 0
+            ? _selectedItems.Select(item => item.Node).ToList()
+            : _currentFolder is { } folder
+                ? [folder]
+                : [];
+        if (nodes.Count == 0)
+        {
+            return;
+        }
+
+        _itemInfoWindowService.Show(nodes, ArchiveDisplayName);
+    }
+
     private void CopySelection(bool isCut)
     {
         var nodes = _selectedItems.Select(item => item.Node).ToList();
@@ -1088,6 +1253,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                     return;
                 }
 
+                var history = CaptureHistory(payload.IsCut ? "Move" : "Paste");
                 var inserted = payload.IsCut
                     ? ArchiveTreeEditor.MoveTo(payload.Originals, _currentFolder)
                     : ArchiveTreeEditor.CopyTo(payload.Templates, _currentFolder);
@@ -1101,6 +1267,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                     ClearClipboardPayload(payload);
                 }
 
+                RecordMutation(history);
                 MarkDirty(payload.IsCut
                     ? $"Moved {inserted.Count} item(s)."
                     : $"Pasted {inserted.Count} item(s).");
@@ -1136,6 +1303,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        if (IsSearchActive)
+        {
+            SearchText = string.Empty;
+        }
         if (_currentFolder is { } current)
         {
             _backHistory.Push(current);
@@ -1282,10 +1453,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         return Document is not null && _currentFolder is not null && !IsBusy;
     }
 
+    private bool CanModifyContextDestination()
+    {
+        return Document is not null && ResolveContextDestination() is not null && !IsBusy;
+    }
+
+    private ArchiveFolderNode? ResolveContextDestination() =>
+        _contextTarget as ArchiveFolderNode ?? _currentFolder;
+
     private bool CanModifySelectedItems()
     {
         return _selectedItems.Count > 0 && !IsBusy;
     }
+
+    private ArchiveFileNode? SelectedFile =>
+        _selectedItems is [var item] ? item.Node as ArchiveFileNode : null;
+
+    private bool IsInlineRenameActive => _selectedItems.Any(item => item.IsRenaming);
 
     private static bool IsPlayableDemo(ArchiveFileNode file) =>
         file.Data.LongLength <= DemoPlaybackHandoff.MaximumSessionBytes &&
@@ -1383,15 +1567,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         return folder.Folders.Any(child => ContainsAnyMap(child, wanted));
     }
 
-    private bool CanSaveSelectedImageAs(string? formatId)
-    {
-        return !IsBusy &&
-               ImageFormatConverter.TryParseFormat(formatId, out _) &&
-               _selectedItems is [var item] &&
-               item.Node is ArchiveFileNode file &&
-               ImageFormatConverter.IsSupportedSource(file.Name);
-    }
-
     private bool CanSaveSelectedModelSkinAs(string? formatId)
     {
         return !IsBusy &&
@@ -1434,14 +1609,41 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         ActiveViewMode = mode;
         StatusText = $"View mode: {mode}";
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void SetIconZoomLevel(int level)
+    {
+        var newLevel = Math.Clamp(level, 0, 2);
+        if (newLevel == _iconZoomLevel)
+        {
+            return;
+        }
+
+        _iconZoomLevel = newLevel;
+        OnPropertyChanged(nameof(LargeIconTileWidth));
+        OnPropertyChanged(nameof(LargeIconPreviewWidth));
+        OnPropertyChanged(nameof(LargeIconPreviewHeight));
+        OnPropertyChanged(nameof(LargeIconGlyphSize));
+        OnPropertyChanged(nameof(LargeFolderWidth));
+        OnPropertyChanged(nameof(LargeFolderHeight));
+        StatusText = $"Icon size: {newLevel + 1} of 3";
+        CommandManager.InvalidateRequerySuggested();
     }
 
     private void LoadDocument(ArchiveDocument document)
     {
+        _itemInfoWindowService.CloseAll();
+        _contextTarget = null;
         _backHistory.Clear();
         _forwardHistory.Clear();
         _currentFolder = null;
         SelectedFolder = null;
+        _undoHistory.Clear();
+        _redoHistory.Clear();
+        _currentRevision = 0;
+        _savedRevision = 0;
+        _nextRevision = 0;
         Document = document;
         SearchText = string.Empty;
         RebuildFolderTree(document.Root);
@@ -1487,23 +1689,26 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         CurrentItems.Clear();
 
-        if (_currentFolder is null)
+        if (_currentFolder is null || Document is null)
         {
             OnPropertyChanged(nameof(SearchResultText));
             return;
         }
 
-        var items = _currentFolder.Children
-            .Select(child => new ArchiveItemViewModel(
-                child,
-                _iconService.GetGlyphForNode(child),
-                ArchiveThumbnailService.CanCreateThumbnail(child)
-                    ? () => _thumbnailService.GetThumbnail(child)
-                    : null))
-            .Where(item => string.IsNullOrWhiteSpace(SearchText) ||
-                           item.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                           item.TypeText.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                           item.SearchableMetadata.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+        var query = SearchText.Trim();
+        var searchAllPaths = query.Length > 0;
+        var nodes = searchAllPaths
+            ? EnumerateDescendants(Document.Root)
+            : _currentFolder.Children;
+        var items = nodes
+            .Select(node => new ArchiveItemViewModel(
+                node,
+                _iconService.GetGlyphForNode(node),
+                ArchiveThumbnailService.CanCreateThumbnail(node)
+                    ? () => _thumbnailService.GetThumbnail(node)
+                    : null,
+                searchAllPaths ? node.FullPath : null))
+            .Where(item => !searchAllPaths || MatchesArchiveSearch(item, query))
             .OrderByDescending(item => item.IsFolder)
             .ThenBy(item => item.Node, Comparer<ArchiveNode>.Create(CompareNodes));
         foreach (var item in items)
@@ -1517,8 +1722,69 @@ public sealed class MainWindowViewModel : ViewModelBase
             ? null
             : CurrentItems.FirstOrDefault(item => ReferenceEquals(item.Node, nodeToSelect));
         SetSelectedItems(selectedItem is null ? [] : [selectedItem]);
-        StatusText = $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
+        StatusText = searchAllPaths
+            ? $"{CurrentItems.Count} search result(s) in {ArchiveDisplayName}"
+            : $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
     }
+
+    private static IEnumerable<ArchiveNode> EnumerateDescendants(ArchiveFolderNode root)
+    {
+        var pending = new Stack<ArchiveNode>(root.Children.Reverse());
+        while (pending.TryPop(out var node))
+        {
+            yield return node;
+            if (node is ArchiveFolderNode folder)
+            {
+                foreach (var child in folder.Children.Reverse())
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+    }
+
+    private static bool MatchesArchiveSearch(ArchiveItemViewModel item, string query)
+    {
+        var searchable = string.Join(
+            " ",
+            item.Name,
+            Path.GetFileNameWithoutExtension(item.Name),
+            item.TypeText,
+            item.SearchPath,
+            item.SearchableMetadata);
+        var compactSearchable = CompactSearchText(searchable);
+
+        return query
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(term =>
+            {
+                if (term.Contains('*') || term.Contains('?'))
+                {
+                    var pattern = "^" + Regex.Escape(term)
+                        .Replace(@"\*", ".*", StringComparison.Ordinal)
+                        .Replace(@"\?", ".", StringComparison.Ordinal) + "$";
+                    return searchable
+                        .Split([' ', '/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+                        .Append(item.SearchPath ?? string.Empty)
+                        .Any(part => Regex.IsMatch(
+                            part,
+                            pattern,
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                            TimeSpan.FromMilliseconds(100)));
+                }
+
+                var compactTerm = CompactSearchText(term);
+                return searchable.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                       compactTerm.Length > 0 &&
+                       compactSearchable.Contains(compactTerm, StringComparison.Ordinal);
+            });
+    }
+
+    private static string CompactSearchText(string value) =>
+        new(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
 
     private int CompareNodes(ArchiveNode left, ArchiveNode right)
     {
@@ -1572,6 +1838,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void RefreshAfterMutation(ArchiveNode? nodeToSelect = null)
     {
+        if (Document is { } document)
+        {
+            _itemInfoWindowService.CloseMissingFrom(document.Root);
+        }
         var status = StatusText;
         var currentFolder = _currentFolder;
         RebuildFolderTree(currentFolder);
@@ -1590,6 +1860,104 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(WindowTitle));
         StatusText = status;
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    private ArchiveHistoryEntry CaptureHistory(string action)
+    {
+        var document = Document
+            ?? throw new InvalidOperationException("No archive is open.");
+        return new ArchiveHistoryEntry(
+            action,
+            ArchiveTreeEditor.CreateFolderSnapshot(document.Root),
+            _currentRevision);
+    }
+
+    private void RecordMutation(ArchiveHistoryEntry history)
+    {
+        _undoHistory.Add(history);
+        if (_undoHistory.Count > MaximumHistoryEntries)
+        {
+            _undoHistory.RemoveAt(0);
+        }
+        _redoHistory.Clear();
+        _currentRevision = ++_nextRevision;
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void Undo()
+    {
+        if (Document is null || _undoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var target = TakeLast(_undoHistory);
+        _redoHistory.Add(new ArchiveHistoryEntry(
+            target.Action,
+            ArchiveTreeEditor.CreateFolderSnapshot(Document.Root),
+            _currentRevision));
+        TrimHistory(_redoHistory);
+        RestoreHistory(target);
+        StatusText = $"Undid {target.Action.ToLowerInvariant()}.";
+    }
+
+    private void Redo()
+    {
+        if (Document is null || _redoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var target = TakeLast(_redoHistory);
+        _undoHistory.Add(new ArchiveHistoryEntry(
+            target.Action,
+            ArchiveTreeEditor.CreateFolderSnapshot(Document.Root),
+            _currentRevision));
+        TrimHistory(_undoHistory);
+        RestoreHistory(target);
+        StatusText = $"Redid {target.Action.ToLowerInvariant()}.";
+    }
+
+    private void RestoreHistory(ArchiveHistoryEntry entry)
+    {
+        if (Document is null)
+        {
+            return;
+        }
+
+        ArchiveTreeEditor.RestoreFolderSnapshot(Document.Root, entry.Root);
+        _itemInfoWindowService.CloseMissingFrom(Document.Root);
+        _currentRevision = entry.Revision;
+        Document.IsDirty = _currentRevision != _savedRevision;
+        if (_clipboardPayload is { } payload)
+        {
+            ClearClipboardPayload(payload);
+        }
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(IsSearchActive));
+        RebuildFolderTree(Document.Root);
+        SetSelectedItems([]);
+        OnPropertyChanged(nameof(WindowTitle));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private static T TakeLast<T>(List<T> items)
+    {
+        var index = items.Count - 1;
+        var item = items[index];
+        items.RemoveAt(index);
+        return item;
+    }
+
+    private static void TrimHistory(List<ArchiveHistoryEntry> history)
+    {
+        if (history.Count > MaximumHistoryEntries)
+        {
+            history.RemoveAt(0);
+        }
     }
 
     private void RecordRecentFile(string path)
@@ -1613,14 +1981,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         _messageBoxService.ShowError(title, string.Join(Environment.NewLine, visibleFailures));
     }
 
-    private async Task ImportPathsAsync(IReadOnlyList<string> paths)
+    private async Task ImportPathsAsync(
+        IReadOnlyList<string> paths,
+        ArchiveFolderNode? targetFolder = null)
     {
-        if (_currentFolder is null)
+        var destination = targetFolder ?? _currentFolder;
+        if (destination is null)
         {
             return;
         }
 
-        var destination = _currentFolder;
+        var history = CaptureHistory(paths.Count == 1 ? "Add Item" : "Add Items");
         var imported = new List<ArchiveNode>();
         var failures = new List<string>();
         try
@@ -1653,6 +2024,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (imported.Count > 0)
         {
+            RecordMutation(history);
             MarkDirty(imported.Count == 1 ? "Added 1 item." : $"Added {imported.Count} items.");
             RefreshAfterMutation(imported[0]);
         }
@@ -1681,4 +2053,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         IReadOnlyList<ArchiveNode> Templates,
         IReadOnlyList<ArchiveNode> Originals,
         bool IsCut);
+
+    private sealed record ArchiveHistoryEntry(
+        string Action,
+        ArchiveFolderNode Root,
+        int Revision);
 }

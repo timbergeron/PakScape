@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
@@ -21,9 +23,11 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _isCloseConfirmationPending;
     private string? _startupArchivePath;
+    private string _startupFormatId = "pak";
     private Point? _dragStartPoint;
     private bool _isStartingDrag;
     private bool _folderPaneWasCollapsedAtDragStart;
+    private bool _contextMenuTargetPrepared;
     private double _lastExpandedFolderPaneWidth = 280;
 
     public MainWindow(
@@ -34,19 +38,26 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _fileTransferService = fileTransferService;
         DataContext = _viewModel;
+        _viewModel.RenameRequested += ViewModel_OnRenameRequested;
+        _viewModel.CloseRequested += ViewModel_OnCloseRequested;
         Loaded += OnLoaded;
     }
 
-    public void ConfigureStartupArchive(string? path)
+    internal string? ArchivePath => _viewModel.Document?.FilePath;
+
+    public void ConfigureStartupArchive(string? path, string formatId = "pak")
     {
         _startupArchivePath = path;
+        _startupFormatId = formatId;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await _viewModel.InitializeAsync(_startupArchivePath).ConfigureAwait(true);
+        await _viewModel.InitializeAsync(_startupArchivePath, _startupFormatId).ConfigureAwait(true);
     }
+
+    private void ViewModel_OnCloseRequested(object? sender, EventArgs e) => Close();
 
     private void FolderTree_OnSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
@@ -133,6 +144,11 @@ public partial class MainWindow : Window
 
     private void ItemList_OnMouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        if (FindVisualAncestor<TextBox>(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is ListViewItem item &&
             item.DataContext is ArchiveItemViewModel archiveItem)
         {
@@ -154,11 +170,133 @@ public partial class MainWindow : Window
 
     private void ItemList_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (FindVisualAncestor<TextBox>(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None)
         {
             ToggleQuickPreview();
             e.Handled = true;
         }
+    }
+
+    private void ViewModel_OnRenameRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(BeginInlineRename));
+    }
+
+    private void BeginInlineRename()
+    {
+        var item = _viewModel.SelectedItem;
+        if (item is null)
+        {
+            return;
+        }
+
+        foreach (var other in _viewModel.CurrentItems.Where(candidate => !ReferenceEquals(candidate, item)))
+        {
+            other.EndRenaming();
+        }
+        item.BeginRenaming();
+        CommandManager.InvalidateRequerySuggested();
+        ItemList.ScrollIntoView(item);
+        ItemList.UpdateLayout();
+
+        if (ItemList.ItemContainerGenerator.ContainerFromItem(item) is not ListViewItem container ||
+            FindInlineRenameTextBox(container) is not { } editor)
+        {
+            item.EndRenaming();
+            CommandManager.InvalidateRequerySuggested();
+            return;
+        }
+
+        editor.Focus();
+        var extensionLength = item.Node is ArchiveFileNode
+            ? Path.GetExtension(item.EditName).Length
+            : 0;
+        editor.Select(0, Math.Max(0, item.EditName.Length - extensionLength));
+    }
+
+    private void InlineRenameTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox editor ||
+            editor.DataContext is not ArchiveItemViewModel item)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Enter:
+                CommitInlineRename(editor, item);
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                item.EndRenaming();
+                CommandManager.InvalidateRequerySuggested();
+                ItemList.Focus();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void InlineRenameTextBox_OnLostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is TextBox editor &&
+            editor.DataContext is ArchiveItemViewModel { IsRenaming: true } item)
+        {
+            CommitInlineRename(editor, item);
+        }
+    }
+
+    private void CommitInlineRename(TextBox editor, ArchiveItemViewModel item)
+    {
+        if (!item.IsRenaming)
+        {
+            return;
+        }
+
+        item.EndRenaming();
+        CommandManager.InvalidateRequerySuggested();
+        _viewModel.CommitItemRename(item, editor.Text);
+        ItemList.Focus();
+    }
+
+    private static TextBox? FindInlineRenameTextBox(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is TextBox { Tag: "InlineRename" } editor)
+            {
+                return editor;
+            }
+            if (FindInlineRenameTextBox(child) is { } nested)
+            {
+                return nested;
+            }
+        }
+        return null;
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? element)
+        where T : DependencyObject
+    {
+        while (element is not null)
+        {
+            if (element is T match)
+            {
+                return match;
+            }
+            element = VisualTreeHelper.GetParent(element);
+        }
+        return null;
     }
 
     private void QuickPreview_OnClick(object sender, RoutedEventArgs e)
@@ -182,6 +320,24 @@ public partial class MainWindow : Window
 
     private void ShowQuickPreview(IReadOnlyList<ArchiveNode> nodes)
     {
+        ShowPreview(nodes, showSkybox: false);
+    }
+
+    private void ViewSkybox_OnClick(object sender, RoutedEventArgs e)
+    {
+        var nodes = ItemList.SelectedItems
+            .Cast<ArchiveItemViewModel>()
+            .Select(item => item.Node)
+            .Take(1)
+            .ToList();
+        if (nodes.Count == 1)
+        {
+            ShowPreview(nodes, showSkybox: true);
+        }
+    }
+
+    private void ShowPreview(IReadOnlyList<ArchiveNode> nodes, bool showSkybox)
+    {
         if (nodes.Count == 0)
         {
             return;
@@ -195,7 +351,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var previewWindow = new PreviewWindow(nodes) { Owner = this };
+            var previewWindow = new PreviewWindow(nodes, showSkybox) { Owner = this };
             previewWindow.Closed += (_, _) =>
             {
                 if (ReferenceEquals(_previewWindow, previewWindow))
@@ -216,13 +372,19 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            ShowWarning("Unable to Preview Selection", exception.Message);
+            ShowWarning(
+                showSkybox ? "Unable to Preview Skybox" : "Unable to Preview Selection",
+                exception.Message);
         }
     }
 
     private void ItemList_OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is ListViewItem item)
+        _contextMenuTargetPrepared = true;
+        if (ItemsControl.ContainerFromElement(
+                ItemList,
+                e.OriginalSource as DependencyObject) is ListViewItem item &&
+            item.DataContext is ArchiveItemViewModel archiveItem)
         {
             if (!item.IsSelected)
             {
@@ -230,7 +392,30 @@ public partial class MainWindow : Window
             }
             item.IsSelected = true;
             item.Focus();
+            _viewModel.SetContextTarget(archiveItem.Node);
         }
+        else
+        {
+            ItemList.SelectedItems.Clear();
+            _viewModel.SetContextTarget(null);
+        }
+    }
+
+    private void ItemContextMenu_OnOpened(object sender, RoutedEventArgs e)
+    {
+        if (!_contextMenuTargetPrepared)
+        {
+            var target = ItemList.SelectedItems.Count == 1
+                ? (ItemList.SelectedItems[0] as ArchiveItemViewModel)?.Node
+                : null;
+            _viewModel.SetContextTarget(target);
+        }
+    }
+
+    private void ItemContextMenu_OnClosed(object sender, RoutedEventArgs e)
+    {
+        _contextMenuTargetPrepared = false;
+        _viewModel.SetContextTarget(null);
     }
 
     private void ItemList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -296,44 +481,88 @@ public partial class MainWindow : Window
 
     private void Cut_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            e.CanExecute = !editor.IsReadOnly && editor.SelectionLength > 0;
+            return;
+        }
         e.CanExecute = _viewModel.CutCommand.CanExecute(null);
     }
 
     private void Cut_Executed(object sender, ExecutedRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            editor.Cut();
+            e.Handled = true;
+            return;
+        }
         _viewModel.CutCommand.Execute(null);
         e.Handled = true;
     }
 
     private void Copy_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            e.CanExecute = editor.SelectionLength > 0;
+            return;
+        }
         e.CanExecute = _viewModel.CopyCommand.CanExecute(null);
     }
 
     private void Copy_Executed(object sender, ExecutedRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            editor.Copy();
+            e.Handled = true;
+            return;
+        }
         _viewModel.CopyCommand.Execute(null);
         e.Handled = true;
     }
 
     private void Paste_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            e.CanExecute = !editor.IsReadOnly && ClipboardHasText();
+            return;
+        }
         e.CanExecute = _viewModel.PasteCommand.CanExecute(null);
     }
 
     private void Paste_Executed(object sender, ExecutedRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            editor.Paste();
+            e.Handled = true;
+            return;
+        }
         _viewModel.PasteCommand.Execute(null);
         e.Handled = true;
     }
 
     private void SelectAll_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            e.CanExecute = editor.Text.Length > 0;
+            return;
+        }
         e.CanExecute = ItemList.Items.Count > 0 && !_viewModel.IsBusy;
     }
 
     private void SelectAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
+        if (FocusedTextBox() is { } editor)
+        {
+            editor.SelectAll();
+            e.Handled = true;
+            return;
+        }
         ItemList.SelectAll();
         ItemList.Focus();
         e.Handled = true;
@@ -391,5 +620,20 @@ public partial class MainWindow : Window
             Owner = this,
         };
         _ = dialog.ShowDialogResult();
+    }
+
+    private static TextBox? FocusedTextBox() =>
+        Keyboard.FocusedElement as TextBox;
+
+    private static bool ClipboardHasText()
+    {
+        try
+        {
+            return Clipboard.ContainsText();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 }

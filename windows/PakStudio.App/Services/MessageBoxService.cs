@@ -11,7 +11,7 @@ public sealed class MessageBoxService : IMessageBoxService
     {
         var dialog = new Views.AboutWindow
         {
-            Owner = Application.Current.MainWindow,
+            Owner = WindowOwnership.ActiveMainWindow(),
         };
         dialog.ShowDialog();
     }
@@ -53,7 +53,7 @@ public sealed class MessageBoxService : IMessageBoxService
         MessageDialogButtons buttons)
     {
         var dialog = new MessageDialogWindow(title, message, buttons);
-        if (Application.Current.MainWindow is { IsVisible: true } owner)
+        if (WindowOwnership.ActiveMainWindow() is { IsVisible: true } owner)
         {
             dialog.Owner = owner;
         }

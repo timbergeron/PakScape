@@ -127,17 +127,29 @@
                            Margin="0,3,0,0"
                            Foreground="{DynamicResource MutedForegroundBrush}" />
             </StackPanel>
-            <Button Grid.Column="1"
-                    Width="34"
-                    Height="30"
-                    Margin="12,0,0,0"
-                    Style="{StaticResource PreviewIconButtonStyle}"
-                    ToolTip="Close preview (Space or Escape)"
-                    Click="CloseButton_OnClick">
-                <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                           FontSize="10"
-                           Text="&#xE8BB;" />
-            </Button>
+            <StackPanel Grid.Column="1" Margin="12,0,0,0" Orientation="Horizontal">
+                <Button x:Name="ViewSkyboxButton"
+                        Margin="0,0,8,0"
+                        Padding="12,5"
+                        Visibility="Collapsed"
+                        Content="View Skybox"
+                        Click="ViewSkyboxButton_OnClick" />
+                <Button x:Name="ResetSkyboxButton"
+                        Margin="0,0,8,0"
+                        Padding="12,5"
+                        Visibility="Collapsed"
+                        Content="Reset View"
+                        Click="ResetSkyboxButton_OnClick" />
+                <Button Width="34"
+                        Height="30"
+                        Style="{StaticResource PreviewIconButtonStyle}"
+                        ToolTip="Close preview (Space or Escape)"
+                        Click="CloseButton_OnClick">
+                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="10"
+                               Text="&#xE8BB;" />
+                </Button>
+            </StackPanel>
         </Grid>
 
         <Border Grid.Row="1"
@@ -202,6 +214,10 @@
                 </Border>
 
                 <ContentControl x:Name="ModelPanel" Visibility="Collapsed" />
+
+                <ContentControl x:Name="SkyboxPanel"
+                                Background="Black"
+                                Visibility="Collapsed" />
 
                 <TextBox x:Name="TextPreview"
                          Visibility="Collapsed"
@@ -324,10 +340,17 @@
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource MutedForegroundBrush}" />
-            <TextBlock Grid.Column="2"
-                       VerticalAlignment="Center"
-                       Foreground="{DynamicResource MutedForegroundBrush}"
-                       Text="Space or Esc to close" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <TextBlock VerticalAlignment="Center"
+                           Foreground="{DynamicResource MutedForegroundBrush}"
+                           Text="Space or Esc to close" />
+                <Button x:Name="BackToImageButton"
+                        Margin="14,0,0,0"
+                        Padding="12,5"
+                        Visibility="Collapsed"
+                        Content="Back to Image"
+                        Click="BackToImageButton_OnClick" />
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

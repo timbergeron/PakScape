@@ -16,13 +16,15 @@ public partial class PreviewWindow : Window
     private readonly DispatcherTimer _audioProgressTimer;
     private NativeAudioPlayer? _audioPlayer;
     private ModelPreviewControl? _modelPreview;
+    private SkyboxPreviewControl? _skyboxPreview;
     private ArchivePreview? _activePreview;
     private int _index;
+    private bool _showSkybox;
     private bool _isAudioPlaying;
     private bool _isUpdatingAudioProgress;
     private bool _isShowingPreview;
 
-    public PreviewWindow(IReadOnlyList<ArchiveNode> nodes)
+    public PreviewWindow(IReadOnlyList<ArchiveNode> nodes, bool showSkybox = false)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArchivePreviewBuilder.ValidateSelection(nodes);
@@ -32,6 +34,7 @@ public partial class PreviewWindow : Window
         }
 
         _nodes = nodes;
+        _showSkybox = showSkybox;
         _audioProgressTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(250),
@@ -45,6 +48,13 @@ public partial class PreviewWindow : Window
     {
         _isShowingPreview = true;
         ResetContent();
+        if (_showSkybox)
+        {
+            ShowSkybox();
+            _isShowingPreview = false;
+            return;
+        }
+
         ArchivePreview preview;
         try
         {
@@ -74,6 +84,10 @@ public partial class PreviewWindow : Window
         PositionText.Text = _nodes.Count == 1 ? "1 of 1" : $"{_index + 1:N0} of {_nodes.Count:N0}";
         PreviousButton.IsEnabled = _nodes.Count > 1;
         NextButton.IsEnabled = _nodes.Count > 1;
+        ViewSkyboxButton.Visibility =
+            SkyboxFaceSet.Find(_nodes[_index]) is not null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
         switch (preview.Kind)
         {
@@ -221,12 +235,43 @@ public partial class PreviewWindow : Window
     {
         ResetAudioPlayback();
         ResetModelPreview();
+        ResetSkyboxPreview();
         ImagePreview.Source = null;
         TextPreview.Text = string.Empty;
         ImagePanel.Visibility = Visibility.Collapsed;
         BspMarkerOptionsPanel.Visibility = Visibility.Collapsed;
         TextPreview.Visibility = Visibility.Collapsed;
         MetadataPanel.Visibility = Visibility.Collapsed;
+        ViewSkyboxButton.Visibility = Visibility.Collapsed;
+        ResetSkyboxButton.Visibility = Visibility.Collapsed;
+        BackToImageButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowSkybox()
+    {
+        var faceSet = SkyboxFaceSet.Find(_nodes[_index])
+            ?? throw new ArchivePreviewException(
+                "The selected image is not part of a complete six-face Quake skybox.");
+        var control = new SkyboxPreviewControl(faceSet);
+        _skyboxPreview = control;
+        SkyboxPanel.Content = control;
+        SkyboxPanel.Visibility = Visibility.Visible;
+        Title = $"{faceSet.Name} — Skybox Preview";
+        TitleText.Text = faceSet.Name;
+        SubtitleText.Text = "Drag to look around • Scroll to zoom";
+        PositionText.Text = _nodes.Count == 1 ? "1 of 1" : $"{_index + 1:N0} of {_nodes.Count:N0}";
+        PreviousButton.IsEnabled = false;
+        NextButton.IsEnabled = false;
+        ResetSkyboxButton.Visibility = Visibility.Visible;
+        BackToImageButton.Visibility = Visibility.Visible;
+        control.Focus();
+    }
+
+    private void ResetSkyboxPreview()
+    {
+        _skyboxPreview = null;
+        SkyboxPanel.Content = null;
+        SkyboxPanel.Visibility = Visibility.Collapsed;
     }
 
     private void ResetAudioPlayback()
@@ -295,6 +340,7 @@ public partial class PreviewWindow : Window
     private void Move(int delta)
     {
         _index = (_index + delta + _nodes.Count) % _nodes.Count;
+        _showSkybox = false;
         ShowCurrentPreview();
     }
 
@@ -408,10 +454,45 @@ public partial class PreviewWindow : Window
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Close();
 
+    private void ViewSkyboxButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _showSkybox = true;
+            ShowCurrentPreview();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _showSkybox = false;
+            ShowCurrentPreview();
+            var dialog = new MessageDialogWindow(
+                "Unable to Preview Skybox",
+                exception.Message,
+                MessageDialogButtons.Ok)
+            {
+                Owner = this,
+            };
+            dialog.ShowDialogResult();
+        }
+    }
+
+    private void ResetSkyboxButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _skyboxPreview?.ResetView();
+        _skyboxPreview?.Focus();
+    }
+
+    private void BackToImageButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _showSkybox = false;
+        ShowCurrentPreview();
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         ResetAudioPlayback();
         ResetModelPreview();
+        ResetSkyboxPreview();
         base.OnClosed(e);
     }
 }

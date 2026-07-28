@@ -40,17 +40,27 @@
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
         <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsCommand}" />
+        <KeyBinding Key="W" Modifiers="Control" Command="{Binding ExitCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
         <KeyBinding Key="F2" Command="{Binding RenameCommand}" />
         <KeyBinding Key="Delete" Command="{Binding DeleteCommand}" />
         <KeyBinding Key="Enter" Command="{Binding OpenSelectedCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Alt" Command="{Binding GetInfoCommand}" />
         <KeyBinding Key="Back" Command="{Binding UpCommand}" />
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
         <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackCommand}" />
         <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}" />
+        <KeyBinding Key="OemPlus" Modifiers="Control" Command="{Binding ZoomInIconsCommand}" />
+        <KeyBinding Key="OemPlus" Modifiers="Control+Shift" Command="{Binding ZoomInIconsCommand}" />
+        <KeyBinding Key="Add" Modifiers="Control" Command="{Binding ZoomInIconsCommand}" />
+        <KeyBinding Key="OemMinus" Modifiers="Control" Command="{Binding ZoomOutIconsCommand}" />
+        <KeyBinding Key="Subtract" Modifiers="Control" Command="{Binding ZoomOutIconsCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
         <helpers:BindingProxy x:Key="ViewModelProxy" Data="{Binding}" />
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <converters:ArchiveViewModeEqualsConverter x:Key="ArchiveViewModeEqualsConverter" />
         <converters:ArchiveViewModeToVisibilityConverter x:Key="ArchiveViewModeToVisibilityConverter" />
 
@@ -153,7 +163,7 @@
 
         <DataTemplate x:Key="LargeIconTemplate">
             <Border x:Name="LargeIconBorder"
-                    Width="128"
+                    Width="{Binding DataContext.LargeIconTileWidth, RelativeSource={RelativeSource AncestorType=Window}}"
                     Margin="0,0,12,12"
                     Padding="12"
                     Background="{DynamicResource PanelBackgroundBrush}"
@@ -161,22 +171,24 @@
                     BorderThickness="1"
                     CornerRadius="10">
                 <StackPanel>
-                    <Grid Width="88" Height="72" HorizontalAlignment="Center">
+                    <Grid Width="{Binding DataContext.LargeIconPreviewWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                          Height="{Binding DataContext.LargeIconPreviewHeight, RelativeSource={RelativeSource AncestorType=Window}}"
+                          HorizontalAlignment="Center">
                         <Image Source="{Binding Thumbnail}"
-                               MaxWidth="88"
-                               MaxHeight="72"
+                               MaxWidth="{Binding DataContext.LargeIconPreviewWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                               MaxHeight="{Binding DataContext.LargeIconPreviewHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                                Stretch="Uniform" />
                         <TextBlock x:Name="LargeIconGlyph"
                                    Visibility="Collapsed"
                                    FontFamily="Segoe MDL2 Assets"
-                                   FontSize="42"
+                                   FontSize="{Binding DataContext.LargeIconGlyphSize, RelativeSource={RelativeSource AncestorType=Window}}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource MutedForegroundBrush}"
                                    Text="{Binding IconGlyph}" />
                         <Path x:Name="LargeFolderGlyph"
-                              Width="48"
-                              Height="36"
+                              Width="{Binding DataContext.LargeFolderWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                              Height="{Binding DataContext.LargeFolderHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                               Visibility="Collapsed"
                               Data="M 1,4 L 1,14 L 19,14 L 19,5 L 9,5 L 7,2 L 1,2 Z"
                               Fill="Transparent"
@@ -185,16 +197,27 @@
                               StrokeThickness="1.25"
                               Stretch="Uniform" />
                     </Grid>
-                    <TextBlock Margin="0,10,0,0"
-                               HorizontalAlignment="Center"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               Text="{Binding Name}" />
+                    <Grid Margin="0,10,0,0">
+                        <TextBlock x:Name="LargeNameText"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding Name}" />
+                        <TextBox x:Name="LargeRenameTextBox"
+                                 Tag="InlineRename"
+                                 Visibility="Collapsed"
+                                 HorizontalContentAlignment="Center"
+                                 TextAlignment="Center"
+                                 Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                 LostKeyboardFocus="InlineRenameTextBox_OnLostKeyboardFocus"
+                                 PreviewKeyDown="InlineRenameTextBox_OnPreviewKeyDown" />
+                    </Grid>
                     <TextBlock Margin="0,4,0,0"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource MutedForegroundBrush}"
                                FontSize="11"
-                               Text="{Binding TypeText}" />
+                               Text="{Binding SecondaryText}"
+                               ToolTip="{Binding SearchPath}" />
                 </StackPanel>
             </Border>
             <DataTemplate.Triggers>
@@ -204,6 +227,10 @@
                 <DataTrigger Binding="{Binding IsFolder}" Value="True">
                     <Setter TargetName="LargeIconGlyph" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="LargeFolderGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                    <Setter TargetName="LargeNameText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="LargeRenameTextBox" Property="Visibility" Value="Visible" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}}"
                              Value="True">
@@ -248,10 +275,20 @@
                               Stretch="Uniform" />
                     </Grid>
                     <StackPanel Margin="8,0,0,0">
-                        <TextBlock Text="{Binding Name}" />
+                        <Grid>
+                            <TextBlock x:Name="SmallNameText" Text="{Binding Name}" />
+                            <TextBox x:Name="SmallRenameTextBox"
+                                     Tag="InlineRename"
+                                     MinWidth="120"
+                                     Visibility="Collapsed"
+                                     Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                     LostKeyboardFocus="InlineRenameTextBox_OnLostKeyboardFocus"
+                                     PreviewKeyDown="InlineRenameTextBox_OnPreviewKeyDown" />
+                        </Grid>
                         <TextBlock FontSize="11"
                                    Foreground="{DynamicResource MutedForegroundBrush}"
-                                   Text="{Binding TypeText}" />
+                                   Text="{Binding SecondaryText}"
+                                   ToolTip="{Binding SearchPath}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -262,6 +299,10 @@
                 <DataTrigger Binding="{Binding IsFolder}" Value="True">
                     <Setter TargetName="SmallIconGlyph" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="SmallFolderGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                    <Setter TargetName="SmallNameText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="SmallRenameTextBox" Property="Visibility" Value="Visible" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}}"
                              Value="True">
@@ -300,13 +341,23 @@
                           StrokeThickness="1.25"
                           Stretch="Uniform" />
                 </Grid>
-                <TextBlock Grid.Column="1"
-                           VerticalAlignment="Center"
-                           Text="{Binding Name}" />
+                <Grid Grid.Column="1">
+                    <TextBlock x:Name="ListNameText"
+                               VerticalAlignment="Center"
+                               Text="{Binding Name}" />
+                    <TextBox x:Name="ListRenameTextBox"
+                             Tag="InlineRename"
+                             Visibility="Collapsed"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                             LostKeyboardFocus="InlineRenameTextBox_OnLostKeyboardFocus"
+                             PreviewKeyDown="InlineRenameTextBox_OnPreviewKeyDown" />
+                </Grid>
                 <TextBlock Grid.Column="2"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource MutedForegroundBrush}"
-                           Text="{Binding TypeText}" />
+                           Text="{Binding SecondaryText}"
+                           ToolTip="{Binding SearchPath}" />
             </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
@@ -315,6 +366,10 @@
                 <DataTrigger Binding="{Binding IsFolder}" Value="True">
                     <Setter TargetName="ListIconGlyph" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="ListFolderGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                    <Setter TargetName="ListNameText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="ListRenameTextBox" Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -329,8 +384,12 @@
                     <ColumnDefinition Width="1.5*" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <Grid Width="20" Height="20" Margin="0,0,8,0">
+                <Grid Grid.Column="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Grid.Column="0" Width="20" Height="20" Margin="0,0,8,0">
                         <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
                         <TextBlock x:Name="DetailsIconGlyph"
                                    Visibility="Collapsed"
@@ -350,8 +409,18 @@
                               StrokeThickness="1.25"
                               Stretch="Uniform" />
                     </Grid>
-                    <TextBlock Text="{Binding Name}" />
-                </StackPanel>
+                    <Grid Grid.Column="1">
+                        <TextBlock x:Name="DetailsNameText"
+                                   Text="{Binding PrimaryText}"
+                                   ToolTip="{Binding SearchPath}" />
+                        <TextBox x:Name="DetailsRenameTextBox"
+                                 Tag="InlineRename"
+                                 Visibility="Collapsed"
+                                 Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                 LostKeyboardFocus="InlineRenameTextBox_OnLostKeyboardFocus"
+                                 PreviewKeyDown="InlineRenameTextBox_OnPreviewKeyDown" />
+                    </Grid>
+                </Grid>
                 <TextBlock Grid.Column="1"
                            Foreground="{DynamicResource MutedForegroundBrush}"
                            Text="{Binding TypeText}" />
@@ -374,6 +443,10 @@
                 <DataTrigger Binding="{Binding IsFolder}" Value="True">
                     <Setter TargetName="DetailsIconGlyph" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="DetailsFolderGlyph" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRenaming}" Value="True">
+                    <Setter TargetName="DetailsNameText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="DetailsRenameTextBox" Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -476,14 +549,20 @@
                 <Separator />
                 <MenuItem Header="_Save" Command="{Binding SaveCommand}" InputGestureText="Ctrl+S" />
                 <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGestureText="Ctrl+Shift+S" />
+                <MenuItem Header="Open PAK _Folder" Command="{Binding OpenPakFolderCommand}" />
                 <Separator />
                 <MenuItem Header="_Add Files..." Command="{Binding AddFilesCommand}" />
                 <MenuItem Header="Add _Folder..." Command="{Binding AddFolderCommand}" />
                 <MenuItem Header="_Export Selected..." Command="{Binding ExportCommand}" />
                 <Separator />
-                <MenuItem Header="E_xit" Command="{Binding ExitCommand}" />
+                <MenuItem Header="_Close Window"
+                          Command="{Binding ExitCommand}"
+                          InputGestureText="Ctrl+W" />
             </MenuItem>
             <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z" />
+                <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y" />
+                <Separator />
                 <MenuItem Header="Cu_t" Command="{x:Static ApplicationCommands.Cut}" InputGestureText="Ctrl+X" />
                 <MenuItem Header="_Copy" Command="{x:Static ApplicationCommands.Copy}" InputGestureText="Ctrl+C" />
                 <MenuItem Header="_Paste" Command="{x:Static ApplicationCommands.Paste}" InputGestureText="Ctrl+V" />
@@ -491,9 +570,9 @@
                           Command="{x:Static ApplicationCommands.SelectAll}"
                           InputGestureText="Ctrl+A" />
                 <Separator />
-                <MenuItem Header="New _Folder..." Command="{Binding NewFolderCommand}" />
+                <MenuItem Header="New _Folder" Command="{Binding NewFolderCommand}" />
                 <Separator />
-                <MenuItem Header="_Rename..." Command="{Binding RenameCommand}" InputGestureText="F2" />
+                <MenuItem Header="_Rename" Command="{Binding RenameCommand}" InputGestureText="F2" />
                 <MenuItem Header="_Delete" Command="{Binding DeleteCommand}" InputGestureText="Delete" />
             </MenuItem>
             <MenuItem Header="_Go">
@@ -521,6 +600,13 @@
                           IsCheckable="True"
                           IsChecked="{Binding ActiveViewMode, Mode=OneWay, Converter={StaticResource ArchiveViewModeEqualsConverter}, ConverterParameter=Details}" />
                 <Separator />
+                <MenuItem Header="Zoom _In"
+                          Command="{Binding ZoomInIconsCommand}"
+                          InputGestureText="Ctrl++" />
+                <MenuItem Header="Zoom _Out"
+                          Command="{Binding ZoomOutIconsCommand}"
+                          InputGestureText="Ctrl+-" />
+                <Separator />
                 <MenuItem Header="_Quick Preview"
                           InputGestureText="Space"
                           Click="QuickPreview_OnClick" />
@@ -528,7 +614,7 @@
                 <MenuItem Header="_Refresh" Command="{Binding RefreshCommand}" InputGestureText="F5" />
             </MenuItem>
             <MenuItem Header="_Help">
-                <MenuItem Header="_About" Command="{Binding AboutCommand}" />
+                <MenuItem Header="_About PakScape" Command="{Binding AboutCommand}" />
             </MenuItem>
             </Menu>
 
@@ -846,12 +932,19 @@
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ContextMenu>
-                            <ContextMenu>
+                            <ContextMenu Opened="ItemContextMenu_OnOpened"
+                                         Closed="ItemContextMenu_OnClosed">
                                 <MenuItem Header="Open"
                                           Command="{Binding Data.OpenSelectedCommand, Source={StaticResource ViewModelProxy}}" />
                                 <MenuItem Header="Quick Preview"
                                           InputGestureText="Space"
                                           Click="QuickPreview_OnClick" />
+                                <MenuItem Header="View Skybox"
+                                          Visibility="{Binding Data.HasSkyboxPreview, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          Click="ViewSkybox_OnClick" />
+                                <MenuItem Header="Get Info"
+                                          InputGestureText="Alt+Enter"
+                                          Command="{Binding Data.GetInfoCommand, Source={StaticResource ViewModelProxy}}" />
                                 <MenuItem Header="Play Demo in Browser..."
                                           Command="{Binding Data.PlayDemoInBrowserCommand, Source={StaticResource ViewModelProxy}}" />
                                 <Separator />
@@ -862,23 +955,17 @@
                                 <MenuItem Header="Paste"
                                           Command="{Binding Data.PasteCommand, Source={StaticResource ViewModelProxy}}" />
                                 <Separator />
+                                <MenuItem Header="Add Files..."
+                                          Command="{Binding Data.ContextAddFilesCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Add Folder..."
+                                          Command="{Binding Data.ContextAddFolderCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="New Folder"
+                                          Command="{Binding Data.ContextNewFolderCommand, Source={StaticResource ViewModelProxy}}" />
+                                <Separator />
                                 <MenuItem Header="Export..."
                                           Command="{Binding Data.ExportCommand, Source={StaticResource ViewModelProxy}}" />
-                                <MenuItem Header="Save As">
-                                    <MenuItem Header="LMP..."
-                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
-                                              CommandParameter="lmp" />
-                                    <MenuItem Header="JPEG..."
-                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
-                                              CommandParameter="jpg" />
-                                    <MenuItem Header="PNG..."
-                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
-                                              CommandParameter="png" />
-                                    <MenuItem Header="TGA..."
-                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
-                                              CommandParameter="tga" />
-                                </MenuItem>
-                                <MenuItem Header="Save Model Skins As">
+                                <MenuItem Header="Save Model Skins As"
+                                          Visibility="{Binding Data.HasModelSkinSaveOptions, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <MenuItem Header="LMP..."
                                               Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="lmp" />
@@ -892,7 +979,8 @@
                                               Command="{Binding Data.SaveModelSkinAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="tga" />
                                 </MenuItem>
-                                <MenuItem Header="Save BSP Textures As">
+                                <MenuItem Header="Save BSP Textures As"
+                                          Visibility="{Binding Data.HasBspTextureSaveOptions, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <MenuItem Header="LMP..."
                                               Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="lmp" />
@@ -906,7 +994,8 @@
                                               Command="{Binding Data.SaveBspTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="tga" />
                                 </MenuItem>
-                                <MenuItem Header="Save WAD Textures As">
+                                <MenuItem Header="Save WAD Textures As"
+                                          Visibility="{Binding Data.HasWadTextureSaveOptions, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <MenuItem Header="LMP..."
                                               Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="lmp" />
@@ -920,7 +1009,7 @@
                                               Command="{Binding Data.SaveWadTexturesAsCommand, Source={StaticResource ViewModelProxy}}"
                                               CommandParameter="tga" />
                                 </MenuItem>
-                                <MenuItem Header="Rename..."
+                                <MenuItem Header="Rename"
                                           Command="{Binding Data.RenameCommand, Source={StaticResource ViewModelProxy}}" />
                                 <MenuItem Header="Delete"
                                           Command="{Binding Data.DeleteCommand, Source={StaticResource ViewModelProxy}}" />
