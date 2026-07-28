@@ -32,9 +32,10 @@ Projects:
 Build prerequisites:
 
 - Windows 10/11
-- Visual Studio 2022 with the `.NET desktop development` workload
+- Visual Studio 2022 with the `.NET desktop development` workload and the
+  `C++ CMake tools for Windows` component
 - .NET 8 SDK
-- CMake and a Visual Studio C++ toolchain
+- A Visual Studio C++ toolchain
 
 Open `PakStudio.sln` in Visual Studio and build or run `PakStudio.App`. The first
 build automatically runs `../native/scripts/build-windows.ps1`; later builds run
