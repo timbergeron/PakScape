@@ -92,6 +92,31 @@ public static class ArchiveTreeEditor
         return NormalizeSelection(nodes).Select(node => CloneDetached(node, copyFileData: false)).ToList();
     }
 
+    public static ArchiveFolderNode CreateFolderSnapshot(ArchiveFolderNode folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        return CloneFolder(folder, copyFileData: false);
+    }
+
+    public static void RestoreFolderSnapshot(
+        ArchiveFolderNode destination,
+        ArchiveFolderNode snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        destination.Folders.Clear();
+        destination.Files.Clear();
+        foreach (var folder in snapshot.Folders)
+        {
+            Attach(destination, CloneFolder(folder, copyFileData: false));
+        }
+        foreach (var file in snapshot.Files)
+        {
+            Attach(destination, CloneDetached(file, copyFileData: false));
+        }
+    }
+
     public static IReadOnlyList<ArchiveNode> CopyTo(
         IEnumerable<ArchiveNode> nodes,
         ArchiveFolderNode destination)

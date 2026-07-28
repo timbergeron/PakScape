@@ -109,4 +109,25 @@ public sealed class ArchiveTreeEditorTests
         Assert.Equal("readme (2).txt", moved.Name);
         Assert.Same(destination, moved.Parent);
     }
+
+    [Fact]
+    public void RestoreFolderSnapshot_RevertsStructureWithoutDuplicatingPayloads()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var maps = ArchiveTreeEditor.CreateFolder(root, "maps");
+        var start = ArchiveTreeEditor.AddFile(maps, "start.bsp", [1, 2, 3]);
+        var snapshot = ArchiveTreeEditor.CreateFolderSnapshot(root);
+
+        ArchiveTreeEditor.Rename(start, "changed.bsp");
+        ArchiveTreeEditor.CreateFolder(root, "extra");
+        ArchiveTreeEditor.RestoreFolderSnapshot(root, snapshot);
+
+        var restoredMaps = Assert.Single(root.Folders);
+        Assert.Equal("maps", restoredMaps.Name);
+        Assert.Same(root, restoredMaps.Parent);
+        var restoredStart = Assert.Single(restoredMaps.Files);
+        Assert.Equal("start.bsp", restoredStart.Name);
+        Assert.Same(restoredMaps, restoredStart.Parent);
+        Assert.Same(start.Data, restoredStart.Data);
+    }
 }

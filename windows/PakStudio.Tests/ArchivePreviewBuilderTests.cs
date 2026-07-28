@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using PakStudio.Core.Nodes;
+using PakStudio.Core.Operations;
 using PakStudio.Core.Preview;
 using Xunit;
 
@@ -7,6 +8,36 @@ namespace PakStudio.Tests;
 
 public sealed class ArchivePreviewBuilderTests
 {
+    [Fact]
+    public void SkyboxFaceSetFindsAllSixSiblingFacesFromAnyFace()
+    {
+        var folder = ArchiveFolderNode.CreateRoot();
+        string[] suffixes = ["rt", "bk", "lf", "ft", "up", "dn"];
+        foreach (var suffix in suffixes)
+        {
+            ArchiveTreeEditor.AddFile(folder, $"desert_{suffix}.tga", [1]);
+        }
+
+        var set = SkyboxFaceSet.Find(folder.Files[2]);
+
+        Assert.NotNull(set);
+        Assert.Equal("desert", set.Name);
+        Assert.Equal(6, set.Faces.Count);
+        Assert.Same(folder.Files[2], set.Faces[SkyboxFaceSet.Face.Left]);
+    }
+
+    [Fact]
+    public void SkyboxFaceSetRequiresAllSixFaces()
+    {
+        var folder = ArchiveFolderNode.CreateRoot();
+        foreach (var suffix in new[] { "rt", "bk", "lf", "ft", "up" })
+        {
+            ArchiveTreeEditor.AddFile(folder, $"night{suffix}.png", [1]);
+        }
+
+        Assert.Null(SkyboxFaceSet.Find(folder.Files[0]));
+    }
+
     [Fact]
     public void SupportedImageHeadersReportSafeDimensions()
     {
