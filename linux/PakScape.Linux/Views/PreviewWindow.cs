@@ -150,7 +150,7 @@ public sealed class PreviewWindow : Window, IDisposable
                     new TextBlock
                     {
                         Text = "Show:",
-                        Margin = new Thickness(0, 0, 10, 0),
+                        Margin = new Thickness(0, 0, 12, 0),
                         VerticalAlignment = VerticalAlignment.Center,
                         Foreground = Brushes.White,
                     },
@@ -669,7 +669,7 @@ public sealed class PreviewWindow : Window, IDisposable
         var checkBox = new CheckBox
         {
             Content = label,
-            Margin = isLast ? default : new Thickness(0, 0, 10, 0),
+            Margin = isLast ? default : new Thickness(0, 0, 12, 0),
             Foreground = Brushes.White,
             VerticalAlignment = VerticalAlignment.Center,
         };

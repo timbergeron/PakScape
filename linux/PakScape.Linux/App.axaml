@@ -88,7 +88,7 @@
           <SolidColorBrush x:Key="MenuDividerBrush" Color="#20FFFFFF" />
           <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#4A4A4A" />
           <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#5A5A5A" />
-          <SolidColorBrush x:Key="PreviewSurfaceBrush" Color="#181B20" />
+          <SolidColorBrush x:Key="PreviewSurfaceBrush" Color="#202020" />
 
           <SolidColorBrush x:Key="ButtonBackground" Color="#2B2B2B" />
           <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#14FFFFFF" />

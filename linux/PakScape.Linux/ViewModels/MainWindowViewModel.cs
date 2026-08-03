@@ -222,6 +222,11 @@ public partial class MainWindowViewModel : ObservableObject
         item.Node is ArchiveFileNode file &&
         Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase);
 
+    public bool HasImageSaveOptions =>
+        _selectedItems is [var item] &&
+        item.Node is ArchiveFileNode file &&
+        ImageFormatConverter.IsSupportedSource(file.Name);
+
     public bool HasBspTextureSaveOptions =>
         _selectedItems is [var item] &&
         item.Node is ArchiveFileNode file &&
@@ -269,6 +274,7 @@ public partial class MainWindowViewModel : ObservableObject
         RedoCommand.NotifyCanExecuteChanged();
         GetInfoCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasModelSkinSaveOptions));
+        OnPropertyChanged(nameof(HasImageSaveOptions));
         OnPropertyChanged(nameof(HasBspTextureSaveOptions));
         OnPropertyChanged(nameof(HasWadTextureSaveOptions));
         OnPropertyChanged(nameof(HasSkyboxPreview));

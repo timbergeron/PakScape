@@ -119,6 +119,18 @@ public partial class MainWindow : Window
         var paste = new MenuItem { Header = "Paste" };
         paste.Click += OnPasteClick;
 
+        var saveImageAs = new MenuItem
+        {
+            Header = "Save As",
+            ItemsSource = new[]
+            {
+                SaveImageMenuItem("LMP...", "lmp", viewModel),
+                SaveImageMenuItem("JPEG...", "jpg", viewModel),
+                SaveImageMenuItem("PNG...", "png", viewModel),
+                SaveImageMenuItem("TGA...", "tga", viewModel),
+            },
+        };
+
         var saveSkinAs = new MenuItem
         {
             Header = "Save Model Skins As",
@@ -175,6 +187,7 @@ public partial class MainWindow : Window
                 new MenuItem { Header = "New Folder...", Command = viewModel.ContextNewFolderCommand },
                 new Separator(),
                 new MenuItem { Header = "Export...", Command = viewModel.ExportCommand },
+                saveImageAs,
                 saveSkinAs,
                 saveBspTexturesAs,
                 saveWadTexturesAs,
@@ -187,6 +200,7 @@ public partial class MainWindow : Window
         {
             viewModel.SetContextTarget(
                 viewModel.SelectedNodes.Count == 1 ? viewModel.SelectedNodes[0] : null);
+            saveImageAs.IsVisible = viewModel.HasImageSaveOptions;
             saveSkinAs.IsVisible = viewModel.HasModelSkinSaveOptions;
             saveBspTexturesAs.IsVisible = viewModel.HasBspTextureSaveOptions;
             saveWadTexturesAs.IsVisible = viewModel.HasWadTextureSaveOptions;
@@ -194,6 +208,17 @@ public partial class MainWindow : Window
         };
         return contextMenu;
     }
+
+    private static MenuItem SaveImageMenuItem(
+        string header,
+        string formatId,
+        MainWindowViewModel viewModel) =>
+        new()
+        {
+            Header = header,
+            Command = viewModel.SaveImageAsCommand,
+            CommandParameter = formatId,
+        };
 
     private void OnViewSkyboxClick(object? sender, RoutedEventArgs e)
     {

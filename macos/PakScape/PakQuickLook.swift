@@ -178,7 +178,7 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
         let stack = NSStackView(views: [label] + markerButtons + [viewSkybox])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 10
+        stack.spacing = 12
 
         let background = NSVisualEffectView()
         background.material = .hudWindow
