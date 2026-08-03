@@ -140,15 +140,6 @@
                         Visibility="Collapsed"
                         Content="Reset View"
                         Click="ResetSkyboxButton_OnClick" />
-                <Button Width="34"
-                        Height="30"
-                        Style="{StaticResource PreviewIconButtonStyle}"
-                        ToolTip="Close preview (Space or Escape)"
-                        Click="CloseButton_OnClick">
-                    <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                               FontSize="10"
-                               Text="&#xE8BB;" />
-                </Button>
             </StackPanel>
         </Grid>
 
@@ -159,7 +150,9 @@
                 CornerRadius="10"
                 ClipToBounds="True">
             <Grid>
-                <Border x:Name="ImagePanel" Background="#FF181B20" Visibility="Collapsed">
+                <Border x:Name="ImagePanel"
+                        Background="{DynamicResource WindowBackgroundBrush}"
+                        Visibility="Collapsed">
                     <Grid>
                         <Image x:Name="ImagePreview"
                                Margin="16"
@@ -175,30 +168,30 @@
                                 CornerRadius="6"
                                 Visibility="Collapsed">
                             <WrapPanel Orientation="Horizontal">
-                                <TextBlock Margin="0,0,10,0"
+                                <TextBlock Margin="0,0,12,0"
                                            VerticalAlignment="Center"
                                            Foreground="White"
                                            Text="Show:" />
                                 <CheckBox x:Name="ShowBspArmors"
-                                          Margin="0,0,10,0"
+                                          Margin="0,0,12,0"
                                           Foreground="White"
                                           Content="Armor"
                                           Checked="BspMarkerOption_OnChanged"
                                           Unchecked="BspMarkerOption_OnChanged" />
                                 <CheckBox x:Name="ShowBspMegaHealth"
-                                          Margin="0,0,10,0"
+                                          Margin="0,0,12,0"
                                           Foreground="White"
                                           Content="Megahealth"
                                           Checked="BspMarkerOption_OnChanged"
                                           Unchecked="BspMarkerOption_OnChanged" />
                                 <CheckBox x:Name="ShowBspPowerups"
-                                          Margin="0,0,10,0"
+                                          Margin="0,0,12,0"
                                           Foreground="White"
                                           Content="Powerups"
                                           Checked="BspMarkerOption_OnChanged"
                                           Unchecked="BspMarkerOption_OnChanged" />
                                 <CheckBox x:Name="ShowBspMajorWeapons"
-                                          Margin="0,0,10,0"
+                                          Margin="0,0,12,0"
                                           Foreground="White"
                                           Content="Weapons"
                                           Checked="BspMarkerOption_OnChanged"

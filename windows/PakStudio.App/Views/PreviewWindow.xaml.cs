@@ -452,8 +452,6 @@ public partial class PreviewWindow : Window
         });
     }
 
-    private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Close();
-
     private void ViewSkyboxButton_OnClick(object sender, RoutedEventArgs e)
     {
         try

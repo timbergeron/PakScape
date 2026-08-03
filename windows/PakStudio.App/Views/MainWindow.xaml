@@ -621,8 +621,7 @@
             <Button Grid.Column="6"
                     Style="{StaticResource CaptionButtonStyle}"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Command="{x:Static SystemCommands.MinimizeWindowCommand}"
-                    CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=Window}}"
+                    Click="MinimizeWindow_OnClick"
                     ToolTip="Minimize">
                 <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                            FontSize="10"
@@ -631,8 +630,7 @@
 
             <Button Grid.Column="7"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Command="{x:Static SystemCommands.MaximizeWindowCommand}"
-                    CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=Window}}"
+                    Click="MaximizeWindow_OnClick"
                     ToolTip="Maximize">
                 <Button.Style>
                     <Style TargetType="Button" BasedOn="{StaticResource CaptionButtonStyle}">
@@ -651,8 +649,7 @@
 
             <Button Grid.Column="7"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Command="{x:Static SystemCommands.RestoreWindowCommand}"
-                    CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=Window}}"
+                    Click="RestoreWindow_OnClick"
                     ToolTip="Restore Down">
                 <Button.Style>
                     <Style TargetType="Button" BasedOn="{StaticResource CaptionButtonStyle}">
@@ -673,8 +670,7 @@
             <Button Grid.Column="8"
                     Style="{StaticResource CloseCaptionButtonStyle}"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Command="{x:Static SystemCommands.CloseWindowCommand}"
-                    CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=Window}}"
+                    Click="CloseWindow_OnClick"
                     ToolTip="Close">
                 <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                            FontSize="10"
@@ -913,24 +909,25 @@
                                 Content="{Binding ModifiedSortHeader}" />
                     </Grid>
 
-                    <ListView x:Name="ItemList"
-                              ItemsSource="{Binding CurrentItems}"
-                              SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-                              SelectionMode="Extended"
-                              SelectionChanged="ItemList_OnSelectionChanged"
-                              MouseDoubleClick="ItemList_OnMouseDoubleClick"
-                              AllowDrop="True"
-                              DragOver="ItemList_OnDragOver"
-                              Drop="ItemList_OnDrop"
-                              PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
-                              MouseMove="ItemList_OnMouseMove"
-                              PreviewKeyDown="ItemList_OnPreviewKeyDown"
-                              PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
-                              ScrollViewer.CanContentScroll="True"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                              ScrollViewer.VerticalScrollBarVisibility="Auto"
-                              VirtualizingPanel.IsVirtualizing="True"
-                              VirtualizingPanel.VirtualizationMode="Recycling">
+                    <Grid>
+                        <ListView x:Name="ItemList"
+                                  ItemsSource="{Binding CurrentItems}"
+                                  SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                  SelectionMode="Extended"
+                                  SelectionChanged="ItemList_OnSelectionChanged"
+                                  MouseDoubleClick="ItemList_OnMouseDoubleClick"
+                                  AllowDrop="True"
+                                  DragOver="ItemList_OnDragOver"
+                                  Drop="ItemList_OnDrop"
+                                  PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
+                                  MouseMove="ItemList_OnMouseMove"
+                                  PreviewKeyDown="ItemList_OnPreviewKeyDown"
+                                  PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
+                                  ScrollViewer.CanContentScroll="True"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling">
                         <ListView.ContextMenu>
                             <ContextMenu Opened="ItemContextMenu_OnOpened"
                                          Closed="ItemContextMenu_OnClosed">
@@ -964,6 +961,21 @@
                                 <Separator />
                                 <MenuItem Header="Export..."
                                           Command="{Binding Data.ExportCommand, Source={StaticResource ViewModelProxy}}" />
+                                <MenuItem Header="Save As"
+                                          Visibility="{Binding Data.HasImageSaveOptions, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <MenuItem Header="LMP..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="lmp" />
+                                    <MenuItem Header="JPEG..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="jpg" />
+                                    <MenuItem Header="PNG..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="png" />
+                                    <MenuItem Header="TGA..."
+                                              Command="{Binding Data.SaveImageAsCommand, Source={StaticResource ViewModelProxy}}"
+                                              CommandParameter="tga" />
+                                </MenuItem>
                                 <MenuItem Header="Save Model Skins As"
                                           Visibility="{Binding Data.HasModelSkinSaveOptions, Source={StaticResource ViewModelProxy}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <MenuItem Header="LMP..."
@@ -1049,7 +1061,30 @@
                                 </Style.Triggers>
                             </Style>
                         </ListView.Style>
-                    </ListView>
+                        </ListView>
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                            <TextBlock HorizontalAlignment="Center"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Text="No archive open" />
+                            <TextBlock Margin="0,8,0,0"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource MutedForegroundBrush}"
+                                       Text="Use File &gt; Open or File &gt; New to get started." />
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Document}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                        </StackPanel>
+                    </Grid>
                 </DockPanel>
             </Border>
         </Grid>

@@ -73,7 +73,7 @@
                                  FontSize="19"
                                  FontWeight="SemiBold"
                                  IsReadOnly="True"
-                                 Text="{Binding Name}"
+                                 Text="{Binding Name, Mode=OneWay}"
                                  TextWrapping="Wrap" />
                         <TextBlock Margin="0,4,0,0"
                                    Foreground="{DynamicResource MutedForegroundBrush}"
@@ -96,11 +96,11 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Style="{StaticResource InfoLabelStyle}" Text="Archive:" />
-                    <TextBox Grid.Row="0" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding ArchiveName}" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding ArchiveName, Mode=OneWay}" />
                     <TextBlock Grid.Row="1" Style="{StaticResource InfoLabelStyle}" Text="Path:" />
-                    <TextBox Grid.Row="1" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding Path}" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding Path, Mode=OneWay}" />
                     <TextBlock Grid.Row="2" Style="{StaticResource InfoLabelStyle}" Text="Size:" />
-                    <TextBox Grid.Row="2" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding Size}" />
+                    <TextBox Grid.Row="2" Grid.Column="1" Style="{StaticResource InfoValueStyle}" Text="{Binding Size, Mode=OneWay}" />
                     <TextBlock Grid.Row="3"
                                Style="{StaticResource InfoLabelStyle}"
                                Text="Contents:"
@@ -108,7 +108,7 @@
                     <TextBox Grid.Row="3"
                              Grid.Column="1"
                              Style="{StaticResource InfoValueStyle}"
-                             Text="{Binding Contents}"
+                             Text="{Binding Contents, Mode=OneWay}"
                              Visibility="{Binding HasContents, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock Grid.Row="4"
                                Style="{StaticResource InfoLabelStyle}"
@@ -117,7 +117,7 @@
                     <TextBox Grid.Row="4"
                              Grid.Column="1"
                              Style="{StaticResource InfoValueStyle}"
-                             Text="{Binding Modified}"
+                             Text="{Binding Modified, Mode=OneWay}"
                              Visibility="{Binding HasModified, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
 
@@ -141,7 +141,7 @@
                                                Text="{Binding Label, StringFormat={}{0}:}" />
                                     <TextBox Grid.Column="1"
                                              Style="{StaticResource InfoValueStyle}"
-                                             Text="{Binding Value}" />
+                                             Text="{Binding Value, Mode=OneWay}" />
                                 </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

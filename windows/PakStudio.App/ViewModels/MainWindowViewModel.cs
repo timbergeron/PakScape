@@ -115,6 +115,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             DeleteSelectedItems,
             () => !IsInlineRenameActive && CanModifySelectedItems());
         ExportCommand = new AsyncRelayCommand(ExportSelectedItemsAsync, CanModifySelectedItems);
+        SaveImageAsCommand = new AsyncRelayCommand<string>(
+            SaveSelectedImageAsAsync,
+            CanSaveSelectedImageAs);
         SaveModelSkinAsCommand = new AsyncRelayCommand<string>(
             SaveSelectedModelSkinAsAsync,
             CanSaveSelectedModelSkinAs);
@@ -321,6 +324,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         SelectedFile is { } file &&
         Path.GetExtension(file.Name).Equals(".mdl", StringComparison.OrdinalIgnoreCase);
 
+    public bool HasImageSaveOptions =>
+        SelectedFile is { } file && ImageFormatConverter.IsSupportedSource(file.Name);
+
     public bool HasBspTextureSaveOptions =>
         SelectedFile is { } file &&
         Path.GetExtension(file.Name).Equals(".bsp", StringComparison.OrdinalIgnoreCase);
@@ -373,6 +379,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public AsyncRelayCommand ExportCommand { get; }
 
+    public AsyncRelayCommand<string> SaveImageAsCommand { get; }
+
     public AsyncRelayCommand<string> SaveModelSkinAsCommand { get; }
 
     public AsyncRelayCommand<string> SaveBspTexturesAsCommand { get; }
@@ -411,7 +419,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public async Task InitializeAsync(
         string? archivePath = null,
-        string initialFormatId = "pak")
+        string initialFormatId = "pak",
+        bool createEmptyDocument = true)
     {
         if (_isInitialized)
         {
@@ -419,8 +428,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         _isInitialized = true;
-        LoadDocument(CreateEmptyDocument(initialFormatId));
-        StatusText = "Ready. Open an archive or add files to a new one.";
+        if (createEmptyDocument)
+        {
+            LoadDocument(CreateEmptyDocument(initialFormatId));
+            StatusText = "Ready. Open an archive or add files to a new one.";
+        }
+        else
+        {
+            ClearDocument();
+            StatusText = "No archive open. Use File > Open or File > New.";
+        }
         if (!string.IsNullOrWhiteSpace(archivePath))
         {
             await OpenPathAsync(archivePath).ConfigureAwait(true);
@@ -486,6 +503,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         _selectedItems = items.Distinct().ToList();
         SelectedItem = _selectedItems.FirstOrDefault();
+        OnPropertyChanged(nameof(HasImageSaveOptions));
         OnPropertyChanged(nameof(HasModelSkinSaveOptions));
         OnPropertyChanged(nameof(HasBspTextureSaveOptions));
         OnPropertyChanged(nameof(HasWadTextureSaveOptions));
@@ -576,9 +594,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         var path = _fileDialogService.PickArchiveToOpen();
         if (!string.IsNullOrWhiteSpace(path))
         {
-            _archiveWindowService.ShowArchive(path);
+            if (Document is null)
+            {
+                await OpenPathAsync(path).ConfigureAwait(true);
+            }
+            else
+            {
+                _archiveWindowService.ShowArchive(path);
+            }
         }
-        await Task.CompletedTask;
     }
 
     private async Task OpenRecentAsync(string? path)
@@ -594,8 +618,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        _archiveWindowService.ShowArchive(path);
-        await Task.CompletedTask;
+        if (Document is null)
+        {
+            await OpenPathAsync(path).ConfigureAwait(true);
+        }
+        else
+        {
+            _archiveWindowService.ShowArchive(path);
+        }
     }
 
     private async Task OpenPathAsync(string path)
@@ -928,6 +958,45 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             StatusText = "Export failed.";
             _messageBoxService.ShowError("Export Failed", exception.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveSelectedImageAsAsync(string? formatId)
+    {
+        if (!ImageFormatConverter.TryParseFormat(formatId, out var format) ||
+            SelectedFile is not { } file ||
+            !ImageFormatConverter.IsSupportedSource(file.Name))
+        {
+            return;
+        }
+
+        var extension = ImageFormatConverter.ExtensionFor(format);
+        var suggestedName = Path.GetFileNameWithoutExtension(file.Name) + extension;
+        var outputPath = _fileDialogService.PickImageSavePath(
+            suggestedName,
+            extension.TrimStart('.'));
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Converting {file.Name}...";
+            var converted = await Task.Run(() =>
+                ImageFormatConverter.Convert(file.Name, file.Data, format)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(outputPath, converted).ConfigureAwait(true);
+            StatusText = $"Saved {Path.GetFileName(outputPath)}";
+        }
+        catch (Exception exception)
+        {
+            StatusText = "Image conversion failed.";
+            _messageBoxService.ShowError("Save Image As Failed", exception.Message);
         }
         finally
         {
@@ -1567,6 +1636,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         return folder.Folders.Any(child => ContainsAnyMap(child, wanted));
     }
 
+    private bool CanSaveSelectedImageAs(string? formatId)
+    {
+        return !IsBusy &&
+               ImageFormatConverter.TryParseFormat(formatId, out _) &&
+               SelectedFile is { } file &&
+               ImageFormatConverter.IsSupportedSource(file.Name);
+    }
+
     private bool CanSaveSelectedModelSkinAs(string? formatId)
     {
         return !IsBusy &&
@@ -1647,6 +1724,28 @@ public sealed class MainWindowViewModel : ViewModelBase
         Document = document;
         SearchText = string.Empty;
         RebuildFolderTree(document.Root);
+        SetSelectedItems([]);
+        OnPropertyChanged(nameof(WindowTitle));
+    }
+
+    private void ClearDocument()
+    {
+        _itemInfoWindowService.CloseAll();
+        _contextTarget = null;
+        _backHistory.Clear();
+        _forwardHistory.Clear();
+        _folderLookup.Clear();
+        _currentFolder = null;
+        SelectedFolder = null;
+        _undoHistory.Clear();
+        _redoHistory.Clear();
+        _currentRevision = 0;
+        _savedRevision = 0;
+        _nextRevision = 0;
+        FolderRoots.Clear();
+        CurrentItems.Clear();
+        Document = null;
+        SearchText = string.Empty;
         SetSelectedItems([]);
         OnPropertyChanged(nameof(WindowTitle));
     }

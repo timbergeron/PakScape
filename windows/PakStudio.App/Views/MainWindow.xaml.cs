@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private PreviewWindow? _previewWindow;
     private bool _allowClose;
     private bool _isCloseConfirmationPending;
+    private bool _initializeDocument = true;
     private string? _startupArchivePath;
     private string _startupFormatId = "pak";
     private Point? _dragStartPoint;
@@ -46,19 +47,58 @@ public partial class MainWindow : Window
 
     internal string? ArchivePath => _viewModel.Document?.FilePath;
 
-    public void ConfigureStartupArchive(string? path, string formatId = "pak")
+    public void ConfigureStartupArchive(
+        string? path,
+        string formatId = "pak",
+        bool initializeDocument = true)
     {
         _startupArchivePath = path;
         _startupFormatId = formatId;
+        _initializeDocument = initializeDocument;
+    }
+
+    public void OpenArchiveDialog()
+    {
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() => _viewModel.OpenCommand.Execute(null)));
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await _viewModel.InitializeAsync(_startupArchivePath, _startupFormatId).ConfigureAwait(true);
+        await _viewModel.InitializeAsync(
+                _startupArchivePath,
+                _startupFormatId,
+                _initializeDocument)
+            .ConfigureAwait(true);
     }
 
     private void ViewModel_OnCloseRequested(object? sender, EventArgs e) => Close();
+
+    private void MinimizeWindow_OnClick(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+        e.Handled = true;
+    }
+
+    private void MaximizeWindow_OnClick(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Maximized;
+        e.Handled = true;
+    }
+
+    private void RestoreWindow_OnClick(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Normal;
+        e.Handled = true;
+    }
+
+    private void CloseWindow_OnClick(object sender, RoutedEventArgs e)
+    {
+        Close();
+        e.Handled = true;
+    }
 
     private void FolderTree_OnSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
@@ -310,6 +350,14 @@ public partial class MainWindow : Window
         if (_previewWindow is { IsVisible: true })
         {
             _previewWindow.Close();
+            return;
+        }
+
+        // Demos have a dedicated interactive destination. Match double-click/Open
+        // so Space takes a playable demo straight into the browser player.
+        if (_viewModel.PlayDemoInBrowserCommand.CanExecute(null))
+        {
+            _viewModel.PlayDemoInBrowserCommand.Execute(null);
             return;
         }
 
@@ -605,7 +653,8 @@ public partial class MainWindow : Window
             if (await _viewModel.CanCloseAsync().ConfigureAwait(true))
             {
                 _allowClose = true;
-                Close();
+                /* Let the current Closing event return before starting a new close. */
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(Close));
             }
         }
         finally

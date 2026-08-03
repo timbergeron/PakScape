@@ -29,9 +29,15 @@ public partial class App : Application
             !string.IsNullOrWhiteSpace(argument) && !argument.StartsWith("-", StringComparison.Ordinal));
         var windowService = _serviceProvider.GetRequiredService<IArchiveWindowService>();
         var window = string.IsNullOrWhiteSpace(startupArchive)
-            ? windowService.ShowNewArchive("pak")
+            ? windowService.ShowBlankWorkspace()
             : windowService.ShowArchive(startupArchive);
         MainWindow = window;
+
+        /* Launching from the taskbar with no document opens the archive picker. */
+        if (string.IsNullOrWhiteSpace(startupArchive))
+        {
+            window.OpenArchiveDialog();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

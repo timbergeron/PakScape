@@ -23,6 +23,9 @@ public sealed class ArchiveWindowService : IArchiveWindowService, IDisposable
         return CreateWindow(archivePath: null, formatId: formatId);
     }
 
+    public MainWindow ShowBlankWorkspace() =>
+        CreateWindow(archivePath: null, formatId: "pak", initializeDocument: false);
+
     public MainWindow ShowArchive(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -58,7 +61,10 @@ public sealed class ArchiveWindowService : IArchiveWindowService, IDisposable
         _windowScopes.Clear();
     }
 
-    private MainWindow CreateWindow(string? archivePath, string? formatId)
+    private MainWindow CreateWindow(
+        string? archivePath,
+        string? formatId,
+        bool initializeDocument = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var activeWindow = WindowOwnership.ActiveMainWindow();
@@ -67,7 +73,7 @@ public sealed class ArchiveWindowService : IArchiveWindowService, IDisposable
         try
         {
             window = scope.ServiceProvider.GetRequiredService<MainWindow>();
-            window.ConfigureStartupArchive(archivePath, formatId ?? "pak");
+            window.ConfigureStartupArchive(archivePath, formatId ?? "pak", initializeDocument);
             Place(window, activeWindow);
             _windowScopes.Add(window, scope);
             window.Closed += Window_OnClosed;

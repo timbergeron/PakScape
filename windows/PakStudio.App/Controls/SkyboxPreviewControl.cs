@@ -31,6 +31,7 @@ internal sealed class SkyboxPreviewControl : Image
         Stretch = Stretch.Fill;
         SnapsToDevicePixels = true;
         Focusable = true;
+        FocusVisualStyle = null;
         Cursor = Cursors.SizeAll;
         SizeChanged += (_, _) => QueueRender();
         Loaded += (_, _) =>
