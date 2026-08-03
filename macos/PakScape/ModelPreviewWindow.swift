@@ -1,4 +1,5 @@
 import AppKit
+import OpenGL
 import UniformTypeIdentifiers
 
 struct ModelPreviewItem {
@@ -503,12 +504,10 @@ private final class PassThroughView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 }
 
-/// Draws the software-rendered frames and turns pointer input into camera moves.
+/// Draws the OpenGL-rendered model and turns pointer input into camera moves.
 @MainActor
-final class ModelRenderView: NSView {
+final class ModelRenderView: NSOpenGLView {
     private(set) var viewer: QuakeModelViewer?
-    private var context: CGContext?
-    private var image: CGImage?
     private var timer: Timer?
     private var lastFrame = Date()
     private var isPanning = false
@@ -517,11 +516,26 @@ final class ModelRenderView: NSView {
     private let hintBackground = PassThroughView()
     private let fallbackImageView = NSImageView()
 
-    /* The renderer runs on the CPU, so the buffer is capped and stretched to fit. */
-    private let maximumRenderPixels = 1_400_000
+    private static func makePixelFormat() -> NSOpenGLPixelFormat {
+        let attributes: [NSOpenGLPixelFormatAttribute] = [
+            NSOpenGLPixelFormatAttribute(NSOpenGLPFAOpenGLProfile),
+            NSOpenGLPixelFormatAttribute(NSOpenGLProfileVersion2_1),
+            NSOpenGLPixelFormatAttribute(NSOpenGLPFAColorSize),
+            24,
+            NSOpenGLPixelFormatAttribute(NSOpenGLPFADepthSize),
+            24,
+            NSOpenGLPixelFormatAttribute(NSOpenGLPFADoubleBuffer),
+            0,
+        ]
+        guard let pixelFormat = NSOpenGLPixelFormat(attributes: attributes) else {
+            fatalError("OpenGL 2.1 is unavailable")
+        }
+        return pixelFormat
+    }
 
     override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+        super.init(frame: frameRect, pixelFormat: Self.makePixelFormat())
+        wantsBestResolutionOpenGLSurface = true
         setUpHint()
     }
 
@@ -530,11 +544,6 @@ final class ModelRenderView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /*
-     * The view stays in AppKit's default bottom-up space: the renderer emits
-     * top-down rows, which is what Core Graphics expects, and flipping the view
-     * would draw every frame upside down.
-     */
     override var acceptsFirstResponder: Bool { true }
 
     /* Dragging orbits the camera, so it must not start a window move. */
@@ -573,9 +582,11 @@ final class ModelRenderView: NSView {
     }
 
     func attach(viewer: QuakeModelViewer?, fallbackImage: NSImage? = nil) {
+        if let previousViewer = self.viewer, let openGLContext {
+            openGLContext.makeCurrentContext()
+            previousViewer.deinitializeOpenGL()
+        }
         self.viewer = viewer
-        context = nil
-        image = nil
         viewer?.setDarkBackground(effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
         hintBackground.isHidden = viewer == nil
         fallbackImageView.image = fallbackImage
@@ -627,42 +638,6 @@ final class ModelRenderView: NSView {
     }
 
     private func renderFrame() {
-        guard let viewer, bounds.width > 1, bounds.height > 1 else { return }
-
-        let scale = window?.backingScaleFactor ?? 2
-        var width = max(16, Int((bounds.width * scale).rounded()))
-        var height = max(16, Int((bounds.height * scale).rounded()))
-        let total = width * height
-        if total > maximumRenderPixels {
-            let reduction = (Double(maximumRenderPixels) / Double(total)).squareRoot()
-            width = max(16, Int(Double(width) * reduction))
-            height = max(16, Int(Double(height) * reduction))
-        }
-
-        if context?.width != width || context?.height != height {
-            context = CGContext(
-                data: nil,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
-                    | CGBitmapInfo.byteOrder32Little.rawValue
-            )
-        }
-
-        guard let context, let buffer = context.data else { return }
-        guard viewer.render(
-            into: buffer,
-            width: width,
-            height: height,
-            stride: context.bytesPerRow
-        ) else {
-            return
-        }
-
-        image = context.makeImage()
         needsDisplay = true
     }
 
@@ -680,20 +655,30 @@ final class ModelRenderView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let image, let context = NSGraphicsContext.current?.cgContext else {
-            NSColor.windowBackgroundColor.setFill()
-            dirtyRect.fill()
+        guard let openGLContext else {
             return
         }
 
-        context.interpolationQuality = .high
-        context.draw(image, in: bounds)
+        openGLContext.makeCurrentContext()
+        guard let viewer, bounds.width > 1, bounds.height > 1 else {
+            glClearColor(0.055, 0.059, 0.075, 1.0)
+            glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
+            openGLContext.flushBuffer()
+            return
+        }
+
+        let backingSize = convertToBacking(bounds).size
+        _ = viewer.renderOpenGL(
+            width: max(16, Int(backingSize.width.rounded())),
+            height: max(16, Int(backingSize.height.rounded()))
+        )
+        openGLContext.flushBuffer()
     }
 
     /// Input arrives in points; the camera works in rendered pixels.
     private var inputScale: CGFloat {
-        guard bounds.width > 0, let context else { return 1 }
-        return CGFloat(context.width) / bounds.width
+        guard bounds.width > 0 else { return 1 }
+        return convertToBacking(bounds).width / bounds.width
     }
 
     override func mouseDown(with event: NSEvent) {

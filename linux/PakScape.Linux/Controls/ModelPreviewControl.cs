@@ -3,6 +3,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.OpenGL;
+using Avalonia.OpenGL.Controls;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -28,6 +30,7 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     private readonly Border _hint;
     private readonly ComboBox _skinPicker;
     private readonly Button _viewSkinButton;
+    private readonly OpenGlModelSurface? _glSurface;
     private readonly DispatcherTimer _timer;
     private readonly ModelPreviewSession _session;
     private readonly string _modelName;
@@ -40,6 +43,7 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     private bool _isOrbiting;
     private bool _isPanning;
     private bool _isViewingSkin;
+    private bool _usingOpenGl;
     private Point _lastPosition;
     private bool _disposed;
 
@@ -169,10 +173,34 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         };
         resetButton.Click += (_, _) => _session.Reset();
 
+        OpenGlModelSurface? glSurface = null;
+        try
+        {
+            glSurface = new OpenGlModelSurface(this)
+            {
+                IsHitTestVisible = false,
+            };
+            _usingOpenGl = true;
+            _image.IsVisible = false;
+        }
+        catch (Exception exception) when (exception is PlatformNotSupportedException or InvalidOperationException)
+        {
+            /* Keep the portable bitmap renderer when OpenGL is unavailable. */
+        }
+        _glSurface = glSurface;
+
         Content = new Grid
         {
             Background = Brushes.Transparent,
-            Children = { _image, _hint, _skinImage, skinControls, resetButton, animationControls },
+            Children =
+            {
+                _usingOpenGl && _glSurface is not null ? _glSurface : _image,
+                _hint,
+                _skinImage,
+                skinControls,
+                resetButton,
+                animationControls,
+            },
         };
         ContextMenu = CreateSkinContextMenu();
 
@@ -240,7 +268,7 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
     private void OnFrame(object? sender, EventArgs e)
     {
-        if (_disposed || _bitmap is null)
+        if (_disposed)
         {
             return;
         }
@@ -249,11 +277,71 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         var elapsed = (now - _lastFrame).TotalSeconds;
         _lastFrame = now;
 
+        if (_usingOpenGl)
+        {
+            if (_session.Advance(elapsed))
+            {
+                _glSurface?.RequestNextFrameRendering();
+            }
+            UpdateHint();
+            return;
+        }
+
+        if (_bitmap is null)
+        {
+            return;
+        }
+
         if (_session.Advance(elapsed))
         {
             RenderFrame();
         }
 
+        var wanted = _session.ShowInteractionPrompt && !_isViewingSkin;
+        if (_hint.IsVisible != wanted)
+        {
+            _hint.IsVisible = wanted;
+        }
+    }
+
+    internal void RenderOpenGl(GlInterface gl, int framebuffer)
+    {
+        _ = gl;
+        _ = framebuffer;
+        if (_disposed || !_usingOpenGl || _glSurface is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+            var width = Math.Max(16, (int)Math.Round(Bounds.Width * scale));
+            var height = Math.Max(16, (int)Math.Round(Bounds.Height * scale));
+            if (!_session.RenderOpenGl(width, height))
+            {
+                _usingOpenGl = false;
+                _glSurface.IsVisible = false;
+                _image.IsVisible = true;
+                ResizeBuffer();
+                return;
+            }
+        }
+        catch (Exception exception) when (
+            exception is DllNotFoundException or EntryPointNotFoundException or
+            PlatformNotSupportedException or InvalidOperationException)
+        {
+            _usingOpenGl = false;
+            _glSurface.IsVisible = false;
+            _image.IsVisible = true;
+            ResizeBuffer();
+        }
+    }
+
+    internal void DeinitializeOpenGl() => _session.DeinitializeOpenGl();
+
+    private void UpdateHint()
+    {
         var wanted = _session.ShowInteractionPrompt && !_isViewingSkin;
         if (_hint.IsVisible != wanted)
         {
@@ -277,14 +365,26 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         var (width, height) = ModelPreviewSession.ClampRenderSize(
             Bounds.Width * scale,
             Bounds.Height * scale);
-        if (width == _bufferWidth && height == _bufferHeight && _bitmap is not null)
+
+        /* Keep input coordinates in rendered pixels even when OpenGL owns the surface. */
+        var sizeChanged = width != _bufferWidth || height != _bufferHeight;
+        _bufferWidth = width;
+        _bufferHeight = height;
+        if (_usingOpenGl)
+        {
+            if (sizeChanged)
+            {
+                _glSurface?.RequestNextFrameRendering();
+            }
+            return;
+        }
+
+        if (!sizeChanged && _bitmap is not null)
         {
             return;
         }
 
         var previous = _bitmap;
-        _bufferWidth = width;
-        _bufferHeight = height;
         _bitmap = new WriteableBitmap(
             new PixelSize(width, height),
             new Vector(96, 96),
@@ -297,6 +397,12 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
     private void RenderFrame()
     {
+        if (_usingOpenGl)
+        {
+            _glSurface?.RequestNextFrameRendering();
+            return;
+        }
+
         if (_bitmap is null || _bufferWidth <= 0 || _bufferHeight <= 0)
         {
             return;

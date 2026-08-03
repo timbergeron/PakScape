@@ -490,4 +490,38 @@ final class QuakeModelViewer {
     ) -> Bool {
         pkm_view_render(view, buffer, Int32(width), Int32(height), Int32(stride)) == 0
     }
+
+    /// Renders a deterministic software frame for an archive icon or Quick Look image.
+    func renderThumbnail(width: Int, height: Int) -> NSImage? {
+        guard width > 0, height > 0 else { return nil }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let baseAddress = buffer.baseAddress else { return false }
+            return render(
+                into: baseAddress,
+                width: width,
+                height: height,
+                stride: width * 4
+            )
+        }
+        guard rendered else { return nil }
+
+        var rgba = [UInt8](repeating: 0, count: pixels.count)
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            rgba[offset] = pixels[offset + 2]
+            rgba[offset + 1] = pixels[offset + 1]
+            rgba[offset + 2] = pixels[offset]
+            rgba[offset + 3] = pixels[offset + 3]
+        }
+        return Self.image(rgba: rgba, width: width, height: height)
+    }
+
+    func renderOpenGL(width: Int, height: Int) -> Bool {
+        pkm_view_render_gl(view, Int32(width), Int32(height)) == 0
+    }
+
+    func deinitializeOpenGL() {
+        pkm_view_gl_deinit(view)
+    }
 }

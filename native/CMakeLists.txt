@@ -167,13 +167,17 @@ install(TARGETS pakscape_audio
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES include/pakscape_audio.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# The model viewer is dependency free: it parses MDL, MD3, and MD5 meshes and
-# software renders them so every edition shares one orbit camera and one look.
+# The model viewer parses MDL, MD3, and MD5 meshes and exposes both a portable
+# software fallback and an OpenGL presentation path. OpenGL is supplied by the
+# desktop platform rather than bundled into the application.
 add_library(pakscape_model SHARED src/pakscape_model.cpp)
 target_compile_features(pakscape_model PRIVATE cxx_std_17)
 target_compile_definitions(pakscape_model PRIVATE PAKSCAPE_MODEL_BUILD)
 target_include_directories(pakscape_model
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
+
+find_package(OpenGL REQUIRED)
+target_link_libraries(pakscape_model PRIVATE OpenGL::GL)
 
 if(UNIX)
     find_package(Threads REQUIRED)

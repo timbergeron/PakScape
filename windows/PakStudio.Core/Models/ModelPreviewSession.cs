@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using PakStudio.Core.Preview;
 
 namespace PakStudio.Core.Models;
@@ -9,10 +10,7 @@ namespace PakStudio.Core.Models;
 /// </summary>
 public sealed class ModelPreviewSession : IDisposable
 {
-    /*
-     * The renderer is a software rasterizer, so the buffer is capped and the image
-     * is stretched to fill larger panes. This keeps a full-screen preview smooth.
-     */
+    /* The bitmap fallback is capped and stretched to fill larger panes. */
     private const int MaximumRenderPixels = 1_400_000;
     private const int MinimumRenderDimension = 16;
 
@@ -200,7 +198,31 @@ public sealed class ModelPreviewSession : IDisposable
     public bool Render(nint bgraPixels, int width, int height, int stride) =>
         _viewer.Render(bgraPixels, width, height, stride);
 
-    /// <summary>Fits a pane size to the software renderer's budget.</summary>
+    /// <summary>Renders one deterministic software frame for an archive thumbnail.</summary>
+    public PreviewBitmap? RenderBitmap(int width, int height)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+
+        var pixels = new byte[checked(width * height * 4)];
+        var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+        try
+        {
+            return _viewer.Render(handle.AddrOfPinnedObject(), width, height, width * 4)
+                ? new PreviewBitmap(width, height, pixels)
+                : null;
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    public bool RenderOpenGl(int width, int height) => _viewer.RenderOpenGl(width, height);
+
+    public void DeinitializeOpenGl() => _viewer.DeinitializeOpenGl();
+
+    /// <summary>Fits a pane size to the bitmap renderer's budget.</summary>
     public static (int Width, int Height) ClampRenderSize(double width, double height)
     {
         var pixelWidth = Math.Max(MinimumRenderDimension, (int)Math.Round(width));

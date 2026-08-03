@@ -155,8 +155,8 @@ PKM_API int pkm_model_copy_texture_rgba(
     size_t rgba_size);
 
 /*
- * A view owns the orbit camera and the software renderer. The model must outlive
- * every view created from it.
+ * A view owns the orbit camera and renderer state. The model must outlive every
+ * view created from it.
  */
 PKM_API pkm_view *pkm_view_create(pkm_model *model);
 PKM_API void pkm_view_destroy(pkm_view *view);
@@ -203,6 +203,15 @@ PKM_API int pkm_view_render(
     int width,
     int height,
     int stride);
+
+/*
+ * OpenGL presentation. The caller must have a current compatibility-profile
+ * OpenGL context on the calling thread. The native library owns only the model
+ * textures and releases them from pkm_view_gl_deinit while that context is current.
+ */
+PKM_API int pkm_view_gl_init(pkm_view *view);
+PKM_API void pkm_view_gl_deinit(pkm_view *view);
+PKM_API int pkm_view_render_gl(pkm_view *view, int width, int height);
 
 #ifdef __cplusplus
 }

@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using OpenTK.Wpf;
 using PakStudio.App.Services;
 using PakStudio.Core.Models;
 using PakStudio.Core.Preview;
@@ -25,6 +26,7 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     private readonly ComboBox _skinPicker;
     private readonly Button _viewSkinButton;
     private readonly Button _resetButton;
+    private readonly GLWpfControl? _glControl;
     private readonly ModelPreviewSession _session;
     private readonly string _modelName;
 
@@ -36,6 +38,8 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
     private bool _isOrbiting;
     private bool _isPanning;
     private bool _isViewingSkin;
+    private bool _usingOpenGl;
+    private bool _hasRenderedOpenGl;
     private Point _lastPosition;
     private bool _disposed;
 
@@ -172,14 +176,43 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         };
         _resetButton.Click += (_, _) => _session.Reset();
 
-        Content = new Grid
+        try
+        {
+            var glControl = new GLWpfControl
+            {
+                IsHitTestVisible = false,
+            };
+            glControl.Render += OpenGlControl_OnRender;
+            glControl.Start(new GLWpfControlSettings
+            {
+                MajorVersion = 2,
+                MinorVersion = 1,
+            });
+            _glControl = glControl;
+            _usingOpenGl = true;
+            _image.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception exception) when (exception is PlatformNotSupportedException or InvalidOperationException)
+        {
+            /* Keep the portable bitmap renderer when OpenGL interop is unavailable. */
+            _glControl = null;
+        }
+
+        var previewGrid = new Grid
         {
             Background = Brushes.Transparent,
-            Children = { _image, _hint, _skinImage, skinControls, _resetButton, animationControls },
         };
+        previewGrid.Children.Add(_usingOpenGl && _glControl is not null ? _glControl : _image);
+        previewGrid.Children.Add(_hint);
+        previewGrid.Children.Add(_skinImage);
+        previewGrid.Children.Add(skinControls);
+        previewGrid.Children.Add(_resetButton);
+        previewGrid.Children.Add(animationControls);
+        Content = previewGrid;
         ContextMenu = CreateSkinContextMenu();
 
         Focusable = true;
+        FocusVisualStyle = null;
         IsManipulationEnabled = true;
         Cursor = Cursors.Hand;
         _session.DarkBackground = IsDarkTheme();
@@ -247,6 +280,13 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         {
             return;
         }
+
+        if (_usingOpenGl)
+        {
+            ResizeBuffer();
+            return;
+        }
+
         _isHooked = true;
         _lastRenderTime = TimeSpan.Zero;
         CompositionTarget.Rendering += OnRendering;
@@ -287,6 +327,43 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         UpdateHint();
     }
 
+    private void OpenGlControl_OnRender(TimeSpan delta)
+    {
+        if (_disposed || !_usingOpenGl || _glControl is null)
+        {
+            return;
+        }
+
+        var elapsed = Math.Clamp(delta.TotalSeconds, 0.0, 0.25);
+        if (_hasRenderedOpenGl ? _session.Advance(elapsed) : true)
+        {
+            var scale = VisualTreeHelper.GetDpi(_glControl).DpiScaleX;
+            var width = Math.Max(16, (int)Math.Round(_glControl.ActualWidth * scale));
+            var height = Math.Max(16, (int)Math.Round(_glControl.ActualHeight * scale));
+            try
+            {
+                if (!_session.RenderOpenGl(width, height))
+                {
+                    return;
+                }
+                _hasRenderedOpenGl = true;
+            }
+            catch (Exception exception) when (
+                exception is DllNotFoundException or EntryPointNotFoundException or
+                PlatformNotSupportedException or InvalidOperationException)
+            {
+                _usingOpenGl = false;
+                _glControl.Visibility = Visibility.Collapsed;
+                _image.Visibility = Visibility.Visible;
+                Hook();
+                ResizeBuffer();
+                return;
+            }
+        }
+
+        UpdateHint();
+    }
+
     private void ResizeBuffer()
     {
         if (_disposed)
@@ -303,13 +380,25 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         var (width, height) = ModelPreviewSession.ClampRenderSize(
             ActualWidth * scale,
             ActualHeight * scale);
-        if (width == _bufferWidth && height == _bufferHeight && _bitmap is not null)
+
+        /* Keep input coordinates in rendered pixels even when OpenGL owns the surface. */
+        var sizeChanged = width != _bufferWidth || height != _bufferHeight;
+        _bufferWidth = width;
+        _bufferHeight = height;
+        if (_usingOpenGl)
+        {
+            if (sizeChanged)
+            {
+                _glControl?.InvalidateVisual();
+            }
+            return;
+        }
+
+        if (!sizeChanged && _bitmap is not null)
         {
             return;
         }
 
-        _bufferWidth = width;
-        _bufferHeight = height;
         _bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
         _image.Source = _bitmap;
         RenderFrame();
@@ -317,6 +406,11 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
 
     private void RenderFrame()
     {
+        if (_usingOpenGl)
+        {
+            return;
+        }
+
         if (_bitmap is null || _bufferWidth <= 0 || _bufferHeight <= 0)
         {
             return;

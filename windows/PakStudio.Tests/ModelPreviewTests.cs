@@ -38,6 +38,25 @@ public sealed class ModelPreviewTests
     }
 
     [Fact]
+    public void ModelPreviewSessionRendersAStillThumbnailFrame()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(root, "progs/armor.mdl", TestModels.CreateMdl());
+        var preview = ArchivePreviewBuilder.Build(root.Folders[0].Files[0]);
+
+        using var session = ModelPreviewSession.Create(preview.Model!, decodeEncodedImage: null);
+        session.DarkBackground = true;
+        session.AutoRotate = false;
+        session.AnimationEnabled = false;
+
+        var bitmap = session.RenderBitmap(48, 48);
+
+        Assert.NotNull(bitmap);
+        Assert.Equal(48, bitmap!.Width);
+        Assert.Equal(48, bitmap.Height);
+    }
+
+    [Fact]
     public void ModelsAndLmpImagesOpenInQuickPreviewOnDoubleClick()
     {
         var root = ArchiveFolderNode.CreateRoot();
@@ -269,6 +288,25 @@ public sealed class ModelPreviewTests
     }
 
     [Fact]
+    public void ModelPreviewSessionRendersAStillSpriteThumbnailFrame()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        ArchiveTreeBuilder.AddFile(root, "progs/s_explod.spr", TestModels.CreateSpr(2));
+        var preview = ArchivePreviewBuilder.Build(root.Folders[0].Files[0]);
+
+        using var session = ModelPreviewSession.Create(preview.Model!, decodeEncodedImage: null);
+        session.DarkBackground = true;
+        session.AutoRotate = false;
+        session.AnimationEnabled = false;
+
+        var bitmap = session.RenderBitmap(48, 48);
+
+        Assert.NotNull(bitmap);
+        Assert.Equal(48, bitmap!.Width);
+        Assert.Equal(48, bitmap.Height);
+    }
+
+    [Fact]
     public void SpritePlaybackRedrawsWhileTheCameraSitsStill()
     {
         using var viewer = NativeModelViewer.Create(TestModels.CreateSpr(3), ".spr");
@@ -318,6 +356,28 @@ public sealed class ModelPreviewTests
         Assert.Equal(8, texture.Height);
         Assert.Equal(8 * 8 * 4, texture.RgbaPixels.Length);
         Assert.Equal(255, texture.RgbaPixels[3]);
+    }
+
+    [Fact]
+    public void BrushModelRenderingUsesItsEmbeddedTexture()
+    {
+        using var viewer = NativeModelViewer.Create(
+            TestModels.CreateBsp(TestModels.BrushModelEntities),
+            ".bsp");
+
+        var original = Render(viewer);
+        var replacement = new byte[8 * 8 * 4];
+        for (var offset = 0; offset < replacement.Length; offset += 4)
+        {
+            replacement[offset] = 32;
+            replacement[offset + 1] = 192;
+            replacement[offset + 2] = 240;
+            replacement[offset + 3] = 255;
+        }
+
+        viewer.SetTexture(0, replacement, 8, 8);
+
+        Assert.NotEqual(original, Render(viewer));
     }
 
     [Fact]

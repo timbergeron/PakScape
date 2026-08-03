@@ -18,14 +18,16 @@ private library; the exported ABI does not expose third-party types.
 ## `pakscape_model`
 
 Parses the QSS-M model formats — Quake MDL, Quake III MD3, and Doom 3 MD5 —
-and software renders them for Quick Preview. It has no third-party
+and renders them for Quick Preview through the platform's OpenGL context, with a
+portable software fallback. It has no third-party
 dependencies.
 
 Keeping the parser, the orbit camera, and the rasterizer in one library means
 every edition shares the same interaction feel and the same picture: damped
 orbit with inertia, bounding-sphere framing, clamped pitch and zoom, pan, an
 idle turntable, and camera-anchored studio lighting.
-Each app only forwards input and blits the BGRA rows the renderer produces.
+Each app forwards input and owns the platform OpenGL surface; the BGRA API remains
+available for thumbnails, fallback rendering, and headless tests.
 
 MDL and MD3 poses are decoded as animations and loop at ten frames per second
 by default. The view API keeps playback separate from the idle turntable and

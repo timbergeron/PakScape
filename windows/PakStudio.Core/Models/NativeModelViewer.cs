@@ -328,6 +328,29 @@ public sealed class NativeModelViewer : IDisposable
         return NativeMethods.ViewRender(_view, bgraPixels, width, height, stride) == 0;
     }
 
+    /// <summary>Initializes textures in the current OpenGL context.</summary>
+    public bool InitializeOpenGl()
+    {
+        ThrowIfDisposed();
+        return NativeMethods.ViewGlInit(_view) == 0;
+    }
+
+    /// <summary>Draws directly into the current OpenGL context.</summary>
+    public bool RenderOpenGl(int width, int height)
+    {
+        ThrowIfDisposed();
+        return NativeMethods.ViewRenderGl(_view, width, height) == 0;
+    }
+
+    /// <summary>Releases OpenGL resources while its context is current.</summary>
+    public void DeinitializeOpenGl()
+    {
+        if (!_disposed)
+        {
+            NativeMethods.ViewGlDeinit(_view);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -580,5 +603,14 @@ public sealed class NativeModelViewer : IDisposable
             int width,
             int height,
             int stride);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_view_gl_init", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ViewGlInit(SafeModelViewHandle view);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_view_gl_deinit", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void ViewGlDeinit(SafeModelViewHandle view);
+
+        [DllImport(LibraryName, EntryPoint = "pkm_view_render_gl", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int ViewRenderGl(SafeModelViewHandle view, int width, int height);
     }
 }

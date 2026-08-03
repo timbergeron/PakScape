@@ -9,6 +9,20 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#  undef near
+#  undef far
+#  include <GL/gl.h>
+#elif defined(__APPLE__)
+#  include <OpenGL/gl.h>
+#else
+#  include <GL/gl.h>
+#endif
+
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
@@ -365,6 +379,7 @@ struct pkm_model {
     std::vector<std::vector<Surface>> animationFrames;
     std::vector<float> frameIntervals;
     int activeFrame = 0;
+    std::size_t textureGeneration = 1;
     /* Sprites start square to the camera and never drift into the turntable. */
     bool faceOn = false;
 
@@ -1850,6 +1865,11 @@ struct pkm_view {
     int backdropHeight = 0;
     bool backdropDark = true;
 
+    /* OpenGL resources belong to the context that initialized them. */
+    std::vector<unsigned int> glTextures;
+    std::size_t glTextureGeneration = 0;
+    bool glInitialized = false;
+
     void frame(float viewAspect) {
         const float ratio = frameDistance > 1e-6f ? distance / frameDistance : 1.0f;
         const float goalRatio = frameDistance > 1e-6f ? goalDistance / frameDistance : 1.0f;
@@ -2462,6 +2482,7 @@ int pkm_model_set_texture(pkm_model *model, int index, const void *rgba_pixels, 
             static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
         texture.rgba.resize(byteCount);
         std::memcpy(texture.rgba.data(), rgba_pixels, byteCount);
+        model->textureGeneration++;
         return PKM_OK;
     } catch (const std::bad_alloc &) {
         return PKM_ERROR_OUT_OF_MEMORY;
@@ -3023,6 +3044,276 @@ int pkm_view_render(pkm_view *view, void *bgra_pixels, int width, int height, in
         return PKM_OK;
     } catch (const std::bad_alloc &) {
         return PKM_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+}
+
+static int uploadGlTextures(pkm_view *view) {
+    if (view == nullptr || view->model == nullptr) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+
+    const pkm_model &model = *view->model;
+    if (view->glTextures.size() != model.textures.size()) {
+        if (!view->glTextures.empty()) {
+            glDeleteTextures(static_cast<GLsizei>(view->glTextures.size()),
+                             reinterpret_cast<const GLuint *>(view->glTextures.data()));
+        }
+        view->glTextures.assign(model.textures.size(), 0);
+        if (!view->glTextures.empty()) {
+            glGenTextures(static_cast<GLsizei>(view->glTextures.size()),
+                          reinterpret_cast<GLuint *>(view->glTextures.data()));
+        }
+    }
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    for (size_t index = 0; index < model.textures.size(); index++) {
+        const Texture &texture = model.textures[index];
+        const GLuint textureId = static_cast<GLuint>(view->glTextures[index]);
+        if (textureId == 0 || !texture.valid()) {
+            continue;
+        }
+
+        glBindTexture(GL_TEXTURE_2D, textureId);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                        texture.smooth ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                        texture.smooth ? GL_LINEAR : GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture.width, texture.height, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, texture.rgba.data());
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    view->glTextureGeneration = model.textureGeneration;
+    return PKM_OK;
+}
+
+/* Keep the GPU surface's studio backdrop visually consistent with the bitmap path. */
+static void drawGlBackdrop(bool dark, int width, int height) {
+    constexpr int grid = 12;
+
+    auto setColor = [&](float x, float y) {
+        const Color color = backdrop(dark, x, y, width, height);
+        glColor3f(linearToSrgb(color.r), linearToSrgb(color.g), linearToSrgb(color.b));
+    };
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, static_cast<GLdouble>(width), 0.0, static_cast<GLdouble>(height), -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    for (int row = 0; row < grid; row++) {
+        const float y0 = static_cast<float>(row) * height / grid;
+        const float y1 = static_cast<float>(row + 1) * height / grid;
+        const float top = static_cast<float>(height) - y1;
+        const float bottom = static_cast<float>(height) - y0;
+        for (int column = 0; column < grid; column++) {
+            const float x0 = static_cast<float>(column) * width / grid;
+            const float x1 = static_cast<float>(column + 1) * width / grid;
+
+            glBegin(GL_QUADS);
+            setColor(x0, y1);
+            glVertex2f(x0, top);
+            setColor(x1, y1);
+            glVertex2f(x1, top);
+            setColor(x1, y0);
+            glVertex2f(x1, bottom);
+            setColor(x0, y0);
+            glVertex2f(x0, bottom);
+            glEnd();
+        }
+    }
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
+int pkm_view_gl_init(pkm_view *view) {
+    if (view == nullptr) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+
+    try {
+        view->glInitialized = true;
+        const int result = uploadGlTextures(view);
+        if (result != PKM_OK) {
+            view->glInitialized = false;
+        }
+        return result;
+    } catch (const std::bad_alloc &) {
+        view->glInitialized = false;
+        return PKM_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        view->glInitialized = false;
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+}
+
+void pkm_view_gl_deinit(pkm_view *view) {
+    if (view == nullptr || !view->glInitialized) {
+        return;
+    }
+
+    if (!view->glTextures.empty()) {
+        glDeleteTextures(static_cast<GLsizei>(view->glTextures.size()),
+                         reinterpret_cast<const GLuint *>(view->glTextures.data()));
+    }
+    view->glTextures.clear();
+    view->glTextureGeneration = 0;
+    view->glInitialized = false;
+}
+
+int pkm_view_render_gl(pkm_view *view, int width, int height) {
+    if (view == nullptr || view->model == nullptr || width <= 0 || height <= 0 ||
+        width > kMaxRenderDimension || height > kMaxRenderDimension) {
+        return PKM_ERROR_INVALID_ARGUMENT;
+    }
+
+    try {
+        if (!view->glInitialized) {
+            const int result = pkm_view_gl_init(view);
+            if (result != PKM_OK) {
+                return result;
+            }
+        } else if (view->glTextureGeneration != view->model->textureGeneration) {
+            const int result = uploadGlTextures(view);
+            if (result != PKM_OK) {
+                return result;
+            }
+        }
+
+        const pkm_model &model = *view->model;
+        if (view->width != width || view->height != height) {
+            view->width = width;
+            view->height = height;
+        }
+        const float aspect = static_cast<float>(width) / static_cast<float>(height);
+        if (std::fabs(aspect - view->aspect) > 1e-4f) {
+            view->frame(aspect);
+            view->dirty = true;
+        }
+
+        const Basis basis = makeBasis(*view);
+        const float nearPlane = std::max(model.radius * 0.005f, 1e-4f);
+        const float farPlane = std::max(nearPlane + 1.0f,
+                                        view->distance + model.radius * 4.0f);
+        const float halfHeight = nearPlane * std::tan(kFieldOfView * 0.5f);
+        const float halfWidth = halfHeight * aspect;
+        const Vec3 eye = basis.eye;
+        const GLfloat modelView[] = {
+            basis.right.x, basis.right.y, basis.right.z, 0.0f,
+            basis.up.x, basis.up.y, basis.up.z, 0.0f,
+            -basis.forward.x, -basis.forward.y, -basis.forward.z, 0.0f,
+            -dot(basis.right, eye), -dot(basis.up, eye), dot(basis.forward, eye), 1.0f,
+        };
+
+        glViewport(0, 0, width, height);
+        glClearColor(view->dark ? 0.055f : 0.90f,
+                     view->dark ? 0.059f : 0.91f,
+                     view->dark ? 0.075f : 0.93f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        drawGlBackdrop(view->dark, width, height);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.5f);
+
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glFrustum(-halfWidth, halfWidth, -halfHeight, halfHeight, nearPlane, farPlane);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadMatrixf(modelView);
+
+        const Lighting lighting = makeLighting(basis);
+        const GLfloat keyDirection[] = {
+            -lighting.key.x, -lighting.key.y, -lighting.key.z, 0.0f,
+        };
+        const GLfloat fillDirection[] = {
+            -lighting.fill.x, -lighting.fill.y, -lighting.fill.z, 0.0f,
+        };
+        const GLfloat rimDirection[] = {
+            -lighting.rim.x, -lighting.rim.y, -lighting.rim.z, 0.0f,
+        };
+        const GLfloat keyColour[] = {0.92f, 0.90f, 0.86f, 1.0f};
+        const GLfloat fillColour[] = {0.34f, 0.35f, 0.40f, 1.0f};
+        const GLfloat rimColour[] = {0.24f, 0.26f, 0.31f, 1.0f};
+        const GLfloat ambientColour[] = {0.22f, 0.23f, 0.26f, 1.0f};
+        glEnable(GL_LIGHTING);
+        glEnable(GL_LIGHT0);
+        glEnable(GL_LIGHT1);
+        glEnable(GL_LIGHT2);
+        glLightfv(GL_LIGHT0, GL_POSITION, keyDirection);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, keyColour);
+        glLightfv(GL_LIGHT1, GL_POSITION, fillDirection);
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, fillColour);
+        glLightfv(GL_LIGHT2, GL_POSITION, rimDirection);
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, rimColour);
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambientColour);
+        glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+
+        for (const Surface &surface : model.drawableSurfaces()) {
+            const Texture *texture = model.textureFor(surface);
+            const bool textured = texture != nullptr &&
+                                  surface.texture >= 0 &&
+                                  static_cast<size_t>(surface.texture) < view->glTextures.size();
+            if (surface.unlit) {
+                glDisable(GL_LIGHTING);
+            } else {
+                glEnable(GL_LIGHTING);
+            }
+            if (textured) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D,
+                              static_cast<GLuint>(view->glTextures[static_cast<size_t>(surface.texture)]));
+                glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+            } else {
+                glDisable(GL_TEXTURE_2D);
+                glColor4f(0.74f, 0.74f, 0.76f, 1.0f);
+            }
+
+            glBegin(GL_TRIANGLES);
+            for (size_t index = 0; index + 2 < surface.indices.size(); index += 3) {
+                for (size_t corner = 0; corner < 3; corner++) {
+                    const int vertexIndex = surface.indices[index + corner];
+                    if (vertexIndex < 0 || static_cast<size_t>(vertexIndex) >= surface.vertices.size()) {
+                        continue;
+                    }
+                    const Vertex &vertex = surface.vertices[static_cast<size_t>(vertexIndex)];
+                    glNormal3f(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+                    if (textured) {
+                        glTexCoord2f(vertex.u, vertex.v);
+                    }
+                    glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
+                }
+            }
+            glEnd();
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_ALPHA_TEST);
+        glDisable(GL_COLOR_MATERIAL);
+        glDisable(GL_LIGHT0);
+        glDisable(GL_LIGHT1);
+        glDisable(GL_LIGHT2);
+        glDisable(GL_LIGHTING);
+        view->dirty = false;
+        return PKM_OK;
     } catch (...) {
         return PKM_ERROR_INVALID_ARGUMENT;
     }

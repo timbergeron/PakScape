@@ -31,3 +31,6 @@ _pkm_view_reset
 _pkm_view_advance
 _pkm_view_show_interaction_prompt
 _pkm_view_render
+_pkm_view_gl_init
+_pkm_view_gl_deinit
+_pkm_view_render_gl
