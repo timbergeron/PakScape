@@ -15,7 +15,8 @@ public static class ArchivePreviewBuilder
     {
         ".cfg", ".txt", ".log", ".md", ".json", ".xml", ".yaml", ".yml",
         ".ini", ".csv", ".qc", ".map", ".ent", ".rc", ".shader", ".def",
-        ".menu", ".arena",
+        ".menu", ".arena", ".h", ".c", ".cc", ".cpp", ".hpp", ".cs", ".js",
+        ".ts", ".css", ".html", ".htm", ".bat", ".cmd", ".scr", ".skin",
     };
 
     private static readonly HashSet<string> EncodedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -75,6 +76,9 @@ public static class ArchivePreviewBuilder
     public static bool SupportsAudioExtension(string extension) =>
         !string.IsNullOrWhiteSpace(extension) && AudioExtensions.Contains(extension);
 
+    public static bool SupportsTextExtension(string extension) =>
+        !string.IsNullOrWhiteSpace(extension) && TextExtensions.Contains(extension);
+
     public static bool SupportsModelExtension(string extension) =>
         !string.IsNullOrWhiteSpace(extension) && ModelExtensions.Contains(extension);
 
@@ -102,9 +106,10 @@ public static class ArchivePreviewBuilder
         QuickPreviewOnOpenExtensions.Contains(file.Extension);
 
     /// <summary>
-    /// Builds a preview. Thumbnails and the fallback path pass
+    /// Builds a preview. Generic bitmap fallbacks pass
     /// <paramref name="includeInteractiveModels"/> as false so that a model is
-    /// decoded to its flat skin instead of the interactive viewer.
+    /// decoded to its flat skin instead of the interactive viewer. Platform thumbnail
+    /// services may render a deterministic native model frame before using this path.
     /// </summary>
     public static ArchivePreview Build(
         ArchiveNode node,

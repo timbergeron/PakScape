@@ -1,4 +1,6 @@
 using Avalonia.Media.Imaging;
+using PakStudio.Core.Audio;
+using PakStudio.Core.Models;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
 
@@ -11,7 +13,7 @@ public sealed class ArchiveThumbnailService : IDisposable
     private static readonly HashSet<string> ThumbnailExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff",
-        ".lmp", ".mdl", ".spr", ".pcx", ".tga", ".bsp", ".wad",
+        ".lmp", ".mdl", ".spr", ".spr32", ".pcx", ".tga", ".bsp", ".wad",
     };
     private static readonly SemaphoreSlim GenerationSlots = new(initialCount: 2, maxCount: 2);
     private readonly object _sync = new();
@@ -41,10 +43,20 @@ public sealed class ArchiveThumbnailService : IDisposable
             {
                 try
                 {
-                    var preview = ArchivePreviewBuilder.Build(file, includeInteractiveModels: false);
-                    if (PreviewImageFactory.TryCreate(preview, ThumbnailDimension, out var generated))
+                    thumbnail = IsNativeModelThumbnail(file)
+                        ? CreateModelThumbnail(file)
+                        : null;
+                    if (thumbnail is null)
                     {
-                        thumbnail = generated;
+                        var preview = ArchivePreviewBuilder.Build(file, includeInteractiveModels: false);
+                        if (preview.Kind == ArchivePreviewKind.Audio)
+                        {
+                            thumbnail = AudioThumbnailRenderer.Create(preview, ThumbnailDimension);
+                        }
+                        else if (PreviewImageFactory.TryCreate(preview, ThumbnailDimension, out var generated))
+                        {
+                            thumbnail = generated;
+                        }
                     }
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -77,6 +89,49 @@ public sealed class ArchiveThumbnailService : IDisposable
         }
     }
 
+    private static bool IsNativeModelThumbnail(ArchiveFileNode file) =>
+        file.Extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase) ||
+        file.Extension.Equals(".spr", StringComparison.OrdinalIgnoreCase) ||
+        file.Extension.Equals(".spr32", StringComparison.OrdinalIgnoreCase) ||
+        (file.Extension.Equals(".bsp", StringComparison.OrdinalIgnoreCase) &&
+            NativeModelViewer.IsBspBrushModel(file.Data));
+
+    private static Bitmap? CreateModelThumbnail(ArchiveFileNode file)
+    {
+        try
+        {
+            var model = new PreviewModel(
+                file.Data,
+                file.Extension,
+                new ModelTextureResolver(file));
+            using var session = ModelPreviewSession.Create(model, ModelTextureDecoder.Decode);
+            session.DarkBackground = true;
+            session.AutoRotate = false;
+            session.AnimationEnabled = false;
+
+            var bitmap = session.RenderBitmap(ThumbnailDimension, ThumbnailDimension);
+            if (bitmap is null)
+            {
+                return null;
+            }
+
+            var preview = new ArchivePreview(
+                file.Name,
+                file.Extension.ToUpperInvariant().TrimStart('.') + " file",
+                file.Size,
+                ArchivePreviewKind.Bitmap,
+                Bitmap: bitmap);
+            return PreviewImageFactory.TryCreate(preview, ThumbnailDimension, out var image)
+                ? image
+                : null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            /* Keep the flat preview when the native model backend cannot render. */
+            return null;
+        }
+    }
+
     public static bool CanCreateThumbnail(ArchiveNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -90,7 +145,8 @@ public sealed class ArchiveThumbnailService : IDisposable
             return null;
         }
 
-        var source = ThumbnailExtensions.Contains(file.Extension)
+        var source = ThumbnailExtensions.Contains(file.Extension) ||
+                     ArchivePreviewBuilder.SupportsAudioExtension(file.Extension)
             ? file
             : ModelTextureResolver.FindCompanionThumbnail(file);
         return source is { Size: <= MaximumThumbnailSourceSize } ? source : null;

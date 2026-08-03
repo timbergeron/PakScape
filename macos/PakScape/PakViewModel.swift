@@ -76,7 +76,7 @@ final class PakViewModel: NSObject, ObservableObject {
     private static let previewableAudioExtensions: Set<String> = [
         "wav", "mp3", "flac", "ogg", "opus", "it", "s3m", "xm", "mod", "umx",
     ]
-    private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "tga", "wad"]
+    private static let renderedQuickLookExtensions: Set<String> = ["bsp", "lmp", "mdl", "pcx", "spr", "spr32", "tga", "wad"]
     private static let companionThumbnailExtensions: Set<String> = [
         "md5mesh", "md5anim", "mesh", "anim",
     ]
@@ -1458,7 +1458,8 @@ final class PakViewModel: NSObject, ObservableObject {
             return preview
         }
 
-        let hasCustomRenderer = Self.renderedQuickLookExtensions.contains(ext)
+        let hasCustomRenderer = Self.renderedQuickLookExtensions.contains(ext) ||
+            Self.previewableAudioExtensions.contains(ext)
         let nativeContentType = nativeThumbnailContentType(forExtension: ext)
         guard hasCustomRenderer || nativeContentType != nil else {
             previewImageMisses.insert(node.id)
@@ -1654,18 +1655,35 @@ final class PakViewModel: NSObject, ObservableObject {
         appearance: NSAppearance = NSApp.effectiveAppearance
     ) -> NSImage? {
         let ext = (fileName as NSString).pathExtension.lowercased()
-        if ext == "lmp" {
+        if Self.previewableAudioExtensions.contains(ext) {
+            return renderAudioThumbnail(fileName: fileName, data: data, appearance: appearance)
+        } else if ext == "lmp" {
             return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
         } else if ext == "pcx" {
             return PcxPreviewRenderer.renderImage(data: data) ?? NativeImagePreviewRenderer.renderImage(data: data)
         } else if ext == "tga" {
             return TgaPreviewRenderer.renderImage(data: data)
         } else if ext == "mdl" {
-            return MdlPreviewRenderer.renderImage(data: data)
-        } else if ext == "spr" {
-            return SprPreviewRenderer.renderImage(data: data)
+            return renderModelThumbnail(
+                fileName: fileName,
+                data: data,
+                appearance: appearance
+            )
+                ?? MdlPreviewRenderer.renderImage(data: data)
+        } else if ext == "spr" || ext == "spr32" {
+            return renderModelThumbnail(
+                fileName: fileName,
+                data: data,
+                appearance: appearance
+            )
+                ?? SprPreviewRenderer.renderImage(data: data)
         } else if ext == "bsp" {
-            return BspPreviewRenderer.renderImage(fileName: fileName, data: data)
+            return renderModelThumbnail(
+                fileName: fileName,
+                data: data,
+                appearance: appearance
+            )
+                ?? BspPreviewRenderer.renderImage(fileName: fileName, data: data)
                 ?? BspLevelPreviewRenderer.renderImage(
                     data: data,
                     appearance: appearance,
@@ -1675,6 +1693,136 @@ final class PakViewModel: NSObject, ObservableObject {
             return WadPreviewRenderer.renderImage(fileName: fileName, data: data)
         }
         return nil
+    }
+
+    private func renderModelThumbnail(
+        fileName: String,
+        data: Data,
+        appearance: NSAppearance
+    ) -> NSImage? {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        guard ext == "mdl" || ext == "spr" || ext == "spr32" ||
+                (ext == "bsp" && QuakeModelFormats.isBrushModel(data: data)) else {
+            return nil
+        }
+
+        do {
+            let viewer = try QuakeModelViewer(
+                data: data,
+                fileExtension: ext,
+                resolver: nil
+            )
+            viewer.setDarkBackground(
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            )
+            viewer.setAutoRotate(false)
+            viewer.setAnimationEnabled(false)
+            return viewer.renderThumbnail(width: 192, height: 192)
+        } catch {
+            /* Keep the existing flat preview when the native model backend rejects it. */
+            return nil
+        }
+    }
+
+    private func renderAudioThumbnail(
+        fileName: String,
+        data: Data,
+        appearance: NSAppearance
+    ) -> NSImage {
+        let imageSize = NSSize(width: 192, height: 192)
+        let image = NSImage(size: imageSize)
+        let levels = audioThumbnailLevels(data: data, count: 48)
+
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        appearance.performAsCurrentDrawingAppearance {
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let background = isDark
+                ? NSColor(calibratedRed: 0.08, green: 0.10, blue: 0.13, alpha: 1)
+                : NSColor(calibratedRed: 0.93, green: 0.96, blue: 0.98, alpha: 1)
+            let panel = isDark
+                ? NSColor(calibratedRed: 0.15, green: 0.21, blue: 0.28, alpha: 1)
+                : NSColor(calibratedRed: 0.84, green: 0.91, blue: 0.96, alpha: 1)
+            let muted = isDark ? NSColor(white: 0.74, alpha: 1) : NSColor(white: 0.30, alpha: 1)
+
+            background.setFill()
+            NSBezierPath(roundedRect: NSRect(origin: .zero, size: imageSize), xRadius: 12, yRadius: 12).fill()
+
+            let center = NSPoint(x: 96, y: 88)
+            let panelRect = NSRect(x: 26, y: 18, width: 140, height: 140)
+            panel.setFill()
+            NSBezierPath(ovalIn: panelRect).fill()
+
+            for (index, level) in levels.enumerated() {
+                let angle = -CGFloat.pi / 2 + CGFloat(index) * (CGFloat.pi * 2 / CGFloat(levels.count))
+                let innerRadius: CGFloat = 38
+                let outerRadius = innerRadius + 10 + level * 27
+                let start = NSPoint(
+                    x: center.x + cos(angle) * innerRadius,
+                    y: center.y + sin(angle) * innerRadius
+                )
+                let end = NSPoint(
+                    x: center.x + cos(angle) * outerRadius,
+                    y: center.y + sin(angle) * outerRadius
+                )
+                let bar = NSBezierPath()
+                bar.move(to: start)
+                bar.line(to: end)
+                bar.lineWidth = 3
+                bar.lineCapStyle = .round
+                audioThumbnailColor(position: (cos(angle) + 1) / 2).setStroke()
+                bar.stroke()
+            }
+
+            background.setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - 34, y: center.y - 34, width: 68, height: 68)).fill()
+
+            let title = (fileName as NSString).lastPathComponent
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 8),
+                .foregroundColor: muted,
+            ]
+            let titleRect = NSRect(x: 24, y: 6, width: 144, height: 12)
+            (title as NSString).draw(with: titleRect, options: [.truncatesLastVisibleLine], attributes: attributes)
+        }
+
+        return image
+    }
+
+    private func audioThumbnailColor(position: CGFloat) -> NSColor {
+        let clamped = min(max(position, 0), 1)
+        let first = (red: 0.608, green: 0.239, blue: 1.0)
+        let second = (red: 0.220, green: 0.722, blue: 0.957)
+        return NSColor(
+            calibratedRed: first.red + (second.red - first.red) * clamped,
+            green: first.green + (second.green - first.green) * clamped,
+            blue: first.blue + (second.blue - first.blue) * clamped,
+            alpha: 1
+        )
+    }
+
+    private func audioThumbnailLevels(data: Data, count: Int) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        guard !data.isEmpty else { return Array(repeating: 0.2, count: count) }
+
+        let bytes = [UInt8](data)
+        let offset = bytes.count >= 12 &&
+            bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+            bytes[8] == 0x57 && bytes[9] == 0x41 && bytes[10] == 0x56 && bytes[11] == 0x45 ? 44 : 0
+        let length = max(1, bytes.count - offset)
+
+        return (0..<count).map { index in
+            let start = offset + index * length / count
+            let end = max(start + 1, offset + (index + 1) * length / count)
+            var total: CGFloat = 0
+            var sampleCount = 0
+            for position in start..<min(end, bytes.count) {
+                total += abs(CGFloat(bytes[position]) - 128) / 128
+                sampleCount += 1
+            }
+            let amplitude = sampleCount == 0 ? 0.2 : total / CGFloat(sampleCount)
+            return min(1, max(0.16, 0.16 + amplitude * 0.94))
+        }
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {

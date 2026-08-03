@@ -172,17 +172,56 @@ public sealed class ArchivePreviewBuilderTests
             new ArchiveFileNode("gfx.wad", CreateSinglePictureWad(diskSize: 9)));
 
         Assert.Equal(ArchivePreviewKind.Bitmap, preview.Kind);
-        Assert.Equal(1, preview.Bitmap?.Width);
-        Assert.Equal(1, preview.Bitmap?.Height);
+        Assert.Equal(256, preview.Bitmap?.Width);
+        Assert.Equal(64, preview.Bitmap?.Height);
     }
 
     [Fact]
-    public void GfxWadRejectsCompressedLumps()
+    public void GfxWadPreviewIncludesAllReadablePicturesInContactSheet()
+    {
+        var preview = ArchivePreviewBuilder.Build(
+            new ArchiveFileNode("gfx.wad", CreatePictureWad(2)));
+
+        Assert.Equal(ArchivePreviewKind.Bitmap, preview.Kind);
+        Assert.Equal(256, preview.Bitmap?.Width);
+        Assert.Equal(64, preview.Bitmap?.Height);
+
+        var pixels = Assert.IsType<PreviewBitmap>(preview.Bitmap).BgraPixels;
+        Assert.NotEqual(pixels[0], pixels[64 * 4]);
+    }
+
+    [Fact]
+    public void GfxWadPreviewCopiesEveryContactSheetRow()
+    {
+        var preview = ArchivePreviewBuilder.Build(
+            new ArchiveFileNode("gfx.wad", CreatePictureWad(5)));
+
+        var bitmap = Assert.IsType<PreviewBitmap>(preview.Bitmap);
+        Assert.Equal(128, bitmap.Height);
+        var secondRowFirstPixel = (64 * bitmap.Width * 4) + 3;
+        Assert.Equal(255, bitmap.BgraPixels[secondRowFirstPixel]);
+    }
+
+    [Fact]
+    public void GfxWadPreviewKeepsReadableLumpsRegardlessOfDirectoryCompressionFlag()
     {
         var preview = ArchivePreviewBuilder.Build(
             new ArchiveFileNode("gfx.wad", CreateSinglePictureWad(diskSize: 9, compression: 1)));
 
-        Assert.Equal(ArchivePreviewKind.Metadata, preview.Kind);
+        Assert.Equal(ArchivePreviewKind.Bitmap, preview.Kind);
+        Assert.Equal(256, preview.Bitmap?.Width);
+        Assert.Equal(64, preview.Bitmap?.Height);
+    }
+
+    [Fact]
+    public void GfxWadPreviewIncludesHeaderlessConsolePictures()
+    {
+        var preview = ArchivePreviewBuilder.Build(
+            new ArchiveFileNode("gfx.wad", CreateConcharsWad()));
+
+        Assert.Equal(ArchivePreviewKind.Bitmap, preview.Kind);
+        var pixels = Assert.IsType<PreviewBitmap>(preview.Bitmap).BgraPixels;
+        Assert.NotEqual(0, pixels[0]);
     }
 
     [Fact]
@@ -259,6 +298,64 @@ public sealed class ArchivePreviewBuilderTests
         WriteInt32(data, lumpOffset, 1);
         WriteInt32(data, lumpOffset + 4, 1);
         data[lumpOffset + 8] = 0;
+        return data;
+    }
+
+    private static byte[] CreatePictureWad(int pictureCount)
+    {
+        const int directoryOffset = 12;
+        const int pictureSize = 10;
+        var lumpOffset = directoryOffset + 32 * pictureCount;
+        var data = new byte[lumpOffset + pictureCount * pictureSize];
+        "WAD2"u8.CopyTo(data);
+        WriteInt32(data, 4, pictureCount);
+        WriteInt32(data, 8, directoryOffset);
+
+        for (var index = 0; index < pictureCount; index++)
+        {
+            var directoryEntry = directoryOffset + index * 32;
+            var pictureOffset = lumpOffset + index * pictureSize;
+            WriteInt32(data, directoryEntry, pictureOffset);
+            WriteInt32(data, directoryEntry + 4, pictureSize);
+            WriteInt32(data, directoryEntry + 8, pictureSize);
+            data[directoryEntry + 12] = (byte)'B';
+            WriteInt32(data, pictureOffset, 1);
+            WriteInt32(data, pictureOffset + 4, 1);
+            data[pictureOffset + 8] = (byte)(index + 1);
+            data[pictureOffset + 9] = (byte)(index + 1);
+        }
+
+        return data;
+    }
+
+    private static byte[] CreateConcharsWad()
+    {
+        const int directoryOffset = 12;
+        const int concharsOffset = directoryOffset + 32 * 2;
+        const int concharsSize = 128 * 128;
+        const int pictureOffset = concharsOffset + concharsSize;
+        const int pictureSize = 10;
+        var data = new byte[pictureOffset + pictureSize];
+        "WAD2"u8.CopyTo(data);
+        WriteInt32(data, 4, 2);
+        WriteInt32(data, 8, directoryOffset);
+
+        WriteInt32(data, directoryOffset, concharsOffset);
+        WriteInt32(data, directoryOffset + 4, concharsSize);
+        WriteInt32(data, directoryOffset + 8, concharsSize);
+        data[directoryOffset + 12] = (byte)'E';
+        "conchars"u8.CopyTo(data.AsSpan(directoryOffset + 16));
+        data.AsSpan(concharsOffset, concharsSize).Fill(1);
+
+        var pictureEntry = directoryOffset + 32;
+        WriteInt32(data, pictureEntry, pictureOffset);
+        WriteInt32(data, pictureEntry + 4, pictureSize);
+        WriteInt32(data, pictureEntry + 8, pictureSize);
+        data[pictureEntry + 12] = (byte)'B';
+        WriteInt32(data, pictureOffset, 1);
+        WriteInt32(data, pictureOffset + 4, 1);
+        data[pictureOffset + 8] = 2;
+        data[pictureOffset + 9] = 2;
         return data;
     }
 

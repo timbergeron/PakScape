@@ -10,6 +10,9 @@ internal static class QuakePreviewDecoder
     private const int MaximumGeometryElements = 1_000_000;
     private const int MaximumBspEntityBytes = 4 * 1024 * 1024;
     private const int MaximumBspEntityCount = 100_000;
+    private const int WadContactSheetTileSize = 64;
+    private const int WadContactSheetColumns = 4;
+    private const int MaximumWadContactSheetImages = 64;
 
     private readonly record struct BspMarker(
         float X,
@@ -526,7 +529,8 @@ internal static class QuakePreviewDecoder
         const int size = 768;
         const int padding = 24;
         var pixels = new byte[size * size * 4];
-        Fill(pixels, 24, 27, 32, 255);
+        // Keep the generated top-down map canvas aligned with the dark theme window surface.
+        Fill(pixels, 32, 32, 32, 255);
         var scale = Math.Min(
             (size - padding * 2) / rangeX,
             (size - padding * 2) / rangeY);
@@ -953,19 +957,38 @@ internal static class QuakePreviewDecoder
             return false;
         }
 
+        var sheet = new byte[
+            WadContactSheetTileSize * WadContactSheetColumns *
+            WadContactSheetTileSize * (MaximumWadContactSheetImages / WadContactSheetColumns) * 4];
+        var imageCount = 0;
+
         for (var index = 0; index < entryCount; index++)
         {
             var entry = directoryOffset + index * 32;
             if (!TryReadInt32(data, entry, out var offset) ||
                 !TryReadInt32(data, entry + 4, out var diskSize) ||
-                offset < 0 || diskSize <= 0 || !HasRange(data, offset, diskSize) ||
-                data[entry + 13] != 0)
+                offset < 0 || diskSize <= 0 || !HasRange(data, offset, diskSize))
             {
                 continue;
             }
             var type = data[entry + 12];
+            var name = ReadWadName(data, entry + 16);
             if (type == (byte)'@')
             {
+                continue;
+            }
+
+            if (TryGetWadFlatDimensions(name, type, diskSize, out var flatWidth, out var flatHeight, out var transparentIndex))
+            {
+                if (IsRangeWithinLump(offset, diskSize, offset, flatWidth, flatHeight) &&
+                    TryCreatePalettedBitmap(data, offset, flatWidth, flatHeight, transparentIndex, out var flatImage))
+                {
+                    AddToWadContactSheet(sheet, flatImage, imageCount++);
+                    if (imageCount == MaximumWadContactSheetImages)
+                    {
+                        break;
+                    }
+                }
                 continue;
             }
 
@@ -980,23 +1003,106 @@ internal static class QuakePreviewDecoder
                 }
                 var pixelStart = (long)offset + pixelOffset;
                 if (!IsRangeWithinLump(offset, diskSize, pixelStart, width, height) ||
-                    !TryCreatePalettedBitmap(data, (int)pixelStart, width, height, 255, out bitmap))
+                    !TryCreatePalettedBitmap(data, (int)pixelStart, width, height, null, out var mipImage))
                 {
                     continue;
                 }
-                return true;
+
+                AddToWadContactSheet(sheet, mipImage, imageCount++);
+                if (imageCount == MaximumWadContactSheetImages)
+                {
+                    break;
+                }
+                continue;
             }
 
             if (HasRange(data, offset, 8) &&
                 TryReadInt32(data, offset, out var simpleWidth) &&
                 TryReadInt32(data, offset + 4, out var simpleHeight) &&
                 IsRangeWithinLump(offset, diskSize, (long)offset + 8, simpleWidth, simpleHeight) &&
-                TryCreatePalettedBitmap(data, offset + 8, simpleWidth, simpleHeight, 255, out bitmap))
+                TryCreatePalettedBitmap(data, offset + 8, simpleWidth, simpleHeight, 255, out var simpleImage))
             {
-                return true;
+                AddToWadContactSheet(sheet, simpleImage, imageCount++);
+                if (imageCount == MaximumWadContactSheetImages)
+                {
+                    break;
+                }
             }
         }
+
+        if (imageCount == 0)
+        {
+            return false;
+        }
+
+        var rows = (imageCount + WadContactSheetColumns - 1) / WadContactSheetColumns;
+        var sheetWidth = WadContactSheetTileSize * WadContactSheetColumns;
+        var sheetHeight = WadContactSheetTileSize * rows;
+        var pixels = new byte[checked(sheetWidth * sheetHeight * 4)];
+        Buffer.BlockCopy(sheet, 0, pixels, 0, pixels.Length);
+
+        bitmap = new PreviewBitmap(sheetWidth, sheetHeight, pixels);
+        return true;
+    }
+
+    private static bool TryGetWadFlatDimensions(
+        string name,
+        byte type,
+        int diskSize,
+        out int width,
+        out int height,
+        out int? transparentIndex)
+    {
+        width = 0;
+        height = 0;
+        transparentIndex = null;
+
+        if (name.Equals("conchars", StringComparison.OrdinalIgnoreCase) ||
+            (type == (byte)'E' && diskSize == 128 * 128))
+        {
+            width = 128;
+            height = 128;
+            transparentIndex = 0;
+            return true;
+        }
+
+        if (name.Equals("conback", StringComparison.OrdinalIgnoreCase) ||
+            (type == (byte)'E' && diskSize == 320 * 200))
+        {
+            width = 320;
+            height = 200;
+            return true;
+        }
+
         return false;
+    }
+
+    private static string ReadWadName(byte[] data, int offset)
+    {
+        var length = 0;
+        while (length < 16 && data[offset + length] != 0)
+        {
+            length++;
+        }
+        return Encoding.ASCII.GetString(data, offset, length);
+    }
+
+    private static void AddToWadContactSheet(byte[] sheet, PreviewBitmap image, int imageIndex)
+    {
+        var tileX = (imageIndex % WadContactSheetColumns) * WadContactSheetTileSize;
+        var tileY = (imageIndex / WadContactSheetColumns) * WadContactSheetTileSize;
+        for (var y = 0; y < WadContactSheetTileSize; y++)
+        {
+            var sourceY = y * image.Height / WadContactSheetTileSize;
+            for (var x = 0; x < WadContactSheetTileSize; x++)
+            {
+                var sourceX = x * image.Width / WadContactSheetTileSize;
+                var sourceOffset = (sourceY * image.Width + sourceX) * 4;
+                var destinationOffset = ((tileY + y) * WadContactSheetTileSize * WadContactSheetColumns +
+                                         tileX + x) * 4;
+                Buffer.BlockCopy(image.BgraPixels, sourceOffset, sheet, destinationOffset, 4);
+            }
+        }
     }
 
     private static bool IsRangeWithinLump(
