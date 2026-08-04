@@ -18,6 +18,20 @@ struct BspLevelPreviewOptions: Equatable {
         showFlags: false
     )
 
+    /// The marker groups in the order they are offered in the preview controls.
+    static let markerCategories: [WritableKeyPath<BspLevelPreviewOptions, Bool>] = [
+        \.showArmors,
+        \.showMegaHealth,
+        \.showPowerups,
+        \.showMajorWeapons,
+        \.showFlags,
+    ]
+
+    static func showing(only category: WritableKeyPath<BspLevelPreviewOptions, Bool>) -> BspLevelPreviewOptions {
+        var options = BspLevelPreviewOptions.geometryOnly
+        options[keyPath: category] = true
+        return options
+    }
 }
 
 enum BspLevelPreviewRenderer {
@@ -121,6 +135,7 @@ enum BspLevelPreviewRenderer {
     private static let lumpSurfEdges = 13
     private static let canvasSize = 256
     private static let canvasPadding: Double = 14
+    private static let maximumPixelScale = 8
     private static let minVisibleNormalZ = 0.01
     private static let nodrawFlag = 0x800
     private static let supportedVersions: Set<Int> = [29, 30]
@@ -128,7 +143,8 @@ enum BspLevelPreviewRenderer {
     static func renderImage(
         data: Data,
         appearance: NSAppearance = NSApp.effectiveAppearance,
-        options: BspLevelPreviewOptions = .all
+        options: BspLevelPreviewOptions = .all,
+        pixelScale: Int = 1
     ) -> NSImage? {
         guard let header = parseHeader(data) else { return nil }
 
@@ -167,8 +183,43 @@ enum BspLevelPreviewRenderer {
             renderableFaces,
             markers: markers,
             bounds: bounds,
-            appearance: appearance
+            appearance: appearance,
+            pixelScale: pixelScale
         )
+    }
+
+    /// Which marker groups the level actually places items for, so the preview
+    /// can offer only the options that would change anything.
+    static func availableMapMarkers(data: Data) -> BspLevelPreviewOptions {
+        guard let header = parseHeader(data) else { return .geometryOnly }
+
+        let lump = header.lumps[lumpEntities]
+        guard lump.size > 0, lump.size <= maximumEntityBytes else { return .geometryOnly }
+
+        var available = BspLevelPreviewOptions.geometryOnly
+        for entity in parseEntities(data[lump.offset ..< lump.offset + lump.size]) {
+            guard let origin = parseOrigin(entity["origin"]),
+                  let className = entity["classname"]?.lowercased() else {
+                continue
+            }
+
+            for category in BspLevelPreviewOptions.markerCategories
+            where !available[keyPath: category] {
+                if marker(
+                    className: className,
+                    entity: entity,
+                    origin: origin,
+                    options: .showing(only: category)
+                ) != nil {
+                    available[keyPath: category] = true
+                }
+            }
+
+            if available == .all {
+                break
+            }
+        }
+        return available
     }
 
     private static func parseHeader(_ data: Data) -> Header? {
@@ -758,14 +809,39 @@ enum BspLevelPreviewRenderer {
         _ renderableFaces: [RenderableFace],
         markers: [MapMarker],
         bounds: Bounds,
-        appearance: NSAppearance
+        appearance: NSAppearance,
+        pixelScale: Int
     ) -> NSImage? {
         let imageSize = NSSize(width: canvasSize, height: canvasSize)
-        let image = NSImage(size: imageSize)
-        image.lockFocus()
-        defer { image.unlockFocus() }
+        let scaleFactor = max(1, min(pixelScale, maximumPixelScale))
+        let pixels = canvasSize * scaleFactor
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixels,
+            pixelsHigh: pixels,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
 
-        guard let context = NSGraphicsContext.current?.cgContext else { return nil }
+        let image = NSImage(size: imageSize)
+        image.addRepresentation(representation)
+
+        guard let graphicsContext = NSGraphicsContext(bitmapImageRep: representation) else {
+            return nil
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        let context = graphicsContext.cgContext
+        // Draw in canvas points regardless of pixel scale so line widths, marker
+        // badges and label fonts keep the same proportions at every resolution.
+        context.scaleBy(x: CGFloat(scaleFactor), y: CGFloat(scaleFactor))
 
         let frame = CGRect(origin: .zero, size: CGSize(width: canvasSize, height: canvasSize))
         context.setShouldAntialias(true)
@@ -823,6 +899,8 @@ enum BspLevelPreviewRenderer {
             guard frame.insetBy(dx: 3, dy: 3).contains(point) else { continue }
             drawMarker(marker, at: point, in: context)
         }
+
+        representation.size = imageSize
         return image
     }
 
