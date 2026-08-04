@@ -522,64 +522,51 @@
           </Grid>
         </DockPanel>
       </Border>
-    </Grid>
-
-    <Button x:Name="FolderPaneCollapsedIndicator"
-            Grid.Row="1"
-            Grid.Column="2"
-            Width="42"
-            Height="76"
-            HorizontalAlignment="Left"
-            VerticalAlignment="Center"
-            ZIndex="10"
-            IsVisible="False"
-            Opacity="0"
-            Background="Transparent"
-            BorderThickness="0"
-            Padding="0"
-            Focusable="False"
-            Click="OnFolderPaneToggleClick"
-            PointerEntered="OnFolderPaneIndicatorPointerEntered"
-            PointerExited="OnFolderPaneIndicatorPointerExited"
-            ToolTip.Tip="Show folders"
-            AutomationProperties.Name="Show folders">
-      <Grid Width="42" Height="76">
+      <!-- Sits in the content column so it rides the seam while a drag widens the pane. -->
+      <Button x:Name="FolderPaneCollapsedIndicator"
+              Grid.Column="2"
+              Width="16"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Stretch"
+              ZIndex="10"
+              IsVisible="False"
+              Opacity="0"
+              Background="Transparent"
+              BorderThickness="0"
+              Padding="0"
+              Focusable="False"
+              Click="OnFolderPaneToggleClick"
+              PointerEntered="OnFolderPaneIndicatorPointerEntered"
+              PointerExited="OnFolderPaneIndicatorPointerExited"
+              PointerPressed="OnFolderPaneIndicatorPointerPressed"
+              PointerMoved="OnFolderPaneIndicatorPointerMoved"
+              PointerReleased="OnFolderPaneIndicatorPointerReleased"
+              ToolTip.Tip="Drag or click to show folders"
+              AutomationProperties.Name="Show folders">
+        <!-- No button chrome: the seam strip is invisible, the grip is the whole visual. -->
+        <Button.Styles>
+          <Style Selector="Button#FolderPaneCollapsedIndicator /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+          </Style>
+          <Style Selector="Button#FolderPaneCollapsedIndicator:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+          </Style>
+          <Style Selector="Button#FolderPaneCollapsedIndicator:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+          </Style>
+        </Button.Styles>
+        <!-- The button spans the whole seam; only the centered grip is drawn. -->
         <Border Width="8"
                 Height="44"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                CornerRadius="4">
-          <Border.Styles>
-            <Style Selector="Border">
-              <Setter Property="Background" Value="{DynamicResource ScrollBarThumbBrush}" />
-            </Style>
-            <Style Selector="Border:pointerover">
-              <Setter Property="Background" Value="{DynamicResource ScrollBarThumbHoverBrush}" />
-            </Style>
-          </Border.Styles>
-        </Border>
-        <Path Width="8"
-              Height="12"
-              Margin="1,0,0,0"
-              HorizontalAlignment="Left"
-              VerticalAlignment="Center"
-              Data="M 7,0 L 1,6 L 7,12"
-              Fill="Transparent"
-              Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
-              StrokeThickness="1.8"
-              Stretch="Fill" />
-        <Path Width="8"
-              Height="12"
-              Margin="0,0,1,0"
-              HorizontalAlignment="Right"
-              VerticalAlignment="Center"
-              Data="M 1,0 L 7,6 L 1,12"
-              Fill="Transparent"
-              Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
-              StrokeThickness="1.8"
-              Stretch="Fill" />
-      </Grid>
-    </Button>
+                CornerRadius="4"
+                Background="{DynamicResource ScrollBarThumbHoverBrush}" />
+      </Button>
+    </Grid>
 
     <Border Grid.RowSpan="2"
             IsVisible="{Binding IsBusy}"

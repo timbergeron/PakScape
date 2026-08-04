@@ -19,6 +19,10 @@ public partial class MainWindow : Window
 {
     private const double FolderPaneCollapseThreshold = 120;
     private const double FolderPaneReopenWidth = 220;
+    private const double FolderPaneIndicatorDragThreshold = 4;
+    private const double FolderPaneMinContentWidth = 260;
+    private static readonly TimeSpan FolderPaneAnimationDuration = TimeSpan.FromMilliseconds(160);
+    private static readonly TimeSpan FolderPaneAnimationInterval = TimeSpan.FromMilliseconds(16);
     private static readonly TimeSpan TypeSelectionResetInterval = TimeSpan.FromSeconds(1);
 
     /* No portable way to read the desktop double-click time; this matches the GTK default. */
@@ -39,7 +43,15 @@ public partial class MainWindow : Window
     private Control? _dragSource;
     private bool _isStartingDrag;
     private bool _isSynchronizingSelection;
-    private bool _folderPaneWasCollapsedAtDragStart;
+    private bool _isFolderPaneIndicatorPressed;
+    private bool _isDraggingFolderPaneIndicator;
+    private bool _suppressFolderPaneIndicatorClick;
+    private double _folderPaneIndicatorPressX;
+    private DispatcherTimer? _folderPaneAnimationTimer;
+    private DateTimeOffset _folderPaneAnimationStartedAt;
+    private double _folderPaneAnimationFrom;
+    private double _folderPaneAnimationTo;
+    private bool _folderPaneAnimationCollapses;
     private bool _isCommittingRename;
     private double _lastExpandedFolderPaneWidth = 280;
     private string _typeSelectionBuffer = string.Empty;
@@ -608,11 +620,23 @@ public partial class MainWindow : Window
 
     private void OnFolderPaneToggleClick(object? sender, RoutedEventArgs e)
     {
+        if (_suppressFolderPaneIndicatorClick)
+        {
+            // The press became a drag, which already settled the pane width. A drag
+            // released off the grip leaves the flag set, so the toolbar toggle clears
+            // it without being swallowed.
+            _suppressFolderPaneIndicatorClick = false;
+            if (ReferenceEquals(sender, FolderPaneCollapsedIndicator))
+            {
+                return;
+            }
+        }
+
         if (FolderPaneColumn.ActualWidth < 1)
         {
-            FolderPaneColumn.Width = new GridLength(
-                Math.Max(FolderPaneReopenWidth, _lastExpandedFolderPaneWidth));
-            SetFolderPaneChrome(collapsed: false);
+            AnimateFolderPaneWidth(
+                Math.Max(FolderPaneReopenWidth, _lastExpandedFolderPaneWidth),
+                collapseWhenDone: false);
             return;
         }
 
@@ -622,56 +646,120 @@ public partial class MainWindow : Window
         CollapseFolderPane();
     }
 
-    private void OnFolderSplitterDragStarted(object? sender, VectorEventArgs e)
-    {
-        _folderPaneWasCollapsedAtDragStart = FolderPaneColumn.ActualWidth < 1;
-    }
+    private void OnFolderSplitterDragStarted(object? sender, VectorEventArgs e) =>
+        StopFolderPaneAnimation();
 
-    private void OnFolderSplitterDragCompleted(object? sender, VectorEventArgs e)
+    private void OnFolderSplitterDragCompleted(object? sender, VectorEventArgs e) =>
+        SettleFolderPaneWidth(FolderPaneColumn.ActualWidth);
+
+    /// <summary>
+    /// Decides where a released drag lands: past the collapse threshold it animates
+    /// shut, short of a usable width it springs back open to that width, and anywhere
+    /// wider it simply rests where it was dropped.
+    /// </summary>
+    private void SettleFolderPaneWidth(double width)
     {
-        var width = FolderPaneColumn.ActualWidth;
-        if (_folderPaneWasCollapsedAtDragStart)
+        if (width < FolderPaneCollapseThreshold)
         {
-            if (width >= 1 && width < FolderPaneReopenWidth)
-            {
-                FolderPaneColumn.Width = new GridLength(FolderPaneReopenWidth);
-                _lastExpandedFolderPaneWidth = FolderPaneReopenWidth;
-                SetFolderPaneChrome(collapsed: false);
-            }
-            else if (width >= FolderPaneReopenWidth)
-            {
-                _lastExpandedFolderPaneWidth = width;
-                SetFolderPaneChrome(collapsed: false);
-            }
+            AnimateFolderPaneWidth(0, collapseWhenDone: true);
         }
-        else if (width < FolderPaneCollapseThreshold)
+        else if (width < FolderPaneReopenWidth)
         {
-            CollapseFolderPane();
+            AnimateFolderPaneWidth(FolderPaneReopenWidth, collapseWhenDone: false);
         }
         else
         {
             _lastExpandedFolderPaneWidth = width;
             SetFolderPaneChrome(collapsed: false);
         }
-
-        _folderPaneWasCollapsedAtDragStart = false;
     }
 
-    private void CollapseFolderPane()
+    private void AnimateFolderPaneWidth(double target, bool collapseWhenDone)
     {
-        FolderPaneColumn.Width = new GridLength(0);
-        SetFolderPaneChrome(collapsed: true);
+        StopFolderPaneAnimation();
+
+        _folderPaneAnimationFrom = FolderPaneColumn.ActualWidth;
+        _folderPaneAnimationTo = target;
+        _folderPaneAnimationCollapses = collapseWhenDone;
+
+        if (!collapseWhenDone)
+        {
+            // Bring the seam back before the pane grows into it; a collapse keeps its
+            // chrome until the very end so the pane shrinks with the splitter attached.
+            SetFolderPaneChrome(collapsed: false);
+        }
+
+        if (Math.Abs(_folderPaneAnimationFrom - target) < 1)
+        {
+            FinishFolderPaneAnimation();
+            return;
+        }
+
+        _folderPaneAnimationStartedAt = DateTimeOffset.UtcNow;
+        _folderPaneAnimationTimer = new DispatcherTimer { Interval = FolderPaneAnimationInterval };
+        _folderPaneAnimationTimer.Tick += OnFolderPaneAnimationTick;
+        _folderPaneAnimationTimer.Start();
     }
 
-    private void SetFolderPaneChrome(bool collapsed)
+    private void OnFolderPaneAnimationTick(object? sender, EventArgs e)
+    {
+        var elapsed = (DateTimeOffset.UtcNow - _folderPaneAnimationStartedAt).TotalMilliseconds;
+        var progress = Math.Clamp(elapsed / FolderPaneAnimationDuration.TotalMilliseconds, 0, 1);
+        /* Ease out cubic, so the pane decelerates into its resting width. */
+        var eased = 1 - Math.Pow(1 - progress, 3);
+        FolderPaneColumn.Width = new GridLength(
+            _folderPaneAnimationFrom + ((_folderPaneAnimationTo - _folderPaneAnimationFrom) * eased));
+
+        if (progress >= 1)
+        {
+            FinishFolderPaneAnimation();
+        }
+    }
+
+    private void FinishFolderPaneAnimation()
+    {
+        StopFolderPaneAnimation();
+        FolderPaneColumn.Width = new GridLength(_folderPaneAnimationTo);
+        if (_folderPaneAnimationCollapses)
+        {
+            SetFolderPaneChrome(collapsed: true);
+            FolderPaneCollapsedIndicator.Opacity = FolderPaneCollapsedIndicator.IsPointerOver ? 1 : 0;
+        }
+        else
+        {
+            _lastExpandedFolderPaneWidth = _folderPaneAnimationTo;
+            SetFolderPaneChrome(collapsed: false);
+        }
+    }
+
+    private void StopFolderPaneAnimation()
+    {
+        if (_folderPaneAnimationTimer is null)
+        {
+            return;
+        }
+
+        _folderPaneAnimationTimer.Stop();
+        _folderPaneAnimationTimer.Tick -= OnFolderPaneAnimationTick;
+        _folderPaneAnimationTimer = null;
+    }
+
+    private void CollapseFolderPane() => AnimateFolderPaneWidth(0, collapseWhenDone: true);
+
+    // A drag from the grip keeps the grip alive (hiding it would drop the pointer
+    // capture mid-drag), so it opts out of the indicator half of the chrome.
+    private void SetFolderPaneChrome(bool collapsed, bool updateIndicator = true)
     {
         FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
         FolderSplitter.IsVisible = !collapsed;
-        if (!collapsed)
+        if (updateIndicator)
         {
-            FolderPaneCollapsedIndicator.Opacity = 0;
+            if (!collapsed)
+            {
+                FolderPaneCollapsedIndicator.Opacity = 0;
+            }
+            FolderPaneCollapsedIndicator.IsVisible = collapsed;
         }
-        FolderPaneCollapsedIndicator.IsVisible = collapsed;
         ContentPaneBorder.CornerRadius = collapsed
             ? new CornerRadius(0)
             : new CornerRadius(12, 0, 0, 0);
@@ -683,8 +771,77 @@ public partial class MainWindow : Window
     private void OnFolderPaneIndicatorPointerEntered(object? sender, PointerEventArgs e) =>
         FolderPaneCollapsedIndicator.Opacity = 1;
 
-    private void OnFolderPaneIndicatorPointerExited(object? sender, PointerEventArgs e) =>
-        FolderPaneCollapsedIndicator.Opacity = 0;
+    private void OnFolderPaneIndicatorPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (!_isDraggingFolderPaneIndicator)
+        {
+            FolderPaneCollapsedIndicator.Opacity = 0;
+        }
+    }
+
+    private void OnFolderPaneIndicatorPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(FolderPaneCollapsedIndicator).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        StopFolderPaneAnimation();
+        _isFolderPaneIndicatorPressed = true;
+        _isDraggingFolderPaneIndicator = false;
+        _suppressFolderPaneIndicatorClick = false;
+        _folderPaneIndicatorPressX = e.GetPosition(ContentLayoutGrid).X;
+        e.Pointer.Capture(FolderPaneCollapsedIndicator);
+    }
+
+    private void OnFolderPaneIndicatorPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_isFolderPaneIndicatorPressed)
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(ContentLayoutGrid).X - _folderPaneIndicatorPressX;
+        if (!_isDraggingFolderPaneIndicator)
+        {
+            if (Math.Abs(delta) < FolderPaneIndicatorDragThreshold)
+            {
+                return;
+            }
+
+            _isDraggingFolderPaneIndicator = true;
+            _suppressFolderPaneIndicatorClick = true;
+            // Show the seam while dragging; the grip stays put until the drag settles.
+            SetFolderPaneChrome(collapsed: false, updateIndicator: false);
+        }
+
+        FolderPaneColumn.Width = new GridLength(ClampDraggedFolderPaneWidth(delta));
+    }
+
+    private void OnFolderPaneIndicatorPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_isFolderPaneIndicatorPressed)
+        {
+            return;
+        }
+
+        _isFolderPaneIndicatorPressed = false;
+        e.Pointer.Capture(null);
+
+        if (!_isDraggingFolderPaneIndicator)
+        {
+            return;
+        }
+
+        _isDraggingFolderPaneIndicator = false;
+        SettleFolderPaneWidth(FolderPaneColumn.ActualWidth);
+    }
+
+    private double ClampDraggedFolderPaneWidth(double width)
+    {
+        var available = Math.Max(0, ContentLayoutGrid.Bounds.Width - FolderPaneMinContentWidth);
+        return Math.Clamp(width, 0, available);
+    }
 
     private void OnRecentFilesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
