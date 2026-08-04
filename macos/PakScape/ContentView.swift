@@ -1,13 +1,6 @@
 import SwiftUI
 import AppKit
 
-fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
-    case list = "List"
-    case icons = "Icons"
-
-    var id: Self { self }
-}
-
 private let sidebarBackgroundColor = NSColor(
     name: NSColor.Name("PakScapeSidebarBackground")
 ) { appearance in
@@ -17,6 +10,13 @@ private let sidebarBackgroundColor = NSColor(
         return NSColor(srgbRed: 20 / 255, green: 20 / 255, blue: 20 / 255, alpha: 1)
     }
     return NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 246 / 255, alpha: 1)
+}
+
+fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
+    case list = "List"
+    case icons = "Icons"
+
+    var id: Self { self }
 }
 
 struct ContentView: View {
@@ -36,8 +36,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var isSearchFieldFocused = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var isCollapsedSidebarIndicatorHovered = false
+    @State private var split = SidebarSplitState()
 
     init(document: PakDocument, fileURL: URL?, isEditable: Bool) {
         self.document = document
@@ -49,16 +48,21 @@ struct ContentView: View {
     @State private var sortOrder = [KeyPathComparator(\PakNode.name)]
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
-        } detail: {
-            ZStack(alignment: .leading) {
-                detailView
-                if columnVisibility == .detailOnly {
-                    collapsedSidebarIndicator
-                }
-            }
+        splitLayout
+        // Both of these must sit outside the GeometryReader: a reader is laid out
+        // inside the safe area, and nothing within one can extend back out of it,
+        // so an ignoresSafeArea in there is silently a no-op.
+        .background {
+            SidebarSplitSurfaces(split: split, sidebarColor: sidebarBackgroundColor)
         }
+        .overlay(alignment: .leading) {
+            // Matches the surfaces layer: the seam is drawn for the full height of
+            // the window, so the grip and its grab area run that full height too.
+            SidebarSeamHandle(split: split)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        // Wraps the overlay, so the seam's drag resolves against this fixed space.
+        .coordinateSpace(name: SidebarSplitState.coordinateSpace)
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
             model.connectDocument(undoManager: undoManager) { pakFile in
@@ -69,6 +73,10 @@ struct ContentView: View {
         .onChange(of: isEditable) { _, newValue in
             model.updateEditableState(newValue)
         }
+        // Fires for the archive this window opens with, and again if it opens another.
+        .onChange(of: model.pakFile?.root.id, initial: true) { _, _ in
+            split.fitWidth(toRows: initialSidebarRows)
+        }
         .onChange(of: model.selectionResetVersion) { _, _ in
             selectedFileIDs.removeAll()
             cancelRenaming()
@@ -77,17 +85,34 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            // Left out until the sidebar is actually wide enough to need it: even at
+            // zero width the item keeps its own slot and spacing, which would shove
+            // the controls off the window buttons the instant a drag began.
+            if split.needsToolbarSpacer {
+                if #available(macOS 26.0, *) {
+                    // Contributes width but no glass. Without this the spacer joins the
+                    // controls' shared background, and the capsule starts back at the
+                    // navigation origin and bleeds across the seam into the sidebar.
+                    ToolbarItem(placement: .navigation) {
+                        SidebarToolbarSpacer(split: split)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigation) {
+                        SidebarToolbarSpacer(split: split)
+                    }
+                }
+            }
+
             ToolbarItem(placement: .navigation) {
                 HStack(spacing: 8) {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-                        }
+                        split.toggle()
                     } label: {
                         Image(systemName: "sidebar.left")
                             .font(.title3)
                     }
-                    .help(columnVisibility == .detailOnly ? "Show folders" : "Hide folders")
+                    .help(split.isCollapsed ? "Show folders" : "Hide folders")
 
                     Button {
                         model.navigateBack()
@@ -177,63 +202,55 @@ struct ContentView: View {
         }
     }
 
+    // A hand-rolled split instead of NavigationSplitView: the seam has to track the
+    // pointer live and snap either way on release, which AppKit's own divider owns
+    // and SwiftUI gives us no hook into. Nothing in this body reads `split.width`,
+    // so a drag never rebuilds the detail pane.
+    private var splitLayout: some View {
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                SidebarColumn(split: split) {
+                    sidebar
+                }
+                detailView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .onChange(of: proxy.size.width, initial: true) { _, width in
+                split.containerWidth = width
+            }
+        }
+    }
+
+    /// The rows the sidebar shows before anything is expanded: the root, then its
+    /// top-level folders one level in.
+    private var initialSidebarRows: [(name: String, depth: Int)] {
+        guard let root = model.pakFile?.root else { return [] }
+        return [(name: "/", depth: 0)]
+            + (root.folderChildren ?? []).map { (name: $0.name, depth: 1) }
+    }
+
     private var sidebar: some View {
         List(selection: $model.currentFolder) {
             if let root = model.pakFile?.root {
                 // Root node itself
-                NavigationLink(value: root) {
-                    Label("/", systemImage: "folder.fill")
-                }
-                
+                Label("/", systemImage: "folder.fill")
+                    .tag(root)
+
                 // Recursive children
                 OutlineGroup(root.folderChildren ?? [], children: \.folderChildren) { node in
-                    NavigationLink(value: node) {
-                        Label(node.name, systemImage: "folder.fill")
-                    }
+                    Label(node.name, systemImage: "folder.fill")
+                        .tag(node)
                 }
             } else {
                 Text("Open a Quake .pak file (File → Open PAK…)")
                     .foregroundStyle(.secondary)
             }
         }
+        .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background {
-            Color(nsColor: sidebarBackgroundColor)
-                .ignoresSafeArea(.container, edges: .top)
-        }
-        .frame(minWidth: 200)
-    }
-
-    private var collapsedSidebarIndicator: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                columnVisibility = .all
-            }
-        } label: {
-            ZStack {
-                Capsule()
-                    .fill(Color.secondary.opacity(isCollapsedSidebarIndicatorHovered ? 0.7 : 0.45))
-                    .frame(width: 8, height: 44)
-
-                HStack {
-                    Image(systemName: "chevron.left")
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                }
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 40)
-            }
-            .frame(width: 42, height: 76)
-            .opacity(isCollapsedSidebarIndicatorHovered ? 1 : 0)
-        }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .onHover { isHovered in
-            isCollapsedSidebarIndicatorHovered = isHovered
-        }
-        .help("Show folders")
-        .accessibilityLabel("Show folders")
+        // Held at its usable width and clipped, so a collapse slides the sidebar
+        // out of view instead of reflowing every label on the way down.
+        .frame(minWidth: SidebarSplitState.minWidth, alignment: .leading)
     }
 
     private var detailView: some View {
