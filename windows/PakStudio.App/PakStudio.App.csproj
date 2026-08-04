@@ -25,6 +25,9 @@
   <ItemGroup>
     <Resource Include="Assets\PakScape.ico" />
     <Resource Include="Assets\PakScape.png" />
+    <None Update="Assets\PakScape.File.ico"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(NativeAudioLibrary)"
           Link="pakscape_audio.dll"
           CopyToOutputDirectory="PreserveNewest"
