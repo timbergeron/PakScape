@@ -1,8 +1,37 @@
 import AppKit
+import CoreServices
 import Foundation
+import UniformTypeIdentifiers
 
 enum FinderPreferencesKey {
     static let actionsEnabled = "finderActionsEnabled"
+}
+
+@MainActor
+enum PakFileAssociationManager {
+    static var isAssociated: Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return false }
+        return supportedTypes.allSatisfy { type in
+            let handler = LSCopyDefaultRoleHandlerForContentType(type.identifier as CFString, .all)?.takeRetainedValue() as? String
+            return handler == bundleIdentifier
+        }
+    }
+
+    static func associate() {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return }
+        for type in supportedTypes {
+            LSSetDefaultRoleHandlerForContentType(
+                type.identifier as CFString,
+                .all,
+                bundleIdentifier as CFString
+            )
+        }
+    }
+
+    private static let supportedTypes: [UTType] = [
+        .pakArchive,
+        .pk3Archive
+    ]
 }
 
 @MainActor

@@ -596,6 +596,20 @@ final class PakViewModel: NSObject, ObservableObject {
     func playDemoInBrowser(_ node: PakNode) {
         guard canPlayDemoInBrowser(node) else { return }
 
+        if UserDefaults.standard.bool(forKey: PakScapePreferencesKey.useQuakeEngineForDemos),
+           let enginePath = UserDefaults.standard.string(forKey: PakScapePreferencesKey.quakeEnginePath),
+           !enginePath.isEmpty {
+            do {
+                try playDemoInEngine(node, enginePath: enginePath)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.alertStyle = .warning
+                alert.messageText = "Unable to Launch Quake Engine"
+                alert.runModal()
+            }
+            return
+        }
+
         do {
             let data = try PakNodeData.data(for: node, originalData: pakFile?.data)
             let summary = QuakeDemoInspector.inspect(data)
@@ -611,6 +625,44 @@ final class PakViewModel: NSObject, ObservableObject {
             alert.messageText = "Unable to Play \(node.name)"
             alert.informativeText = error.localizedDescription
             alert.runModal()
+        }
+    }
+
+    private func playDemoInEngine(_ node: PakNode, enginePath: String) throws {
+        guard FileManager.default.isExecutableFile(atPath: enginePath) else {
+            throw PakError.unknown("The selected Quake engine is not executable.")
+        }
+        guard let root = pakFile?.root else {
+            throw PakError.unknown("The archive is no longer available.")
+        }
+
+        let fileManager = FileManager.default
+        let temporaryRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("PakScape-EngineDemo-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: temporaryRoot, withIntermediateDirectories: false)
+        do {
+            try PakFilesystemExporter.export(
+                root: root,
+                originalData: pakFile?.data,
+                to: temporaryRoot
+            )
+            let relativeDemoPath = node.entry?.name ?? node.name
+            let demoURL = temporaryRoot.appendingPathComponent(relativeDemoPath)
+            guard fileManager.fileExists(atPath: demoURL.path) else {
+                throw PakError.unknown("The selected demo could not be staged for the engine.")
+            }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: enginePath)
+            process.currentDirectoryURL = temporaryRoot
+            process.arguments = ["+playdemo", demoURL.path]
+            process.terminationHandler = { _ in
+                try? fileManager.removeItem(at: temporaryRoot)
+            }
+            try process.run()
+        } catch {
+            try? fileManager.removeItem(at: temporaryRoot)
+            throw error
         }
     }
 
@@ -1127,6 +1179,7 @@ final class PakViewModel: NSObject, ObservableObject {
         
         save.begin { response in
             guard response == .OK, let outURL = save.url else { return }
+            guard pakScapeConfirmOverwriteIfNeeded(at: outURL) else { return }
             do {
                 try data.write(to: outURL, options: .atomic)
             } catch {
@@ -1174,6 +1227,7 @@ final class PakViewModel: NSObject, ObservableObject {
 
             save.begin { response in
                 guard response == .OK, let outputURL = save.url else { return }
+                guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                 do {
                     try convertedData.write(to: outputURL, options: .atomic)
                 } catch {
@@ -1221,6 +1275,7 @@ final class PakViewModel: NSObject, ObservableObject {
                 guard response == .OK, let outputURL = save.url else { return }
                 do {
                     if convertedSkins.count == 1 {
+                        guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                         try convertedSkins[0].write(to: outputURL, options: .atomic)
                     } else {
                         let folder = outputURL.deletingLastPathComponent()
@@ -1230,12 +1285,8 @@ final class PakViewModel: NSObject, ObservableObject {
                                 "\(baseName)_\(skinIndex + 1).\(format.pathExtension)"
                             )
                         }
-                        guard !outputURLs.contains(where: {
-                            FileManager.default.fileExists(atPath: $0.path)
-                        }) else {
-                            throw PakError.unknown(
-                                "One or more model skin files already exist in that folder."
-                            )
+                        for outputURL in outputURLs {
+                            guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                         }
                         for (skinIndex, data) in convertedSkins.enumerated() {
                             try data.write(to: outputURLs[skinIndex], options: .atomic)
@@ -1291,12 +1342,8 @@ final class PakViewModel: NSObject, ObservableObject {
                             "\(baseName).\(format.pathExtension)"
                         )
                     }
-                    guard !outputs.contains(where: {
-                        FileManager.default.fileExists(atPath: $0.path)
-                    }) else {
-                        throw PakError.unknown(
-                            "One or more BSP texture files already exist in that folder."
-                        )
+                    for outputURL in outputs {
+                        guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                     }
                     for (index, texture) in converted.enumerated() {
                         try texture.data.write(to: outputs[index], options: .atomic)
@@ -1346,12 +1393,8 @@ final class PakViewModel: NSObject, ObservableObject {
                             "\(candidate).\(format.pathExtension)"
                         )
                     }
-                    guard !outputs.contains(where: {
-                        FileManager.default.fileExists(atPath: $0.path)
-                    }) else {
-                        throw PakError.unknown(
-                            "One or more WAD texture files already exist in that folder."
-                        )
+                    for outputURL in outputs {
+                        guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                     }
                     for (index, texture) in converted.enumerated() {
                         try texture.data.write(to: outputs[index], options: .atomic)
@@ -1431,7 +1474,7 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     func previewImage(for node: PakNode) -> NSImage? {
-        let previewAppearance = NSApp.effectiveAppearance
+        let previewAppearance = pakScapePreviewAppearance()
         invalidatePreviewImageCacheIfNeeded(appearance: previewAppearance)
 
         if let cachedImage = previewImageCache[node.id] {
@@ -1652,11 +1695,12 @@ final class PakViewModel: NSObject, ObservableObject {
     private func renderPreviewImage(
         fileName: String,
         data: Data,
-        appearance: NSAppearance = NSApp.effectiveAppearance
+        appearance: NSAppearance? = nil
     ) -> NSImage? {
+        let drawingAppearance = appearance ?? pakScapePreviewAppearance()
         let ext = (fileName as NSString).pathExtension.lowercased()
         if Self.previewableAudioExtensions.contains(ext) {
-            return renderAudioThumbnail(data: data, appearance: appearance)
+            return renderAudioThumbnail(data: data, appearance: drawingAppearance)
         } else if ext == "lmp" {
             return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
         } else if ext == "pcx" {
@@ -1667,26 +1711,26 @@ final class PakViewModel: NSObject, ObservableObject {
             return renderModelThumbnail(
                 fileName: fileName,
                 data: data,
-                appearance: appearance
+                appearance: drawingAppearance
             )
                 ?? MdlPreviewRenderer.renderImage(data: data)
         } else if ext == "spr" || ext == "spr32" {
             return renderModelThumbnail(
                 fileName: fileName,
                 data: data,
-                appearance: appearance
+                appearance: drawingAppearance
             )
                 ?? SprPreviewRenderer.renderImage(data: data)
         } else if ext == "bsp" {
             return renderModelThumbnail(
                 fileName: fileName,
                 data: data,
-                appearance: appearance
+                appearance: drawingAppearance
             )
                 ?? BspPreviewRenderer.renderImage(fileName: fileName, data: data)
                 ?? BspLevelPreviewRenderer.renderImage(
                     data: data,
-                    appearance: appearance,
+                    appearance: drawingAppearance,
                     options: .geometryOnly
                 )
         } else if ext == "wad" {
@@ -1843,13 +1887,18 @@ final class PakViewModel: NSObject, ObservableObject {
         }
 
         let selectedCount = idsToDelete.count
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = selectedCount == 1 ? "Delete This Item?" : "Delete \(selectedCount) Items?"
-        alert.informativeText = "This removes the selection from the archive. You can undo this operation."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let shouldConfirm = UserDefaults.standard.object(
+            forKey: PakScapePreferencesKey.confirmDeletion
+        ) as? Bool ?? true
+        if shouldConfirm {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = selectedCount == 1 ? "Delete This Item?" : "Delete \(selectedCount) Items?"
+            alert.informativeText = "This removes the selection from the archive. You can undo this operation."
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
 
         let removedPlacements = PakTreeMutation.placements(for: idsToDelete, in: root)
         guard !removedPlacements.isEmpty else { return }

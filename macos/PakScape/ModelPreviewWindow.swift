@@ -335,9 +335,12 @@ final class ModelPreviewController: NSViewController {
             let hidesAnimation = viewer.frameCount <= 1
             animateButton.isHidden = hidesAnimation
             speedPicker.isHidden = hidesAnimation
-            animateButton.state = .on
+            let animationsEnabled = UserDefaults.standard.object(
+                forKey: PakScapePreferencesKey.animateModels
+            ) as? Bool ?? true
+            animateButton.state = animationsEnabled ? .on : .off
             speedPicker.selectItem(at: 2)
-            viewer.setAnimationEnabled(true)
+            viewer.setAnimationEnabled(animationsEnabled)
             viewer.setAnimationSpeed(1)
         } catch {
             /* Truncated models still have a skin worth showing, as on the other editions. */
@@ -451,6 +454,7 @@ final class ModelPreviewController: NSViewController {
             save.canCreateDirectories = true
             save.begin { response in
                 guard response == .OK, let outputURL = save.url else { return }
+                guard pakScapeConfirmOverwriteIfNeeded(at: outputURL) else { return }
                 do {
                     try data.write(to: outputURL, options: Data.WritingOptions.atomic)
                 } catch {
@@ -587,7 +591,8 @@ final class ModelRenderView: NSOpenGLView {
             previousViewer.deinitializeOpenGL()
         }
         self.viewer = viewer
-        viewer?.setDarkBackground(effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+        let previewAppearance = pakScapePreviewAppearance()
+        viewer?.setDarkBackground(previewAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
         hintBackground.isHidden = viewer == nil
         fallbackImageView.image = fallbackImage
         fallbackImageView.isHidden = viewer != nil || fallbackImage == nil
@@ -648,8 +653,9 @@ final class ModelRenderView: NSOpenGLView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        let previewAppearance = pakScapePreviewAppearance()
         viewer?.setDarkBackground(
-            effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            previewAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         )
         renderFrame()
     }

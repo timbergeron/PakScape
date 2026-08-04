@@ -84,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct PakScapeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @AppStorage(PakScapePreferencesKey.appearance) private var appearance = "automatic"
 
     init() {
         if #available(macOS 10.12, *) {
@@ -99,6 +100,7 @@ struct PakScapeApp: App {
                 isEditable: file.isEditable
             )
                 .id(ObjectIdentifier(file.document))
+                .preferredColorScheme(preferredColorScheme)
         }
         .commands {
             PakAboutCommands()
@@ -111,6 +113,15 @@ struct PakScapeApp: App {
 
         Settings {
             PreferencesView()
+        }
+        .windowResizability(.contentSize)
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
         }
     }
 }

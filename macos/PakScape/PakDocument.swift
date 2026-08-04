@@ -13,6 +13,7 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
     }
 
     @Published var pakFile: PakFile
+    var fileURL: URL?
 
     static var readableContentTypes: [UTType] {
         [UTType.pakArchive, UTType.pk3Archive]
@@ -50,6 +51,7 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
     func fileWrapper(snapshot: Snapshot, configuration: WriteConfiguration) throws -> FileWrapper {
         let pakFile = snapshot.pakFile
         let root = pakFile.root
+        createBackupIfNeeded()
         let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
         let ext = preferredExt ?? "pak"
         if ext == "pk3" {
@@ -59,6 +61,30 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
 
         let packResult = try PakWriter.write(root: root, originalData: pakFile.data)
         return FileWrapper(regularFileWithContents: packResult.data)
+    }
+
+    private func createBackupIfNeeded() {
+        let shouldBackUp = UserDefaults.standard.object(
+            forKey: PakScapePreferencesKey.backupBeforeSave
+        ) as? Bool ?? false
+        guard shouldBackUp,
+              let fileURL,
+              FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        let fileManager = FileManager.default
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let temporaryURL = backupURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(backupURL.lastPathComponent).\(UUID().uuidString)")
+
+        do {
+            try fileManager.copyItem(at: fileURL, to: temporaryURL)
+            if fileManager.fileExists(atPath: backupURL.path) {
+                try fileManager.removeItem(at: backupURL)
+            }
+            try fileManager.moveItem(at: temporaryURL, to: backupURL)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+        }
     }
 }
 

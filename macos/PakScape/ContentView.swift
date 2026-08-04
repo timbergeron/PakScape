@@ -24,6 +24,11 @@ struct ContentView: View {
     let fileURL: URL?
     let isEditable: Bool
     @Environment(\.undoManager) private var undoManager
+    @AppStorage(PakScapePreferencesKey.defaultView) private var preferredView = "list"
+    @AppStorage(PakScapePreferencesKey.defaultSort) private var preferredSort = "name"
+    @AppStorage(PakScapePreferencesKey.defaultSortAscending) private var preferredSortAscending = true
+    @AppStorage(PakScapePreferencesKey.textSize) private var textSize = 13.0
+    @AppStorage(PakScapePreferencesKey.quickLookOnSelection) private var quickLookOnSelection = false
     @StateObject private var model: PakViewModel
     @State private var selectedFileIDs: Set<PakNode.ID> = [] // Selection in the detail table (supports multi-select)
     @State private var detailViewStyle: DetailViewStyle = .list
@@ -43,6 +48,7 @@ struct ContentView: View {
         self.fileURL = fileURL
         self.isEditable = isEditable
         self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.pakFile, isEditable: isEditable))
+        document.fileURL = fileURL
     }
 
     @State private var sortOrder = [KeyPathComparator(\PakNode.name)]
@@ -63,8 +69,11 @@ struct ContentView: View {
         }
         // Wraps the overlay, so the seam's drag resolves against this fixed space.
         .coordinateSpace(name: SidebarSplitState.coordinateSpace)
+        .font(.system(size: textSize))
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
+            detailViewStyle = preferredView == "icons" ? .icons : .list
+            sortOrder = configuredSortOrder
             model.connectDocument(undoManager: undoManager) { pakFile in
                 document.pakFile = pakFile
             }
@@ -72,6 +81,9 @@ struct ContentView: View {
         }
         .onChange(of: isEditable) { _, newValue in
             model.updateEditableState(newValue)
+        }
+        .onChange(of: fileURL) { _, newValue in
+            document.fileURL = newValue
         }
         // Fires for the archive this window opens with, and again if it opens another.
         .onChange(of: model.pakFile?.root.id, initial: true) { _, _ in
@@ -336,6 +348,13 @@ struct ContentView: View {
                     updateSelection(ids: newValue, in: folder)
                     if let renamingID = renamingNodeID, !newValue.contains(renamingID) {
                         cancelRenaming()
+                    }
+                    if quickLookOnSelection,
+                       !model.selectedNodes.isEmpty,
+                       !PakQuickLook.shared.isVisible,
+                       !ModelPreviewPresenter.shared.isVisible,
+                       !SkyboxPreviewPresenter.shared.isVisible {
+                        model.toggleQuickLook(for: model.selectedNodes)
                     }
                 }
             } else {
@@ -809,6 +828,18 @@ private struct ToolbarSearchField: NSViewRepresentable {
 }
 
 private extension ContentView {
+    var configuredSortOrder: [KeyPathComparator<PakNode>] {
+        let order: SortOrder = preferredSortAscending ? .forward : .reverse
+        switch preferredSort {
+        case "type":
+            return [KeyPathComparator(\.fileType, order: order)]
+        case "size":
+            return [KeyPathComparator(\.fileSize, order: order)]
+        default:
+            return [KeyPathComparator(\.name, order: order)]
+        }
+    }
+
     var currentPakCommands: PakCommands {
         PakCommands(
             deleteFile: {

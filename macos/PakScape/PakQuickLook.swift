@@ -364,7 +364,10 @@ final class PakQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
 
     private func markerButton(_ title: String) -> NSButton {
         let button = NSButton(checkboxWithTitle: title, target: self, action: #selector(markerOptionChanged(_:)))
-        button.state = .off
+        let showMarkers = UserDefaults.standard.object(
+            forKey: PakScapePreferencesKey.showBspMarkers
+        ) as? Bool ?? false
+        button.state = showMarkers ? .on : .off
         return button
     }
 
