@@ -1789,14 +1789,24 @@ final class PakViewModel: NSObject, ObservableObject {
         return image
     }
 
+    private static let audioThumbnailGradientStops: [(red: CGFloat, green: CGFloat, blue: CGFloat)] = [
+        (red: 140.0 / 255, green: 80.0 / 255, blue: 60.0 / 255),
+        (red: 124.0 / 255, green: 100.0 / 255, blue: 56.0 / 255),
+        (red: 145.0 / 255, green: 145.0 / 255, blue: 145.0 / 255),
+    ]
+
     private func audioThumbnailColor(position: CGFloat) -> NSColor {
+        let stops = Self.audioThumbnailGradientStops
         let clamped = min(max(position, 0), 1)
-        let first = (red: 0.608, green: 0.239, blue: 1.0)
-        let second = (red: 0.220, green: 0.722, blue: 0.957)
+        let scaled = clamped * CGFloat(stops.count - 1)
+        let index = min(Int(scaled), stops.count - 2)
+        let amount = scaled - CGFloat(index)
+        let first = stops[index]
+        let second = stops[index + 1]
         return NSColor(
-            calibratedRed: first.red + (second.red - first.red) * clamped,
-            green: first.green + (second.green - first.green) * clamped,
-            blue: first.blue + (second.blue - first.blue) * clamped,
+            calibratedRed: first.red + (second.red - first.red) * amount,
+            green: first.green + (second.green - first.green) * amount,
+            blue: first.blue + (second.blue - first.blue) * amount,
             alpha: 1
         )
     }

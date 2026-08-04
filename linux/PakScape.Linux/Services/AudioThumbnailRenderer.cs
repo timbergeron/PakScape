@@ -26,10 +26,7 @@ internal static class AudioThumbnailRenderer
             var angle = -Math.PI / 2 + index * (Math.PI * 2 / waveform.Count);
             var outerRadius = innerRadius + minimumBarLength + waveform[index] * maximumBarLength;
             var gradientPosition = (Math.Cos(angle) + 1) / 2;
-            var (red, green, blue) = InterpolateColor(
-                0x9B, 0x3D, 0xFF,
-                0x38, 0xB8, 0xF4,
-                gradientPosition);
+            var (red, green, blue) = SampleWaveformGradient(gradientPosition);
             DrawRadialBar(
                 pixels,
                 stride,
@@ -116,6 +113,30 @@ internal static class AudioThumbnailRenderer
             var y = centerY + (int)Math.Round(Math.Sin(angle) * radius);
             FillCircle(pixels, stride, x, y, Math.Max(1, width / 2), r, g, b, a);
         }
+    }
+
+    private static readonly (byte Red, byte Green, byte Blue)[] WaveformGradientStops =
+    {
+        (0x8C, 0x50, 0x3C),
+        (0x7C, 0x64, 0x38),
+        (0x91, 0x91, 0x91),
+    };
+
+    private static (byte Red, byte Green, byte Blue) SampleWaveformGradient(double position)
+    {
+        position = Math.Clamp(position, 0, 1);
+        var scaled = position * (WaveformGradientStops.Length - 1);
+        var index = Math.Min((int)scaled, WaveformGradientStops.Length - 2);
+        var first = WaveformGradientStops[index];
+        var second = WaveformGradientStops[index + 1];
+        return InterpolateColor(
+            first.Red,
+            first.Green,
+            first.Blue,
+            second.Red,
+            second.Green,
+            second.Blue,
+            scaled - index);
     }
 
     private static (byte Red, byte Green, byte Blue) InterpolateColor(

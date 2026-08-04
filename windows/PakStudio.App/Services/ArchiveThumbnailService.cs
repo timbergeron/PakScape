@@ -314,10 +314,7 @@ public sealed class ArchiveThumbnailService
                     center.X + Math.Cos(angle) * outerRadius,
                     center.Y + Math.Sin(angle) * outerRadius);
                 var gradientPosition = (Math.Cos(angle) + 1) / 2;
-                var accent = new SolidColorBrush(InterpolateColor(
-                    Color.FromRgb(0x9B, 0x3D, 0xFF),
-                    Color.FromRgb(0x38, 0xB8, 0xF4),
-                    gradientPosition));
+                var accent = new SolidColorBrush(SampleWaveformGradient(gradientPosition));
                 var bar = new Pen(accent, barWidth)
                 {
                     StartLineCap = PenLineCap.Round,
@@ -357,6 +354,24 @@ public sealed class ArchiveThumbnailService
         bitmap.Render(visual);
         bitmap.Freeze();
         return bitmap;
+    }
+
+    private static readonly Color[] WaveformGradientStops =
+    [
+        Color.FromRgb(0x8C, 0x50, 0x3C),
+        Color.FromRgb(0x7C, 0x64, 0x38),
+        Color.FromRgb(0x91, 0x91, 0x91),
+    ];
+
+    private static Color SampleWaveformGradient(double position)
+    {
+        position = Math.Clamp(position, 0, 1);
+        var scaled = position * (WaveformGradientStops.Length - 1);
+        var index = Math.Min((int)scaled, WaveformGradientStops.Length - 2);
+        return InterpolateColor(
+            WaveformGradientStops[index],
+            WaveformGradientStops[index + 1],
+            scaled - index);
     }
 
     private static Color InterpolateColor(Color first, Color second, double amount)
