@@ -21,6 +21,9 @@ public partial class MainWindow : Window
     private const double FolderPaneReopenWidth = 220;
     private static readonly TimeSpan TypeSelectionResetInterval = TimeSpan.FromSeconds(1);
 
+    /* No portable way to read the desktop double-click time; this matches the GTK default. */
+    private static readonly TimeSpan RenameClickDelay = TimeSpan.FromMilliseconds(500);
+
     private static readonly DataFormat<byte[]> ArchiveClipboardFormat =
         DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-clipboard-id");
     private MainWindowViewModel? _viewModel;
@@ -41,6 +44,11 @@ public partial class MainWindow : Window
     private double _lastExpandedFolderPaneWidth = 280;
     private string _typeSelectionBuffer = string.Empty;
     private DateTimeOffset _lastTypeSelectionInput;
+    private readonly DispatcherTimer _renameClickTimer = new() { Interval = RenameClickDelay };
+    private ArchiveItemViewModel? _renameClickCandidate;
+    private ArchiveItemViewModel? _pendingRenameItem;
+    private Control? _renameClickSource;
+    private Point? _renameClickOrigin;
     private readonly Dictionary<ArchiveNode, ItemInfoWindow> _itemInfoWindows =
         new(ReferenceEqualityComparer.Instance);
 
@@ -65,6 +73,25 @@ public partial class MainWindow : Window
             RoutingStrategies.Tunnel);
         FolderSplitter.DragStarted += OnFolderSplitterDragStarted;
         FolderSplitter.DragCompleted += OnFolderSplitterDragCompleted;
+
+        AddHandler(
+            InputElement.PointerPressedEvent,
+            OnWindowPointerPressed,
+            RoutingStrategies.Tunnel);
+
+        /* Tunnel so the pressed handler sees the selection as it was before the click. */
+        foreach (var itemsView in new Control[] { LargeIconsList, SmallIconsList, ArchiveList, ArchiveGrid })
+        {
+            itemsView.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnArchiveItemRenameClickPressed,
+                RoutingStrategies.Tunnel);
+            itemsView.AddHandler(
+                InputElement.PointerReleasedEvent,
+                OnArchiveItemRenameClickReleased,
+                RoutingStrategies.Tunnel);
+        }
+        _renameClickTimer.Tick += OnRenameClickTimerTick;
     }
 
     public void Configure(
@@ -305,18 +332,143 @@ public partial class MainWindow : Window
     {
         Dispatcher.UIThread.Post(() =>
         {
-            var editor = this.GetVisualDescendants()
-                .OfType<TextBox>()
-                .FirstOrDefault(textBox =>
-                    textBox.Classes.Contains("inline-rename") &&
-                    textBox.IsVisible &&
-                    textBox.DataContext is ArchiveItemViewModel { IsRenaming: true });
+            var editor = FindActiveInlineRenameEditor();
             if (editor is not null)
             {
                 editor.Focus();
                 editor.SelectAll();
             }
         });
+    }
+
+    private TextBox? FindActiveInlineRenameEditor() =>
+        this.GetVisualDescendants()
+            .OfType<TextBox>()
+            .FirstOrDefault(textBox =>
+                textBox.Classes.Contains("inline-rename") &&
+                textBox.IsVisible &&
+                textBox.DataContext is ArchiveItemViewModel { IsRenaming: true });
+
+    /// <summary>Commits an open inline rename when the click lands anywhere else. Clicking
+    /// another item already commits by moving focus, but empty list space and other chrome
+    /// never take focus, which would otherwise leave the editor open.</summary>
+    private async void OnWindowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Visual visual &&
+            (visual as TextBox ?? visual.FindAncestorOfType<TextBox>()) is { } clicked &&
+            clicked.Classes.Contains("inline-rename"))
+        {
+            return;
+        }
+
+        if (FindActiveInlineRenameEditor() is { DataContext: ArchiveItemViewModel item } editor)
+        {
+            await CommitInlineRenameAsync(item, editor.Text ?? string.Empty);
+        }
+    }
+
+    /* Finder/Explorer-style slow double click: clicking the name of an item that is
+       already the lone selection starts an inline rename once the double-click
+       window has passed without a second click. */
+    private void OnArchiveItemRenameClickPressed(object? sender, PointerPressedEventArgs e)
+    {
+        CancelPendingRenameClick();
+        _renameClickCandidate = null;
+        if (sender is not Control source ||
+            e.ClickCount != 1 ||
+            e.KeyModifiers != KeyModifiers.None ||
+            !e.GetCurrentPoint(source).Properties.IsLeftButtonPressed ||
+            e.Source is not TextBlock { Tag: "NameText", DataContext: ArchiveItemViewModel item } nameText ||
+            !IsPointOverRenderedText(nameText, e.GetPosition(nameText)) ||
+            !IsSoleSelectedItem(source, item))
+        {
+            return;
+        }
+
+        _renameClickCandidate = item;
+        _renameClickSource = source;
+        _renameClickOrigin = e.GetPosition(source);
+    }
+
+    private void OnArchiveItemRenameClickReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        var candidate = _renameClickCandidate;
+        _renameClickCandidate = null;
+        if (candidate is null ||
+            sender is not Control source ||
+            !ReferenceEquals(source, _renameClickSource) ||
+            e.InitialPressMouseButton != MouseButton.Left ||
+            e.KeyModifiers != KeyModifiers.None ||
+            !IsSoleSelectedItem(source, candidate))
+        {
+            return;
+        }
+
+        /* A click that turned into a drag is not a rename request. */
+        if (_renameClickOrigin is { } origin)
+        {
+            var current = e.GetPosition(source);
+            if (Math.Abs(current.X - origin.X) >= 4 || Math.Abs(current.Y - origin.Y) >= 4)
+            {
+                return;
+            }
+        }
+
+        _pendingRenameItem = candidate;
+        _renameClickTimer.Start();
+    }
+
+    private void OnRenameClickTimerTick(object? sender, EventArgs e)
+    {
+        var item = _pendingRenameItem;
+        var source = _renameClickSource;
+        CancelPendingRenameClick();
+        if (item is null || source is null || !IsSoleSelectedItem(source, item))
+        {
+            return;
+        }
+
+        ViewModel.RenameCommand.Execute(null);
+    }
+
+    /// <summary>Drops an armed rename. The candidate from the current press is left alone;
+    /// it is re-validated against the selection when the button is released.</summary>
+    private void CancelPendingRenameClick()
+    {
+        _renameClickTimer.Stop();
+        _pendingRenameItem = null;
+    }
+
+    private static bool IsSoleSelectedItem(Control itemsView, ArchiveItemViewModel item)
+    {
+        var selection = itemsView switch
+        {
+            ListBox listBox => listBox.SelectedItems,
+            DataGrid dataGrid => dataGrid.SelectedItems,
+            _ => null,
+        };
+        return selection is { Count: 1 } && ReferenceEquals(selection[0], item);
+    }
+
+    /// <summary>Reports whether <paramref name="point"/> lands on drawn glyphs rather than
+    /// the padding the label stretches over.</summary>
+    private static bool IsPointOverRenderedText(TextBlock label, Point point)
+    {
+        var x = point.X - label.Padding.Left;
+        var y = point.Y - label.Padding.Top;
+        var lineTop = 0.0;
+        foreach (var line in label.TextLayout.TextLines)
+        {
+            if (y >= lineTop &&
+                y <= lineTop + line.Height &&
+                x >= line.Start &&
+                x <= line.Start + line.Width)
+            {
+                return true;
+            }
+            lineTop += line.Height;
+        }
+        return false;
     }
 
     private async void OnInlineRenameKeyDown(object? sender, KeyEventArgs e)
@@ -515,6 +667,11 @@ public partial class MainWindow : Window
     {
         FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
         FolderSplitter.IsVisible = !collapsed;
+        if (!collapsed)
+        {
+            FolderPaneCollapsedIndicator.Opacity = 0;
+        }
+        FolderPaneCollapsedIndicator.IsVisible = collapsed;
         ContentPaneBorder.CornerRadius = collapsed
             ? new CornerRadius(0)
             : new CornerRadius(12, 0, 0, 0);
@@ -522,6 +679,12 @@ public partial class MainWindow : Window
             ? new Thickness(0, 1, 0, 0)
             : new Thickness(1, 1, 0, 0);
     }
+
+    private void OnFolderPaneIndicatorPointerEntered(object? sender, PointerEventArgs e) =>
+        FolderPaneCollapsedIndicator.Opacity = 1;
+
+    private void OnFolderPaneIndicatorPointerExited(object? sender, PointerEventArgs e) =>
+        FolderPaneCollapsedIndicator.Opacity = 0;
 
     private void OnRecentFilesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -641,6 +804,7 @@ public partial class MainWindow : Window
 
     private async void OnArchiveGridKeyDown(object? sender, KeyEventArgs e)
     {
+        CancelPendingRenameClick();
         if (e.Source is TextBox)
         {
             return;
@@ -923,6 +1087,7 @@ public partial class MainWindow : Window
 
         var triggerEvent = _dragTriggerEvent;
         ClearDragStart();
+        CancelPendingRenameClick();
         _isStartingDrag = true;
         IReadOnlyList<string> paths = [];
         try

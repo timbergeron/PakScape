@@ -331,7 +331,7 @@
                                MaxHeight="{Binding $parent[Window].DataContext.LargeIconPreviewHeight}"
                                Stretch="Uniform" />
                       </Grid>
-                      <TextBlock IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextAlignment="Center" TextWrapping="Wrap" />
+                      <TextBlock Tag="NameText" IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextAlignment="Center" TextWrapping="Wrap" />
                       <TextBox Classes="inline-rename"
                                IsVisible="{Binding IsRenaming}"
                                Text="{Binding EditName, Mode=TwoWay}"
@@ -392,7 +392,7 @@
                         <Image Source="{Binding Thumbnail}" MaxWidth="30" MaxHeight="30" Stretch="Uniform" />
                       </Grid>
                       <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                        <TextBlock IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Tag="NameText" IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                         <TextBox Classes="inline-rename"
                                  IsVisible="{Binding IsRenaming}"
                                  Text="{Binding EditName, Mode=TwoWay}"
@@ -441,7 +441,7 @@
                             Stretch="Uniform" />
                       <Image Source="{Binding Thumbnail}" Width="20" Height="20" Stretch="Uniform" />
                     </Grid>
-                    <TextBlock Grid.Column="1" IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Tag="NameText" IsVisible="{Binding !IsRenaming}" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <TextBox Grid.Column="1"
                              Classes="inline-rename"
                              IsVisible="{Binding IsRenaming}"
@@ -498,7 +498,8 @@
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate x:DataType="models:ArchiveItemViewModel">
                       <Grid>
-                        <TextBlock IsVisible="{Binding !IsRenaming}"
+                        <TextBlock Tag="NameText"
+                                 IsVisible="{Binding !IsRenaming}"
                                  Text="{Binding Name}"
                                  VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis"
@@ -522,6 +523,63 @@
         </DockPanel>
       </Border>
     </Grid>
+
+    <Button x:Name="FolderPaneCollapsedIndicator"
+            Grid.Row="1"
+            Grid.Column="2"
+            Width="42"
+            Height="76"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Center"
+            ZIndex="10"
+            IsVisible="False"
+            Opacity="0"
+            Background="Transparent"
+            BorderThickness="0"
+            Padding="0"
+            Focusable="False"
+            Click="OnFolderPaneToggleClick"
+            PointerEntered="OnFolderPaneIndicatorPointerEntered"
+            PointerExited="OnFolderPaneIndicatorPointerExited"
+            ToolTip.Tip="Show folders"
+            AutomationProperties.Name="Show folders">
+      <Grid Width="42" Height="76">
+        <Border Width="8"
+                Height="44"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                CornerRadius="4">
+          <Border.Styles>
+            <Style Selector="Border">
+              <Setter Property="Background" Value="{DynamicResource ScrollBarThumbBrush}" />
+            </Style>
+            <Style Selector="Border:pointerover">
+              <Setter Property="Background" Value="{DynamicResource ScrollBarThumbHoverBrush}" />
+            </Style>
+          </Border.Styles>
+        </Border>
+        <Path Width="8"
+              Height="12"
+              Margin="1,0,0,0"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Center"
+              Data="M 7,0 L 1,6 L 7,12"
+              Fill="Transparent"
+              Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
+              StrokeThickness="1.8"
+              Stretch="Fill" />
+        <Path Width="8"
+              Height="12"
+              Margin="0,0,1,0"
+              HorizontalAlignment="Right"
+              VerticalAlignment="Center"
+              Data="M 1,0 L 7,6 L 1,12"
+              Fill="Transparent"
+              Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
+              StrokeThickness="1.8"
+              Stretch="Fill" />
+      </Grid>
+    </Button>
 
     <Border Grid.RowSpan="2"
             IsVisible="{Binding IsBusy}"

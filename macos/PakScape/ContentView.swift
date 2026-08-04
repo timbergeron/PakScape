@@ -36,6 +36,8 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var isSearchFieldFocused = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isCollapsedSidebarIndicatorHovered = false
 
     init(document: PakDocument, fileURL: URL?, isEditable: Bool) {
         self.document = document
@@ -47,10 +49,15 @@ struct ContentView: View {
     @State private var sortOrder = [KeyPathComparator(\PakNode.name)]
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
         } detail: {
-            detailView
+            ZStack(alignment: .leading) {
+                detailView
+                if columnVisibility == .detailOnly {
+                    collapsedSidebarIndicator
+                }
+            }
         }
         .focusedSceneValue(\.pakCommands, currentPakCommands)
         .onAppear {
@@ -72,6 +79,16 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                            .font(.title3)
+                    }
+                    .help(columnVisibility == .detailOnly ? "Show folders" : "Hide folders")
+
                     Button {
                         model.navigateBack()
                     } label: {
@@ -185,6 +202,38 @@ struct ContentView: View {
                 .ignoresSafeArea(.container, edges: .top)
         }
         .frame(minWidth: 200)
+    }
+
+    private var collapsedSidebarIndicator: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                columnVisibility = .all
+            }
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(Color.secondary.opacity(isCollapsedSidebarIndicatorHovered ? 0.7 : 0.45))
+                    .frame(width: 8, height: 44)
+
+                HStack {
+                    Image(systemName: "chevron.left")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                }
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 40)
+            }
+            .frame(width: 42, height: 76)
+            .opacity(isCollapsedSidebarIndicatorHovered ? 1 : 0)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered in
+            isCollapsedSidebarIndicatorHovered = isHovered
+        }
+        .help("Show folders")
+        .accessibilityLabel("Show folders")
     }
 
     private var detailView: some View {

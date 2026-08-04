@@ -59,6 +59,7 @@ public partial class App : Application
         services.AddSingleton<IMessageBoxService, MessageBoxService>();
         services.AddSingleton<ITextInputService, TextInputService>();
         services.AddSingleton<IRecentFilesService, JsonRecentFilesService>();
+        services.AddSingleton<IDetailsColumnLayoutService, JsonDetailsColumnLayoutService>();
         services.AddSingleton<IIconService, GlyphIconService>();
         services.AddScoped<IArchiveFileTransferService, ArchiveFileTransferService>();
         services.AddScoped<ArchiveThumbnailService>();

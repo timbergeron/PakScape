@@ -1,10 +1,13 @@
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
@@ -17,9 +20,15 @@ public partial class MainWindow : Window
 {
     private const double FolderPaneCollapseThreshold = 120;
     private const double FolderPaneReopenWidth = 220;
+    private const string DetailsColumnDragFormat = "PakScape.DetailsColumnKey";
+
+    private static readonly Duration ColumnDragFadeInDuration = new(TimeSpan.FromMilliseconds(90));
+    private static readonly Duration ColumnDragFadeOutDuration = new(TimeSpan.FromMilliseconds(140));
+    private static readonly Duration ColumnDropIndicatorSlideDuration = new(TimeSpan.FromMilliseconds(140));
 
     private readonly MainWindowViewModel _viewModel;
     private readonly IArchiveFileTransferService _fileTransferService;
+    private readonly DispatcherTimer _renameClickTimer;
     private PreviewWindow? _previewWindow;
     private bool _allowClose;
     private bool _isCloseConfirmationPending;
@@ -31,17 +40,30 @@ public partial class MainWindow : Window
     private bool _folderPaneWasCollapsedAtDragStart;
     private bool _contextMenuTargetPrepared;
     private double _lastExpandedFolderPaneWidth = 280;
+    private Point? _columnHeaderDragStart;
+    private string? _columnHeaderDragKey;
+    private double _columnHeaderGrabOffset;
+    private bool _columnDropIndicatorShown;
+    private ArchiveItemViewModel? _renameClickCandidate;
+    private ArchiveItemViewModel? _pendingRenameItem;
+    private Point? _renameClickOrigin;
 
     public MainWindow(
         MainWindowViewModel viewModel,
         IArchiveFileTransferService fileTransferService)
     {
         InitializeComponent();
+        _renameClickTimer = new DispatcherTimer(DispatcherPriority.Input, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime()),
+        };
+        _renameClickTimer.Tick += RenameClickTimer_OnTick;
         _viewModel = viewModel;
         _fileTransferService = fileTransferService;
         DataContext = _viewModel;
         _viewModel.RenameRequested += ViewModel_OnRenameRequested;
         _viewModel.CloseRequested += ViewModel_OnCloseRequested;
+        PreviewMouseDown += MainWindow_OnPreviewMouseDown;
         Loaded += OnLoaded;
     }
 
@@ -175,6 +197,7 @@ public partial class MainWindow : Window
     {
         FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
         FolderSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        FolderPaneCollapsedIndicator.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
         ContentPaneBorder.CornerRadius = collapsed
             ? new CornerRadius(0)
             : new CornerRadius(12, 0, 0, 0);
@@ -206,11 +229,13 @@ public partial class MainWindow : Window
 
     private void ItemList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        CancelPendingRenameClick();
         _viewModel.SetSelectedItems(ItemList.SelectedItems.Cast<ArchiveItemViewModel>());
     }
 
     private void ItemList_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        CancelPendingRenameClick();
         if (FindVisualAncestor<TextBox>(e.OriginalSource as DependencyObject) is not null)
         {
             return;
@@ -260,6 +285,91 @@ public partial class MainWindow : Window
             ? Path.GetExtension(item.EditName).Length
             : 0;
         editor.Select(0, Math.Max(0, item.EditName.Length - extensionLength));
+    }
+
+    private void ArchiveName_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_viewModel.CanRenameArchive)
+        {
+            return;
+        }
+
+        _viewModel.BeginArchiveRename();
+        e.Handled = true;
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(FocusArchiveNameEditor));
+    }
+
+    private void FocusArchiveNameEditor()
+    {
+        if (!_viewModel.IsRenamingArchive)
+        {
+            return;
+        }
+
+        ArchiveNameEditor.Focus();
+        var name = ArchiveNameEditor.Text;
+        var extensionLength = Path.GetExtension(name).Length;
+        ArchiveNameEditor.Select(0, Math.Max(0, name.Length - extensionLength));
+    }
+
+    private void ArchiveNameEditor_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Enter:
+                CommitArchiveRename();
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                _viewModel.CancelArchiveRename();
+                ItemList.Focus();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void ArchiveNameEditor_OnLostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        CommitArchiveRename();
+    }
+
+    private void CommitArchiveRename()
+    {
+        if (!_viewModel.IsRenamingArchive)
+        {
+            return;
+        }
+
+        _viewModel.CommitArchiveRename(ArchiveNameEditor.Text);
+        if (ArchiveNameEditor.IsKeyboardFocusWithin)
+        {
+            ItemList.Focus();
+        }
+    }
+
+    /// <summary>Commits an open inline rename when the click lands anywhere else. Clicking
+    /// another item already commits by moving keyboard focus, but empty list space and
+    /// other chrome never take focus, which would otherwise leave the editor open.</summary>
+    private void MainWindow_OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (FindVisualAncestor<TextBox>(e.OriginalSource as DependencyObject) is { Tag: "InlineRename" })
+        {
+            return;
+        }
+
+        if (_viewModel.CurrentItems.FirstOrDefault(item => item.IsRenaming) is not { } renaming)
+        {
+            return;
+        }
+
+        renaming.EndRenaming();
+        CommandManager.InvalidateRequerySuggested();
+        _viewModel.CommitItemRename(renaming, renaming.EditName);
     }
 
     private void InlineRenameTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -335,7 +445,16 @@ public partial class MainWindow : Window
             {
                 return match;
             }
-            element = VisualTreeHelper.GetParent(element);
+
+            // Text input can originate from a Run/other ContentElement rather
+            // than a Visual. VisualTreeHelper.GetParent throws for those nodes,
+            // so switch to the corresponding content-tree parent operation.
+            element = element switch
+            {
+                Visual or Visual3D => VisualTreeHelper.GetParent(element),
+                ContentElement content => ContentOperations.GetParent(content),
+                _ => null,
+            };
         }
         return null;
     }
@@ -429,6 +548,7 @@ public partial class MainWindow : Window
 
     private void ItemList_OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
+        CancelPendingRenameClick();
         _contextMenuTargetPrepared = true;
         if (ItemsControl.ContainerFromElement(
                 ItemList,
@@ -469,12 +589,112 @@ public partial class MainWindow : Window
 
     private void ItemList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _dragStartPoint = ItemsControl.ContainerFromElement(
-                ItemList,
-                e.OriginalSource as DependencyObject) is ListViewItem
-            ? e.GetPosition(ItemList)
-            : null;
+        CancelPendingRenameClick();
+        _renameClickCandidate = null;
+        var container = ItemsControl.ContainerFromElement(
+            ItemList,
+            e.OriginalSource as DependencyObject) as ListViewItem;
+        _dragStartPoint = container is not null ? e.GetPosition(ItemList) : null;
+
+        /* Explorer-style slow double click: clicking the name of an item that is
+           already the lone selection starts an inline rename. Selection has not
+           been applied yet on the preview pass, so IsSelected is the prior state. */
+        if (e.ClickCount == 1 &&
+            Keyboard.Modifiers == ModifierKeys.None &&
+            e.OriginalSource is TextBlock { Tag: "NameText" } label &&
+            IsPointOverRenderedText(label, e.GetPosition(label)) &&
+            container is { IsSelected: true, DataContext: ArchiveItemViewModel candidate } &&
+            ItemList.SelectedItems.Count == 1)
+        {
+            _renameClickCandidate = candidate;
+            _renameClickOrigin = e.GetPosition(ItemList);
+        }
     }
+
+    private void ItemList_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var candidate = _renameClickCandidate;
+        _renameClickCandidate = null;
+        if (candidate is null ||
+            e.ClickCount != 1 ||
+            Keyboard.Modifiers != ModifierKeys.None ||
+            !IsSoleSelectedItem(candidate) ||
+            !_viewModel.RenameCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        /* A click that turned into a drag is not a rename request. */
+        if (_renameClickOrigin is { } origin)
+        {
+            var current = e.GetPosition(ItemList);
+            if (Math.Abs(current.X - origin.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+                Math.Abs(current.Y - origin.Y) >= SystemParameters.MinimumVerticalDragDistance)
+            {
+                return;
+            }
+        }
+
+        _pendingRenameItem = candidate;
+        _renameClickTimer.Start();
+    }
+
+    private void ItemList_OnPreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
+        CancelPendingRenameClick();
+
+    private void RenameClickTimer_OnTick(object? sender, EventArgs e)
+    {
+        var item = _pendingRenameItem;
+        CancelPendingRenameClick();
+        if (item is null ||
+            Mouse.LeftButton == MouseButtonState.Pressed ||
+            !IsSoleSelectedItem(item) ||
+            !_viewModel.RenameCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        _viewModel.RenameCommand.Execute(null);
+    }
+
+    /// <summary>Reports whether <paramref name="point"/> lands on drawn text rather than the
+    /// empty layout width the label stretches over.</summary>
+    private static bool IsPointOverRenderedText(TextBlock label, Point point)
+    {
+        var margin = label.Margin;
+        var textWidth = label.DesiredSize.Width - margin.Left - margin.Right;
+        var textHeight = label.DesiredSize.Height - margin.Top - margin.Bottom;
+        if (textWidth <= 0 || textHeight <= 0)
+        {
+            return false;
+        }
+
+        /* Text is drawn at the top of the layout slot, offset horizontally by its alignment. */
+        var left = label.TextAlignment switch
+        {
+            TextAlignment.Center => Math.Max(0, (label.ActualWidth - textWidth) / 2),
+            TextAlignment.Right => Math.Max(0, label.ActualWidth - textWidth),
+            _ => 0,
+        };
+        return point.X >= left &&
+            point.X <= left + textWidth &&
+            point.Y >= 0 &&
+            point.Y <= textHeight;
+    }
+
+    private bool IsSoleSelectedItem(ArchiveItemViewModel item) =>
+        ItemList.SelectedItems.Count == 1 && ReferenceEquals(ItemList.SelectedItems[0], item);
+
+    /// <summary>Drops an armed rename. The candidate from the current press is left alone;
+    /// it is re-validated against the selection when the button is released.</summary>
+    private void CancelPendingRenameClick()
+    {
+        _renameClickTimer.Stop();
+        _pendingRenameItem = null;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
 
     private void ItemList_OnMouseMove(object sender, MouseEventArgs e)
     {
@@ -496,6 +716,7 @@ public partial class MainWindow : Window
 
         _dragStartPoint = null;
         _isStartingDrag = true;
+        CancelPendingRenameClick();
         IReadOnlyList<string> paths = [];
         try
         {
@@ -526,6 +747,237 @@ public partial class MainWindow : Window
         {
             _viewModel.SortBy(columnName);
         }
+    }
+
+    private void DetailsColumnHeader_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button { Tag: string columnKey } header)
+        {
+            _columnHeaderDragStart = e.GetPosition(DetailsHeaderColumns);
+            _columnHeaderGrabOffset = e.GetPosition(header).X;
+            _columnHeaderDragKey = columnKey;
+        }
+    }
+
+    private void DetailsColumnHeader_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) =>
+        ResetColumnHeaderDrag();
+
+    private void DetailsColumnHeader_OnMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed ||
+            sender is not Button header ||
+            _columnHeaderDragStart is not { } start ||
+            _columnHeaderDragKey is not { } columnKey)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(DetailsHeaderColumns);
+        if (Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance)
+        {
+            return;
+        }
+
+        var grabOffset = _columnHeaderGrabOffset;
+        ResetColumnHeaderDrag();
+        try
+        {
+            ShowColumnDragGhost(header, grabOffset, current.X);
+            DragDrop.DoDragDrop(
+                header,
+                new DataObject(DetailsColumnDragFormat, columnKey),
+                DragDropEffects.Move);
+        }
+        finally
+        {
+            EndColumnDragVisuals();
+            /* The header button captured the mouse on press; the drag consumed its release. */
+            header.ReleaseMouseCapture();
+        }
+    }
+
+    /// <summary>Explorer keeps the plain arrow under the ghost instead of the OLE move cursor.</summary>
+    private void DetailsColumnHeader_OnGiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        if (DetailsColumnDragGhost.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        e.UseDefaultCursors = false;
+        Mouse.SetCursor(Cursors.Arrow);
+        e.Handled = true;
+    }
+
+    private void DetailsHeader_OnDragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DetailsColumnDragFormat))
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        var x = e.GetPosition(DetailsHeaderColumns).X;
+        MoveColumnDragGhost(x);
+        ShowColumnDropIndicator(ColumnInsertionIndex(x));
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+    }
+
+    /// <summary>Only a real exit hides the marker; moving between header buttons bubbles a
+    /// DragLeave here too.</summary>
+    private void DetailsHeader_OnDragLeave(object sender, DragEventArgs e)
+    {
+        var position = e.GetPosition(DetailsHeaderColumns);
+        if (position.X < 0 ||
+            position.Y < 0 ||
+            position.X > DetailsHeaderColumns.ActualWidth ||
+            position.Y > DetailsHeaderColumns.ActualHeight)
+        {
+            HideColumnDropIndicator();
+        }
+    }
+
+    private void DetailsHeader_OnDrop(object sender, DragEventArgs e)
+    {
+        HideColumnDropIndicator();
+        if (e.Data.GetData(DetailsColumnDragFormat) is string columnKey)
+        {
+            _viewModel.MoveDetailsColumn(columnKey, ColumnInsertionIndex(e.GetPosition(DetailsHeaderColumns).X));
+        }
+        e.Handled = true;
+    }
+
+    private void DetailsHeader_OnResizeCompleted(object sender, DragCompletedEventArgs e) =>
+        _viewModel.SaveDetailsColumnLayout();
+
+    private void ResetColumnHeaderDrag()
+    {
+        _columnHeaderDragStart = null;
+        _columnHeaderDragKey = null;
+    }
+
+    /// <summary>Lifts a translucent copy of the header out from under the cursor.</summary>
+    private void ShowColumnDragGhost(Button header, double grabOffset, double pointerX)
+    {
+        _columnHeaderGrabOffset = grabOffset;
+        DetailsColumnDragGhostSurface.Width = header.ActualWidth;
+        DetailsColumnDragGhostSurface.Height = header.ActualHeight;
+        DetailsColumnDragGhostSurface.Fill = new VisualBrush(header)
+        {
+            Stretch = Stretch.None,
+            AlignmentX = AlignmentX.Left,
+            AlignmentY = AlignmentY.Top,
+        };
+        DetailsColumnDragGhostTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        DetailsColumnDragGhostTransform.X = pointerX - grabOffset;
+        DetailsColumnDragGhost.Visibility = Visibility.Visible;
+        DetailsColumnDragGhost.BeginAnimation(OpacityProperty, FadeTo(0.85, ColumnDragFadeInDuration));
+    }
+
+    private void MoveColumnDragGhost(double pointerX)
+    {
+        if (DetailsColumnDragGhost.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var maximum = Math.Max(0, DetailsHeaderColumns.ActualWidth - DetailsColumnDragGhost.ActualWidth);
+        DetailsColumnDragGhostTransform.X = Math.Clamp(pointerX - _columnHeaderGrabOffset, 0, maximum);
+    }
+
+    private void EndColumnDragVisuals()
+    {
+        HideColumnDropIndicator();
+        if (DetailsColumnDragGhost.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var fade = FadeTo(0, ColumnDragFadeOutDuration);
+        fade.Completed += (_, _) =>
+        {
+            DetailsColumnDragGhost.Visibility = Visibility.Collapsed;
+            DetailsColumnDragGhostSurface.Fill = null;
+        };
+        DetailsColumnDragGhost.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private static DoubleAnimation FadeTo(double target, Duration duration) => new(target, duration)
+    {
+        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        FillBehavior = FillBehavior.HoldEnd,
+    };
+
+    /// <summary>Display position the dragged column would take if dropped at <paramref name="x"/>.</summary>
+    private int ColumnInsertionIndex(double x)
+    {
+        var offset = 0.0;
+        var columns = DetailsHeaderColumns.ColumnDefinitions;
+        for (var index = 0; index < columns.Count; index++)
+        {
+            var width = columns[index].ActualWidth;
+            if (x < offset + (width / 2))
+            {
+                return index;
+            }
+            offset += width;
+        }
+        return columns.Count;
+    }
+
+    private void ShowColumnDropIndicator(int insertionIndex)
+    {
+        var offset = 0.0;
+        var columns = DetailsHeaderColumns.ColumnDefinitions;
+        for (var index = 0; index < insertionIndex && index < columns.Count; index++)
+        {
+            offset += columns[index].ActualWidth;
+        }
+
+        var edge = Math.Max(0, Math.Min(offset, DetailsHeaderColumns.ActualWidth - DetailsColumnDropIndicator.Width));
+        if (_columnDropIndicatorShown)
+        {
+            /* Slide between slots rather than jumping, the way the WinUI drop marker moves. */
+            if (Math.Abs(DetailsColumnDropIndicatorTransform.X - edge) > 0.5)
+            {
+                DetailsColumnDropIndicatorTransform.BeginAnimation(
+                    TranslateTransform.XProperty,
+                    new DoubleAnimation(edge, ColumnDropIndicatorSlideDuration)
+                    {
+                        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                        FillBehavior = FillBehavior.HoldEnd,
+                    });
+            }
+            return;
+        }
+
+        _columnDropIndicatorShown = true;
+        DetailsColumnDropIndicatorTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        DetailsColumnDropIndicatorTransform.X = edge;
+        DetailsColumnDropIndicator.Visibility = Visibility.Visible;
+        DetailsColumnDropIndicator.BeginAnimation(OpacityProperty, FadeTo(1, ColumnDragFadeInDuration));
+    }
+
+    private void HideColumnDropIndicator()
+    {
+        if (!_columnDropIndicatorShown)
+        {
+            return;
+        }
+
+        _columnDropIndicatorShown = false;
+        var fade = FadeTo(0, ColumnDragFadeOutDuration);
+        fade.Completed += (_, _) =>
+        {
+            /* A drag that came straight back keeps the marker on screen. */
+            if (!_columnDropIndicatorShown)
+            {
+                DetailsColumnDropIndicator.Visibility = Visibility.Collapsed;
+            }
+        };
+        DetailsColumnDropIndicator.BeginAnimation(OpacityProperty, fade);
     }
 
     private void Cut_CanExecute(object sender, CanExecuteRoutedEventArgs e)

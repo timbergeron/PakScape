@@ -13,6 +13,7 @@ using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
 using PakStudio.Core.Playback;
 using PakStudio.Core.Preview;
+using PakStudio.Core.Validation;
 
 namespace PakStudio.App.ViewModels;
 
@@ -30,6 +31,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly IIconService _iconService;
     private readonly ArchiveThumbnailService _thumbnailService;
     private readonly ItemInfoWindowService _itemInfoWindowService;
+    private readonly IDetailsColumnLayoutService _detailsColumnLayoutService;
     private readonly Dictionary<ArchiveFolderNode, FolderTreeNodeViewModel> _folderLookup = [];
     private readonly Stack<ArchiveFolderNode> _backHistory = [];
     private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
@@ -51,6 +53,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _statusText = "Ready";
     private string _selectionStatus = "0 selected";
     private bool _isBusy;
+    private bool _isRenamingArchive;
+    private string _archiveEditName = string.Empty;
     private bool _isInitialized;
     private int _currentRevision;
     private int _savedRevision;
@@ -66,7 +70,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         IRecentFilesService recentFilesService,
         IIconService iconService,
         ArchiveThumbnailService thumbnailService,
-        ItemInfoWindowService itemInfoWindowService)
+        ItemInfoWindowService itemInfoWindowService,
+        IDetailsColumnLayoutService detailsColumnLayoutService)
     {
         _archiveService = archiveService;
         _archiveWindowService = archiveWindowService;
@@ -77,6 +82,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         _iconService = iconService;
         _thumbnailService = thumbnailService;
         _itemInfoWindowService = itemInfoWindowService;
+        _detailsColumnLayoutService = detailsColumnLayoutService;
+
+        NameColumn = new DetailsColumnViewModel("Name", "Name", 3, 160, HorizontalAlignment.Left);
+        TypeColumn = new DetailsColumnViewModel("Type", "Type", 1.3, 70, HorizontalAlignment.Left);
+        DetailsColumn = new DetailsColumnViewModel("Details", "Details", 2, 110, HorizontalAlignment.Left);
+        SizeColumn = new DetailsColumnViewModel("Size", "Size", 1, 60, HorizontalAlignment.Right);
+        ModifiedColumn = new DetailsColumnViewModel("Modified", "Modified", 1.5, 80, HorizontalAlignment.Right);
+        RestoreDetailsColumnLayout();
 
         NewCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("pak"), () => !IsBusy);
         NewPk3Command = new AsyncRelayCommand(() => CreateNewArchiveAsync("pk3"), () => !IsBusy);
@@ -172,6 +185,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(WindowTitle));
                 OnPropertyChanged(nameof(ArchiveDisplayName));
+                OnPropertyChanged(nameof(CanRenameArchive));
                 OnPropertyChanged(nameof(SearchPlaceholder));
                 OnPropertyChanged(nameof(CurrentFolderPath));
                 CommandManager.InvalidateRequerySuggested();
@@ -252,6 +266,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _isBusy, value))
             {
+                OnPropertyChanged(nameof(CanRenameArchive));
                 CommandManager.InvalidateRequerySuggested();
             }
         }
@@ -286,6 +301,30 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string ArchiveDisplayName => Document?.DisplayName ?? "PakScape";
 
+    /// <summary>Renaming the header renames the archive on disk, so it needs a saved file.</summary>
+    public bool CanRenameArchive =>
+        !IsBusy &&
+        Document?.FilePath is { Length: > 0 } path &&
+        File.Exists(path);
+
+    public bool IsRenamingArchive
+    {
+        get => _isRenamingArchive;
+        private set
+        {
+            if (SetProperty(ref _isRenamingArchive, value))
+            {
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public string ArchiveEditName
+    {
+        get => _archiveEditName;
+        set => SetProperty(ref _archiveEditName, value);
+    }
+
     public string SearchPlaceholder => $"Search {ArchiveDisplayName}";
 
     public bool IsSearchActive => !string.IsNullOrWhiteSpace(SearchText);
@@ -310,15 +349,18 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public IReadOnlyList<string> RecentFiles => _recentFilesService.GetRecentFiles();
 
-    public string NameSortHeader => SortHeader("Name", ArchiveSortColumn.Name);
+    /// <summary>Details columns in display order; reordering this collection moves the columns.</summary>
+    public ObservableCollection<DetailsColumnViewModel> DetailsColumns { get; } = [];
 
-    public string TypeSortHeader => SortHeader("Type", ArchiveSortColumn.Type);
+    public DetailsColumnViewModel NameColumn { get; }
 
-    public string DetailsSortHeader => SortHeader("Details", ArchiveSortColumn.Details);
+    public DetailsColumnViewModel TypeColumn { get; }
 
-    public string SizeSortHeader => SortHeader("Size", ArchiveSortColumn.Size);
+    public DetailsColumnViewModel DetailsColumn { get; }
 
-    public string ModifiedSortHeader => SortHeader("Modified", ArchiveSortColumn.Modified);
+    public DetailsColumnViewModel SizeColumn { get; }
+
+    public DetailsColumnViewModel ModifiedColumn { get; }
 
     public bool HasModelSkinSaveOptions =>
         SelectedFile is { } file &&
@@ -564,13 +606,41 @@ public sealed class MainWindowViewModel : ViewModelBase
             _sortDescending = false;
         }
 
-        OnPropertyChanged(nameof(NameSortHeader));
-        OnPropertyChanged(nameof(TypeSortHeader));
-        OnPropertyChanged(nameof(DetailsSortHeader));
-        OnPropertyChanged(nameof(SizeSortHeader));
-        OnPropertyChanged(nameof(ModifiedSortHeader));
+        RefreshDetailsColumnHeaders();
         RebuildCurrentItems(_selectedItems.FirstOrDefault()?.Node);
     }
+
+    /// <summary>Moves a details column so it lands at <paramref name="targetIndex"/> in display order.</summary>
+    public void MoveDetailsColumn(string? columnKey, int targetIndex)
+    {
+        var column = DetailsColumns.FirstOrDefault(candidate =>
+            string.Equals(candidate.Key, columnKey, StringComparison.Ordinal));
+        if (column is null)
+        {
+            return;
+        }
+
+        var currentIndex = DetailsColumns.IndexOf(column);
+        var destination = Math.Clamp(targetIndex, 0, DetailsColumns.Count);
+        if (destination > currentIndex)
+        {
+            destination--;
+        }
+        if (destination == currentIndex)
+        {
+            return;
+        }
+
+        DetailsColumns.Move(currentIndex, destination);
+        RefreshDetailsColumnIndexes();
+        SaveDetailsColumnLayout();
+    }
+
+    /// <summary>Persists the current column widths, called once a resize drag finishes.</summary>
+    public void SaveDetailsColumnLayout() =>
+        _detailsColumnLayoutService.Save(DetailsColumns
+            .Select(column => new DetailsColumnState(column.Key, column.Weight))
+            .ToList());
 
     public async Task<bool> CanCloseAsync()
     {
@@ -694,6 +764,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             RebuildFolderTree(_currentFolder ?? Document.Root);
             OnPropertyChanged(nameof(WindowTitle));
             OnPropertyChanged(nameof(ArchiveDisplayName));
+            OnPropertyChanged(nameof(CanRenameArchive));
             OnPropertyChanged(nameof(SearchPlaceholder));
             StatusText = $"Saved {Path.GetFileName(path)}";
             return true;
@@ -875,6 +946,100 @@ public sealed class MainWindowViewModel : ViewModelBase
             return true;
         }
         catch (Exception exception)
+        {
+            _messageBoxService.ShowError("Rename Failed", exception.Message);
+            return false;
+        }
+    }
+
+    public void BeginArchiveRename()
+    {
+        if (!CanRenameArchive || IsRenamingArchive)
+        {
+            return;
+        }
+
+        ArchiveEditName = ArchiveDisplayName;
+        IsRenamingArchive = true;
+    }
+
+    public void CancelArchiveRename()
+    {
+        IsRenamingArchive = false;
+    }
+
+    /// <summary>Renames the archive file itself, keeping the open document pointed at it.</summary>
+    public bool CommitArchiveRename(string newName)
+    {
+        if (!IsRenamingArchive)
+        {
+            return false;
+        }
+
+        IsRenamingArchive = false;
+        if (Document?.FilePath is not { Length: > 0 } currentPath)
+        {
+            return false;
+        }
+
+        var trimmed = newName?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+        {
+            _messageBoxService.ShowError("Rename Failed", "The name cannot be empty.");
+            return false;
+        }
+
+        var currentName = Path.GetFileName(currentPath);
+        if (string.Equals(currentName, trimmed, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            WindowsFileNameValidator.Validate(trimmed);
+
+            var directory = Path.GetDirectoryName(currentPath);
+            if (string.IsNullOrEmpty(directory))
+            {
+                throw new InvalidOperationException($"'{currentPath}' has no containing folder.");
+            }
+
+            var targetPath = Path.Combine(directory, trimmed);
+            if (File.Exists(targetPath) || Directory.Exists(targetPath))
+            {
+                _messageBoxService.ShowError(
+                    "Rename Failed",
+                    $"'{trimmed}' already exists in this folder.");
+                return false;
+            }
+
+            /* Changing the extension leaves a file the format handlers may no longer recognize. */
+            if (!string.Equals(
+                    Path.GetExtension(currentName),
+                    Path.GetExtension(trimmed),
+                    StringComparison.OrdinalIgnoreCase) &&
+                !_messageBoxService.Confirm(
+                    "Change Extension",
+                    $"'{trimmed}' uses a different extension than '{currentName}'. " +
+                    "The archive contents stay in their current format, and the renamed file " +
+                    "may no longer open as expected. Rename anyway?"))
+            {
+                return false;
+            }
+
+            File.Move(currentPath, targetPath);
+            Document.FilePath = targetPath;
+            RecordRecentFile(targetPath);
+            OnPropertyChanged(nameof(WindowTitle));
+            OnPropertyChanged(nameof(ArchiveDisplayName));
+            OnPropertyChanged(nameof(CanRenameArchive));
+            OnPropertyChanged(nameof(SearchPlaceholder));
+            CommandManager.InvalidateRequerySuggested();
+            StatusText = $"Renamed archive to '{trimmed}'.";
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             _messageBoxService.ShowError("Rename Failed", exception.Message);
             return false;
@@ -1538,7 +1703,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     private ArchiveFileNode? SelectedFile =>
         _selectedItems is [var item] ? item.Node as ArchiveFileNode : null;
 
-    private bool IsInlineRenameActive => _selectedItems.Any(item => item.IsRenaming);
+    private bool IsInlineRenameActive =>
+        IsRenamingArchive || _selectedItems.Any(item => item.IsRenaming);
 
     private static bool IsPlayableDemo(ArchiveFileNode file) =>
         file.Data.LongLength <= DemoPlaybackHandoff.MaximumSessionBytes &&
@@ -1710,6 +1876,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void LoadDocument(ArchiveDocument document)
     {
+        IsRenamingArchive = false;
         _itemInfoWindowService.CloseAll();
         _contextTarget = null;
         _backHistory.Clear();
@@ -1730,6 +1897,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void ClearDocument()
     {
+        IsRenamingArchive = false;
         _itemInfoWindowService.CloseAll();
         _contextTarget = null;
         _backHistory.Clear();
@@ -1920,6 +2088,56 @@ public sealed class MainWindowViewModel : ViewModelBase
             return title;
         }
         return $"{title} {(_sortDescending ? '▼' : '▲')}";
+    }
+
+    private void RestoreDetailsColumnLayout()
+    {
+        DetailsColumnViewModel[] defaults =
+            [NameColumn, TypeColumn, DetailsColumn, SizeColumn, ModifiedColumn];
+        var saved = _detailsColumnLayoutService.Load();
+        var ordered = saved
+            .Select(state => defaults.FirstOrDefault(column =>
+                string.Equals(column.Key, state.Key, StringComparison.OrdinalIgnoreCase)))
+            .OfType<DetailsColumnViewModel>()
+            .ToList();
+
+        /* Columns added by a newer build keep their default position when older state is loaded. */
+        foreach (var column in defaults.Where(column => !ordered.Contains(column)))
+        {
+            ordered.Insert(Math.Min(Array.IndexOf(defaults, column), ordered.Count), column);
+        }
+
+        foreach (var column in ordered)
+        {
+            var state = saved.FirstOrDefault(candidate =>
+                string.Equals(candidate.Key, column.Key, StringComparison.OrdinalIgnoreCase));
+            if (state is not null)
+            {
+                column.Width = new GridLength(state.Weight, GridUnitType.Star);
+            }
+            DetailsColumns.Add(column);
+        }
+
+        RefreshDetailsColumnIndexes();
+        RefreshDetailsColumnHeaders();
+    }
+
+    private void RefreshDetailsColumnIndexes()
+    {
+        for (var index = 0; index < DetailsColumns.Count; index++)
+        {
+            DetailsColumns[index].DisplayIndex = index;
+        }
+    }
+
+    private void RefreshDetailsColumnHeaders()
+    {
+        foreach (var column in DetailsColumns)
+        {
+            column.HeaderText = Enum.TryParse<ArchiveSortColumn>(column.Key, out var sortColumn)
+                ? SortHeader(column.Title, sortColumn)
+                : column.Title;
+        }
     }
 
     private static string GetTypeText(ArchiveNode node) => node switch

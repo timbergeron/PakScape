@@ -136,6 +136,110 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="DetailsColumnHeaderStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0,0,6,0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+            <Setter Property="AllowDrop" Value="True" />
+            <Setter Property="Tag" Value="{Binding Key}" />
+            <Setter Property="Content" Value="{Binding HeaderText}" />
+            <Setter Property="HorizontalContentAlignment" Value="{Binding ContentAlignment}" />
+            <Setter Property="ToolTip" Value="Click to sort, drag to move the column" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="1200" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="4">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <EventSetter Event="Click" Handler="SortHeader_OnClick" />
+            <EventSetter Event="PreviewMouseLeftButtonDown"
+                         Handler="DetailsColumnHeader_OnPreviewMouseLeftButtonDown" />
+            <EventSetter Event="PreviewMouseLeftButtonUp"
+                         Handler="DetailsColumnHeader_OnPreviewMouseLeftButtonUp" />
+            <!-- Tunneling: ButtonBase marks the bubbling MouseMove handled while it holds capture. -->
+            <EventSetter Event="PreviewMouseMove" Handler="DetailsColumnHeader_OnMouseMove" />
+            <EventSetter Event="GiveFeedback" Handler="DetailsColumnHeader_OnGiveFeedback" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="DetailsColumnSplitterStyle" TargetType="GridSplitter">
+            <Setter Property="Width" Value="7" />
+            <Setter Property="Margin" Value="0,0,-4,0" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="ResizeBehavior" Value="CurrentAndNext" />
+            <Setter Property="ResizeDirection" Value="Columns" />
+            <Setter Property="ShowsPreview" Value="False" />
+            <Setter Property="Panel.ZIndex" Value="1" />
+            <Setter Property="ToolTip" Value="Drag to resize the column" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GridSplitter">
+                        <!-- Explorer fades a hairline in at the divider while you are on it. -->
+                        <Border Background="Transparent">
+                            <Border x:Name="DividerLine"
+                                    Width="1"
+                                    Margin="0,1"
+                                    Opacity="0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Stretch"
+                                    Background="{DynamicResource MutedForegroundBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="DividerLine"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="0.8"
+                                                             Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <QuadraticEase EasingMode="EaseOut" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="DividerLine"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="0"
+                                                             Duration="0:0:0.18" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <ItemsPanelTemplate x:Key="WrapItemsPanel">
             <WrapPanel Orientation="Horizontal" />
         </ItemsPanelTemplate>
@@ -199,6 +303,7 @@
                     </Grid>
                     <Grid Margin="0,10,0,0">
                         <TextBlock x:Name="LargeNameText"
+                                   Tag="NameText"
                                    HorizontalAlignment="Center"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
@@ -276,7 +381,7 @@
                     </Grid>
                     <StackPanel Margin="8,0,0,0">
                         <Grid>
-                            <TextBlock x:Name="SmallNameText" Text="{Binding Name}" />
+                            <TextBlock x:Name="SmallNameText" Tag="NameText" Text="{Binding Name}" />
                             <TextBox x:Name="SmallRenameTextBox"
                                      Tag="InlineRename"
                                      MinWidth="120"
@@ -343,6 +448,7 @@
                 </Grid>
                 <Grid Grid.Column="1">
                     <TextBlock x:Name="ListNameText"
+                               Tag="NameText"
                                VerticalAlignment="Center"
                                Text="{Binding Name}" />
                     <TextBox x:Name="ListRenameTextBox"
@@ -377,14 +483,20 @@
         <DataTemplate x:Key="DetailsTemplate">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="3*" />
-                    <ColumnDefinition Width="1.3*" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="1*" />
-                    <ColumnDefinition Width="1.5*" />
+                    <ColumnDefinition Width="{Binding Data.DetailsColumns[0].Width, Source={StaticResource ViewModelProxy}}"
+                                      MinWidth="{Binding Data.DetailsColumns[0].MinWidth, Source={StaticResource ViewModelProxy}}" />
+                    <ColumnDefinition Width="{Binding Data.DetailsColumns[1].Width, Source={StaticResource ViewModelProxy}}"
+                                      MinWidth="{Binding Data.DetailsColumns[1].MinWidth, Source={StaticResource ViewModelProxy}}" />
+                    <ColumnDefinition Width="{Binding Data.DetailsColumns[2].Width, Source={StaticResource ViewModelProxy}}"
+                                      MinWidth="{Binding Data.DetailsColumns[2].MinWidth, Source={StaticResource ViewModelProxy}}" />
+                    <ColumnDefinition Width="{Binding Data.DetailsColumns[3].Width, Source={StaticResource ViewModelProxy}}"
+                                      MinWidth="{Binding Data.DetailsColumns[3].MinWidth, Source={StaticResource ViewModelProxy}}" />
+                    <ColumnDefinition Width="{Binding Data.DetailsColumns[4].Width, Source={StaticResource ViewModelProxy}}"
+                                      MinWidth="{Binding Data.DetailsColumns[4].MinWidth, Source={StaticResource ViewModelProxy}}" />
                 </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="0">
+                <Grid Grid.Column="{Binding Data.NameColumn.DisplayIndex, Source={StaticResource ViewModelProxy}}"
+                      Margin="0,0,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -411,6 +523,8 @@
                     </Grid>
                     <Grid Grid.Column="1">
                         <TextBlock x:Name="DetailsNameText"
+                                   Tag="NameText"
+                                   TextTrimming="CharacterEllipsis"
                                    Text="{Binding PrimaryText}"
                                    ToolTip="{Binding SearchPath}" />
                         <TextBox x:Name="DetailsRenameTextBox"
@@ -421,19 +535,26 @@
                                  PreviewKeyDown="InlineRenameTextBox_OnPreviewKeyDown" />
                     </Grid>
                 </Grid>
-                <TextBlock Grid.Column="1"
+                <TextBlock Grid.Column="{Binding Data.TypeColumn.DisplayIndex, Source={StaticResource ViewModelProxy}}"
+                           Margin="0,0,6,0"
                            Foreground="{DynamicResource MutedForegroundBrush}"
+                           TextTrimming="CharacterEllipsis"
                            Text="{Binding TypeText}" />
-                <TextBlock Grid.Column="2"
+                <TextBlock Grid.Column="{Binding Data.DetailsColumn.DisplayIndex, Source={StaticResource ViewModelProxy}}"
+                           Margin="0,0,6,0"
                            Foreground="{DynamicResource MutedForegroundBrush}"
                            TextTrimming="CharacterEllipsis"
                            ToolTip="{Binding DetailsText}"
                            Text="{Binding DetailsText}" />
-                <TextBlock Grid.Column="3"
+                <TextBlock Grid.Column="{Binding Data.SizeColumn.DisplayIndex, Source={StaticResource ViewModelProxy}}"
+                           Margin="0,0,6,0"
                            HorizontalAlignment="Right"
+                           TextTrimming="CharacterEllipsis"
                            Text="{Binding SizeText}" />
-                <TextBlock Grid.Column="4"
+                <TextBlock Grid.Column="{Binding Data.ModifiedColumn.DisplayIndex, Source={StaticResource ViewModelProxy}}"
+                           Margin="0,0,6,0"
                            HorizontalAlignment="Right"
+                           TextTrimming="CharacterEllipsis"
                            Text="{Binding ModifiedText}" />
             </Grid>
             <DataTemplate.Triggers>
@@ -727,18 +848,67 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Column="0"
-                                       Grid.Row="0"
-                                       Margin="0,0,16,0"
-                                       VerticalAlignment="Center"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Text="{Binding ArchiveDisplayName}"
-                                       TextTrimming="CharacterEllipsis">
-                                <TextBlock.RenderTransform>
+                            <Grid Grid.Column="0"
+                                  Grid.Row="0"
+                                  Margin="-6,0,16,0"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center">
+                                <Grid.RenderTransform>
                                     <TranslateTransform Y="-1" />
-                                </TextBlock.RenderTransform>
-                            </TextBlock>
+                                </Grid.RenderTransform>
+                                <Border x:Name="ArchiveNameButton"
+                                        MouseLeftButtonUp="ArchiveName_OnMouseLeftButtonUp">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Padding" Value="6,3" />
+                                            <Setter Property="CornerRadius" Value="4" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CanRenameArchive}" Value="True">
+                                                    <Setter Property="ToolTip" Value="Click to rename this archive" />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}"
+                                                                   Value="True" />
+                                                        <Condition Binding="{Binding CanRenameArchive}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource MenuHoverBrush}" />
+                                                    <Setter Property="Cursor" Value="Hand" />
+                                                </MultiDataTrigger>
+                                                <DataTrigger Binding="{Binding IsRenamingArchive}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding ArchiveDisplayName}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Border>
+                                <TextBox x:Name="ArchiveNameEditor"
+                                         MinWidth="180"
+                                         Text="{Binding ArchiveEditName, UpdateSourceTrigger=PropertyChanged}"
+                                         LostKeyboardFocus="ArchiveNameEditor_OnLostKeyboardFocus"
+                                         PreviewKeyDown="ArchiveNameEditor_OnPreviewKeyDown">
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                            <Setter Property="Padding" Value="5,2" />
+                                            <Setter Property="FontSize" Value="14" />
+                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                            <Setter Property="VerticalContentAlignment" Value="Center" />
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsRenamingArchive}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
+                            </Grid>
 
                             <Border Grid.Column="1"
                                     Grid.Row="0"
@@ -842,71 +1012,81 @@
                     </Border>
 
                     <Grid DockPanel.Dock="Top"
-                          Margin="0,0,0,8"
+                          Margin="4,0,4,8"
+                          ClipToBounds="True"
                           Visibility="{Binding ActiveViewMode, Converter={StaticResource ArchiveViewModeToVisibilityConverter}, ConverterParameter=Details}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="3*" />
-                            <ColumnDefinition Width="1.3*" />
-                            <ColumnDefinition Width="2*" />
-                            <ColumnDefinition Width="1*" />
-                            <ColumnDefinition Width="1.5*" />
-                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="DetailsHeaderColumns"
+                              Background="Transparent"
+                              AllowDrop="True"
+                              DragOver="DetailsHeader_OnDragOver"
+                              DragLeave="DetailsHeader_OnDragLeave"
+                              Drop="DetailsHeader_OnDrop"
+                              Thumb.DragCompleted="DetailsHeader_OnResizeCompleted">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{Binding DetailsColumns[0].Width, Mode=TwoWay}"
+                                                  MinWidth="{Binding DetailsColumns[0].MinWidth}" />
+                                <ColumnDefinition Width="{Binding DetailsColumns[1].Width, Mode=TwoWay}"
+                                                  MinWidth="{Binding DetailsColumns[1].MinWidth}" />
+                                <ColumnDefinition Width="{Binding DetailsColumns[2].Width, Mode=TwoWay}"
+                                                  MinWidth="{Binding DetailsColumns[2].MinWidth}" />
+                                <ColumnDefinition Width="{Binding DetailsColumns[3].Width, Mode=TwoWay}"
+                                                  MinWidth="{Binding DetailsColumns[3].MinWidth}" />
+                                <ColumnDefinition Width="{Binding DetailsColumns[4].Width, Mode=TwoWay}"
+                                                  MinWidth="{Binding DetailsColumns[4].MinWidth}" />
+                            </Grid.ColumnDefinitions>
 
-                        <Button Grid.Column="0"
-                                Tag="Name"
-                                Click="SortHeader_OnClick"
-                                Margin="0"
-                                Padding="0"
-                                BorderThickness="0"
-                                Background="Transparent"
-                                HorizontalContentAlignment="Left"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundBrush}"
-                                Content="{Binding NameSortHeader}" />
-                        <Button Grid.Column="1"
-                                Tag="Type"
-                                Click="SortHeader_OnClick"
-                                Margin="0"
-                                Padding="0"
-                                BorderThickness="0"
-                                Background="Transparent"
-                                HorizontalContentAlignment="Left"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundBrush}"
-                                Content="{Binding TypeSortHeader}" />
-                        <Button Grid.Column="2"
-                                Tag="Details"
-                                Click="SortHeader_OnClick"
-                                Margin="0"
-                                Padding="0"
-                                BorderThickness="0"
-                                Background="Transparent"
-                                HorizontalContentAlignment="Left"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundBrush}"
-                                Content="{Binding DetailsSortHeader}" />
-                        <Button Grid.Column="3"
-                                Tag="Size"
-                                Click="SortHeader_OnClick"
-                                Margin="0"
-                                Padding="0"
-                                BorderThickness="0"
-                                Background="Transparent"
-                                HorizontalContentAlignment="Right"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundBrush}"
-                                Content="{Binding SizeSortHeader}" />
-                        <Button Grid.Column="4"
-                                Tag="Modified"
-                                Click="SortHeader_OnClick"
-                                Margin="0"
-                                Padding="0"
-                                BorderThickness="0"
-                                Background="Transparent"
-                                HorizontalContentAlignment="Right"
-                                FontWeight="SemiBold"
-                                Foreground="{DynamicResource MutedForegroundBrush}"
-                                Content="{Binding ModifiedSortHeader}" />
+                            <Button Grid.Column="0"
+                                    Style="{StaticResource DetailsColumnHeaderStyle}"
+                                    DataContext="{Binding DetailsColumns[0]}" />
+                            <Button Grid.Column="1"
+                                    Style="{StaticResource DetailsColumnHeaderStyle}"
+                                    DataContext="{Binding DetailsColumns[1]}" />
+                            <Button Grid.Column="2"
+                                    Style="{StaticResource DetailsColumnHeaderStyle}"
+                                    DataContext="{Binding DetailsColumns[2]}" />
+                            <Button Grid.Column="3"
+                                    Style="{StaticResource DetailsColumnHeaderStyle}"
+                                    DataContext="{Binding DetailsColumns[3]}" />
+                            <Button Grid.Column="4"
+                                    Style="{StaticResource DetailsColumnHeaderStyle}"
+                                    DataContext="{Binding DetailsColumns[4]}" />
+
+                            <GridSplitter Grid.Column="0" Style="{StaticResource DetailsColumnSplitterStyle}" />
+                            <GridSplitter Grid.Column="1" Style="{StaticResource DetailsColumnSplitterStyle}" />
+                            <GridSplitter Grid.Column="2" Style="{StaticResource DetailsColumnSplitterStyle}" />
+                            <GridSplitter Grid.Column="3" Style="{StaticResource DetailsColumnSplitterStyle}" />
+                        </Grid>
+
+                        <!-- Translucent copy of the header being dragged, as Explorer shows. -->
+                        <Border x:Name="DetailsColumnDragGhost"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed"
+                                IsHitTestVisible="False"
+                                Opacity="0"
+                                CornerRadius="4"
+                                Background="{DynamicResource PanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource PanelBorderBrush}"
+                                BorderThickness="1">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="DetailsColumnDragGhostTransform" />
+                            </Border.RenderTransform>
+                            <Rectangle x:Name="DetailsColumnDragGhostSurface" />
+                        </Border>
+
+                        <Border x:Name="DetailsColumnDropIndicator"
+                                Width="2"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Stretch"
+                                Visibility="Collapsed"
+                                IsHitTestVisible="False"
+                                Opacity="0"
+                                CornerRadius="1"
+                                Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="DetailsColumnDropIndicatorTransform" />
+                            </Border.RenderTransform>
+                        </Border>
                     </Grid>
 
                     <Grid>
@@ -920,6 +1100,8 @@
                                   DragOver="ItemList_OnDragOver"
                                   Drop="ItemList_OnDrop"
                                   PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
+                                  PreviewMouseLeftButtonUp="ItemList_OnPreviewMouseLeftButtonUp"
+                                  PreviewMouseWheel="ItemList_OnPreviewMouseWheel"
                                   MouseMove="ItemList_OnMouseMove"
                                   PreviewKeyDown="ItemList_OnPreviewKeyDown"
                                   PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
@@ -1087,6 +1269,70 @@
                     </Grid>
                 </DockPanel>
             </Border>
+
+            <Button x:Name="FolderPaneCollapsedIndicator"
+                    Grid.Column="2"
+                    Width="42"
+                    Height="76"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Panel.ZIndex="10"
+                    Visibility="Collapsed"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Focusable="False"
+                    Click="FolderPaneToggle_OnClick"
+                    ToolTip="Show folders">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Opacity" Value="0" />
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="1" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Grid Width="42" Height="76">
+                    <Border Width="8"
+                            Height="44"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            CornerRadius="4">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource ScrollBarThumbBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                 Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource ScrollBarThumbHoverBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                    </Border>
+                    <Path Width="8"
+                          Height="12"
+                          Margin="1,0,0,0"
+                          HorizontalAlignment="Left"
+                          VerticalAlignment="Center"
+                          Data="M 7,0 L 1,6 L 7,12"
+                          Fill="Transparent"
+                          Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
+                          StrokeThickness="1.8"
+                          Stretch="Fill" />
+                    <Path Width="8"
+                          Height="12"
+                          Margin="0,0,1,0"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Center"
+                          Data="M 1,0 L 7,6 L 1,12"
+                          Fill="Transparent"
+                          Stroke="{DynamicResource ScrollBarThumbHoverBrush}"
+                          StrokeThickness="1.8"
+                          Stretch="Fill" />
+                </Grid>
+            </Button>
         </Grid>
     </DockPanel>
     </Border>

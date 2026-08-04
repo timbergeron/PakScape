@@ -741,6 +741,13 @@ public partial class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        /* Closing an untouched editor must not mark the archive dirty. */
+        if (string.Equals(item.Name, name, StringComparison.Ordinal))
+        {
+            item.EndRenaming();
+            return true;
+        }
+
         try
         {
             var history = CaptureHistory("Rename");
