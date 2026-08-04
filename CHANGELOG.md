@@ -27,6 +27,11 @@ Notable user-visible changes are documented here.
 
 ### Added
 
+- macOS BSP level previews now open fitted to the panel instead of running under
+  the marker controls, and zoom with the scroll wheel or a trackpad pinch, with
+  drag to pan and double-click to reset. Each marker checkbox now appears only
+  when the level actually places that item, and the first level preview of a
+  session opens in a larger panel.
 - Portable Swift tests for PAK round trips, unsafe paths, missing payloads, format limits, document mutation, and PK3 preflight checks.
 - Windows regression tests for unsafe paths, unsupported PAK names, and atomic replacement.
 - Archive-wide Windows search now matches names, full paths, types, metadata, compact names, and wildcard patterns.
