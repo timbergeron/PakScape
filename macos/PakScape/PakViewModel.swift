@@ -1656,7 +1656,7 @@ final class PakViewModel: NSObject, ObservableObject {
     ) -> NSImage? {
         let ext = (fileName as NSString).pathExtension.lowercased()
         if Self.previewableAudioExtensions.contains(ext) {
-            return renderAudioThumbnail(fileName: fileName, data: data, appearance: appearance)
+            return renderAudioThumbnail(data: data, appearance: appearance)
         } else if ext == "lmp" {
             return LmpPreviewRenderer.renderImage(fileName: fileName, data: data)
         } else if ext == "pcx" {
@@ -1725,7 +1725,6 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     private func renderAudioThumbnail(
-        fileName: String,
         data: Data,
         appearance: NSAppearance
     ) -> NSImage {
@@ -1743,13 +1742,13 @@ final class PakViewModel: NSObject, ObservableObject {
             let panel = isDark
                 ? NSColor(calibratedRed: 0.15, green: 0.21, blue: 0.28, alpha: 1)
                 : NSColor(calibratedRed: 0.84, green: 0.91, blue: 0.96, alpha: 1)
-            let muted = isDark ? NSColor(white: 0.74, alpha: 1) : NSColor(white: 0.30, alpha: 1)
 
             background.setFill()
             NSBezierPath(roundedRect: NSRect(origin: .zero, size: imageSize), xRadius: 12, yRadius: 12).fill()
 
-            let center = NSPoint(x: 96, y: 88)
-            let panelRect = NSRect(x: 26, y: 18, width: 140, height: 140)
+            /* Keep the disc centred so it lines up with the play overlay drawn at the icon centre. */
+            let center = NSPoint(x: imageSize.width / 2, y: imageSize.height / 2)
+            let panelRect = NSRect(x: center.x - 70, y: center.y - 70, width: 140, height: 140)
             panel.setFill()
             NSBezierPath(ovalIn: panelRect).fill()
 
@@ -1776,14 +1775,6 @@ final class PakViewModel: NSObject, ObservableObject {
 
             background.setFill()
             NSBezierPath(ovalIn: NSRect(x: center.x - 34, y: center.y - 34, width: 68, height: 68)).fill()
-
-            let title = (fileName as NSString).lastPathComponent
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 8),
-                .foregroundColor: muted,
-            ]
-            let titleRect = NSRect(x: 24, y: 6, width: 144, height: 12)
-            (title as NSString).draw(with: titleRect, options: [.truncatesLastVisibleLine], attributes: attributes)
         }
 
         return image
