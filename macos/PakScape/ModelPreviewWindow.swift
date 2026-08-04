@@ -106,7 +106,7 @@ final class ModelPreviewController: NSViewController {
     private let skinImageView = NSImageView()
     private var isViewingSkin = false
 
-    let renderView = ModelRenderView()
+    let renderView = ModelRenderView(frame: .zero)
 
     init(items: [ModelPreviewItem], onClose: @escaping () -> Void) {
         self.items = items
@@ -341,7 +341,7 @@ final class ModelPreviewController: NSViewController {
             viewer.setAnimationSpeed(1)
         } catch {
             /* Truncated models still have a skin worth showing, as on the other editions. */
-            renderView.attach(viewer: nil, fallbackImage: item.fallbackImage())
+            renderView.attach(viewer: Optional<QuakeModelViewer>.none, fallbackImage: item.fallbackImage())
             subtitleLabel.stringValue = error.localizedDescription
             skinPicker.isHidden = true
             viewSkinButton.isHidden = true
@@ -452,7 +452,7 @@ final class ModelPreviewController: NSViewController {
             save.begin { response in
                 guard response == .OK, let outputURL = save.url else { return }
                 do {
-                    try data.write(to: outputURL, options: .atomic)
+                    try data.write(to: outputURL, options: Data.WritingOptions.atomic)
                 } catch {
                     NSAlert(error: error).runModal()
                 }
@@ -475,20 +475,20 @@ final class ModelPreviewController: NSViewController {
             renderView.viewer?.reset()
             return true
         case "+", "=":
-            renderView.viewer?.nudge(.zoomIn)
+            renderView.viewer?.nudge(QuakeModelNudge.zoomIn)
             return true
         case "-", "_":
-            renderView.viewer?.nudge(.zoomOut)
+            renderView.viewer?.nudge(QuakeModelNudge.zoomOut)
             return true
         default:
             break
         }
 
         switch Int(event.keyCode) {
-        case 123: renderView.viewer?.nudge(.left)
-        case 124: renderView.viewer?.nudge(.right)
-        case 126: renderView.viewer?.nudge(.up)
-        case 125: renderView.viewer?.nudge(.down)
+        case 123: renderView.viewer?.nudge(QuakeModelNudge.left)
+        case 124: renderView.viewer?.nudge(QuakeModelNudge.right)
+        case 126: renderView.viewer?.nudge(QuakeModelNudge.up)
+        case 125: renderView.viewer?.nudge(QuakeModelNudge.down)
         case 121: move(by: 1)     // page down
         case 116: move(by: -1)    // page up
         default: return false
@@ -519,7 +519,7 @@ final class ModelRenderView: NSOpenGLView {
     private static func makePixelFormat() -> NSOpenGLPixelFormat {
         let attributes: [NSOpenGLPixelFormatAttribute] = [
             NSOpenGLPixelFormatAttribute(NSOpenGLPFAOpenGLProfile),
-            NSOpenGLPixelFormatAttribute(NSOpenGLProfileVersion2_1),
+            NSOpenGLPixelFormatAttribute(NSOpenGLProfileVersionLegacy),
             NSOpenGLPixelFormatAttribute(NSOpenGLPFAColorSize),
             24,
             NSOpenGLPixelFormatAttribute(NSOpenGLPFADepthSize),
@@ -534,7 +534,7 @@ final class ModelRenderView: NSOpenGLView {
     }
 
     override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect, pixelFormat: Self.makePixelFormat())
+        super.init(frame: frameRect, pixelFormat: Self.makePixelFormat())!
         wantsBestResolutionOpenGLSurface = true
         setUpHint()
     }

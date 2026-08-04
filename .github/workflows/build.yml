@@ -155,6 +155,11 @@ jobs:
             8.0.x
             10.0.x
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgl-dev
+
       - name: Build native libraries
         run: native/scripts/build-linux.sh
 
