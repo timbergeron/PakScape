@@ -35,6 +35,8 @@ inline image and Quake-format thumbnails, sortable name/type/size/modified colum
 back/forward/up navigation, cut/copy/paste/select-all shortcuts, and file drag-and-drop
 both into and out of PakScape. Archive edits support up to 100 levels of Undo/Redo,
 including adds, pastes and moves, folder creation, renames, and deletion.
+Items rename inline from `F2`, the context menu, or a click on the name of an
+already-selected item.
 Context menus expose model-skin, BSP-texture, and WAD-texture conversion only for
 the matching selected file type.
 Search spans the entire archive, including item names, full paths, types, and

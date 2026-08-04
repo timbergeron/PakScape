@@ -11,7 +11,8 @@ Current capabilities include:
 - Cut, copy, paste, select all, and drag archive items to or from Windows Explorer.
 - Undo and redo up to 50 archive mutations.
 - Browse with Back/Forward history and large-icon, small-icon, list, and detail views.
-- Rename items inline and adjust the large-icon view across three zoom levels.
+- Rename items inline with `F2`, the context menu, or a click on the name of an
+  already-selected item, and adjust the large-icon view across three zoom levels.
 - Sort by name, type, size, or modified date and show image/Quake thumbnails in every view.
 - Search names, paths, types, and metadata across the entire archive.
 - Preview selected archive items without extracting them by pressing Space.

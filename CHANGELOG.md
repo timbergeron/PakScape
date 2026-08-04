@@ -1,5 +1,7 @@
 # Changelog
 
+- Added Windows and Linux click-pause-click inline rename on an already-selected
+  item's name, matching macOS and the system file managers.
 - Added Linux Undo/Redo parity with bounded history for archive additions, pastes,
   moves, folder creation, renames, and deletion, including saved-revision tracking.
 - Made Linux contextual conversion menus file-specific and removed the generic
@@ -71,6 +73,8 @@ Notable user-visible changes are documented here.
 
 ### Changed
 
+- Audio preview thumbnails now use a warm rust/olive/grey gradient in place of
+  the previous purple-to-blue one on Windows, Linux, and macOS.
 - Model previews no longer draw a contact shadow beneath the model.
 - macOS 14 is now the minimum deployment target.
 - Save As now updates the active document location.
