@@ -210,6 +210,8 @@
 
                 <ContentControl x:Name="SkyboxPanel"
                                 Background="Black"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch"
                                 Visibility="Collapsed" />
 
                 <TextBox x:Name="TextPreview"

@@ -269,9 +269,11 @@ public partial class PreviewWindow : Window
 
     private void ResetSkyboxPreview()
     {
+        var control = _skyboxPreview;
         _skyboxPreview = null;
         SkyboxPanel.Content = null;
         SkyboxPanel.Visibility = Visibility.Collapsed;
+        control?.Dispose();
     }
 
     private void ResetAudioPlayback()
