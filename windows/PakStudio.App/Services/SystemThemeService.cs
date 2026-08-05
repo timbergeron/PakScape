@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -20,6 +21,7 @@ internal sealed class SystemThemeService : IDisposable
     private static readonly Uri DarkColors = new("Themes/DarkColors.xaml", UriKind.Relative);
 
     private readonly Application _application;
+    private readonly PakScapeSettings _settings = PakScapeSettings.Current;
     private bool _isDarkMode;
     private bool _disposed;
 
@@ -34,6 +36,7 @@ internal sealed class SystemThemeService : IDisposable
             FrameworkElement.LoadedEvent,
             new RoutedEventHandler(Window_OnLoaded));
         SystemEvents.UserPreferenceChanged += SystemEvents_OnUserPreferenceChanged;
+        _settings.PropertyChanged += Settings_OnPropertyChanged;
     }
 
     public void Dispose()
@@ -44,10 +47,16 @@ internal sealed class SystemThemeService : IDisposable
         }
 
         SystemEvents.UserPreferenceChanged -= SystemEvents_OnUserPreferenceChanged;
+        _settings.PropertyChanged -= Settings_OnPropertyChanged;
         _disposed = true;
     }
 
     private void SystemEvents_OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        _application.Dispatcher.BeginInvoke(new Action(RefreshTheme));
+    }
+
+    private void Settings_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         _application.Dispatcher.BeginInvoke(new Action(() =>
         {
@@ -56,20 +65,41 @@ internal sealed class SystemThemeService : IDisposable
                 return;
             }
 
-            var isDarkMode = ShouldUseDarkMode();
-            if (isDarkMode == _isDarkMode)
+            switch (e.PropertyName)
             {
-                return;
-            }
-
-            _isDarkMode = isDarkMode;
-            ApplyApplicationTheme();
-
-            foreach (Window window in _application.Windows)
-            {
-                ApplyTitleBarTheme(window);
+                case nameof(PakScapeSettings.Appearance):
+                    RefreshTheme();
+                    break;
+                case nameof(PakScapeSettings.TextSize):
+                    foreach (Window window in _application.Windows)
+                    {
+                        ApplyTextSize(window);
+                    }
+                    break;
             }
         }));
+    }
+
+    private void RefreshTheme()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var isDarkMode = ShouldUseDarkMode();
+        if (isDarkMode == _isDarkMode)
+        {
+            return;
+        }
+
+        _isDarkMode = isDarkMode;
+        ApplyApplicationTheme();
+
+        foreach (Window window in _application.Windows)
+        {
+            ApplyTitleBarTheme(window);
+        }
     }
 
     private void Window_OnLoaded(object sender, RoutedEventArgs e)
@@ -77,7 +107,14 @@ internal sealed class SystemThemeService : IDisposable
         if (sender is Window window)
         {
             ApplyTitleBarTheme(window);
+            ApplyTextSize(window);
         }
+    }
+
+    /// <summary>Applies the preferred text size, which overrides the themed default font size.</summary>
+    private void ApplyTextSize(Window window)
+    {
+        window.FontSize = _settings.TextSize;
     }
 
     private void ApplyApplicationTheme()
@@ -136,8 +173,16 @@ internal sealed class SystemThemeService : IDisposable
             sizeof(int));
     }
 
-    private static bool ShouldUseDarkMode()
+    private bool ShouldUseDarkMode()
     {
+        switch (_settings.Appearance)
+        {
+            case AppearancePreference.Light:
+                return false;
+            case AppearancePreference.Dark:
+                return true;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             return false;

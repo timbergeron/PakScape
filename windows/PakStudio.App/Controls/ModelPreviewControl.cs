@@ -128,12 +128,14 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
         _viewSkinButton.Margin = new Thickness(8, 0, 0, 0);
         copySkinButton.Margin = new Thickness(8, 0, 0, 0);
 
+        var animateModels = PakScapeSettings.Current.AnimateModels;
         var animateCheck = new CheckBox
         {
             Content = "Animate",
-            IsChecked = true,
+            IsChecked = animateModels,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        _session.AnimationEnabled = animateModels;
         animateCheck.Checked += (_, _) => _session.AnimationEnabled = true;
         animateCheck.Unchecked += (_, _) => _session.AnimationEnabled = false;
 

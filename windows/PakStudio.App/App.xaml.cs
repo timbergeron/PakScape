@@ -14,7 +14,7 @@ public partial class App : Application
     private ServiceProvider? _serviceProvider;
     private SystemThemeService? _systemThemeService;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -25,6 +25,17 @@ public partial class App : Application
 
         _serviceProvider = services.BuildServiceProvider();
 
+        /* Explorer verbs are re-registered so they follow the running copy of PakScape. */
+        ShellIntegrationService.UpdateExplorerActions(PakScapeSettings.Current.ExplorerActionsEnabled);
+
+        /* Shell verbs only show dialogs, so the app must outlive the last closed dialog. */
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        if (await ShellCommandRunner.TryRunAsync(_serviceProvider, e.Args).ConfigureAwait(true))
+        {
+            Shutdown();
+            return;
+        }
+
         var startupArchive = e.Args.FirstOrDefault(argument =>
             !string.IsNullOrWhiteSpace(argument) && !argument.StartsWith("-", StringComparison.Ordinal));
         var windowService = _serviceProvider.GetRequiredService<IArchiveWindowService>();
@@ -32,6 +43,7 @@ public partial class App : Application
             ? windowService.ShowBlankWorkspace()
             : windowService.ShowArchive(startupArchive);
         MainWindow = window;
+        ShutdownMode = ShutdownMode.OnLastWindowClose;
 
         /* Launching from the taskbar with no document opens the archive picker. */
         if (string.IsNullOrWhiteSpace(startupArchive))

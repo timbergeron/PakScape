@@ -40,8 +40,20 @@ public partial class PreviewWindow : Window
             Interval = TimeSpan.FromMilliseconds(250),
         };
         InitializeComponent();
+        ApplyBspMarkerPreference();
         _audioProgressTimer.Tick += (_, _) => UpdateAudioProgress();
         ShowCurrentPreview();
+    }
+
+    /// <summary>Seeds the BSP marker checkboxes from the preference; each window can still override them.</summary>
+    private void ApplyBspMarkerPreference()
+    {
+        var showMarkers = PakScapeSettings.Current.ShowBspMarkers;
+        ShowBspArmors.IsChecked = showMarkers;
+        ShowBspMegaHealth.IsChecked = showMarkers;
+        ShowBspPowerups.IsChecked = showMarkers;
+        ShowBspMajorWeapons.IsChecked = showMarkers;
+        ShowBspFlags.IsChecked = showMarkers;
     }
 
     private void ShowCurrentPreview()

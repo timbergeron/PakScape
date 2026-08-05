@@ -32,6 +32,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly ArchiveThumbnailService _thumbnailService;
     private readonly ItemInfoWindowService _itemInfoWindowService;
     private readonly IDetailsColumnLayoutService _detailsColumnLayoutService;
+    private readonly PakScapeSettings _settings = PakScapeSettings.Current;
     private readonly Dictionary<ArchiveFolderNode, FolderTreeNodeViewModel> _folderLookup = [];
     private readonly Stack<ArchiveFolderNode> _backHistory = [];
     private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
@@ -84,6 +85,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         _itemInfoWindowService = itemInfoWindowService;
         _detailsColumnLayoutService = detailsColumnLayoutService;
 
+        /* Newly opened windows start from the preferred view and sort order. */
+        _activeViewMode = _settings.DefaultView;
+        _sortColumn = _settings.DefaultSort switch
+        {
+            DefaultSortPreference.Type => ArchiveSortColumn.Type,
+            DefaultSortPreference.Size => ArchiveSortColumn.Size,
+            _ => ArchiveSortColumn.Name,
+        };
+        _sortDescending = !_settings.DefaultSortAscending;
+
         NameColumn = new DetailsColumnViewModel("Name", "Name", 3, 160, HorizontalAlignment.Left);
         TypeColumn = new DetailsColumnViewModel("Type", "Type", 1.3, 70, HorizontalAlignment.Left);
         DetailsColumn = new DetailsColumnViewModel("Details", "Details", 2, 110, HorizontalAlignment.Left);
@@ -108,6 +119,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         RefreshCommand = new RelayCommand(RefreshCurrentFolder, () => Document is not null && !IsBusy);
         ExitCommand = new RelayCommand(() => CloseRequested?.Invoke(this, EventArgs.Empty));
         AboutCommand = new RelayCommand(ShowAbout);
+        SettingsCommand = new RelayCommand(SettingsWindowService.Show);
 
         NewFolderCommand = new RelayCommand(CreateFolder, CanModifyCurrentFolder);
         AddFilesCommand = new AsyncRelayCommand(AddFilesAsync, CanModifyCurrentFolder);
@@ -402,6 +414,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public RelayCommand ExitCommand { get; }
 
     public RelayCommand AboutCommand { get; }
+
+    public RelayCommand SettingsCommand { get; }
 
     public RelayCommand NewFolderCommand { get; }
 
@@ -758,6 +772,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             IsBusy = true;
             StatusText = "Saving archive...";
+            if (_settings.BackupBeforeSave)
+            {
+                CreateBackup(path);
+            }
             await _archiveService.SaveAsync(Document, path).ConfigureAwait(true);
             _savedRevision = _currentRevision;
             RecordRecentFile(path);
@@ -778,6 +796,42 @@ public sealed class MainWindowViewModel : ViewModelBase
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    /// <summary>Copies the archive that is about to be replaced to '&lt;name&gt;.bak'.</summary>
+    private static void CreateBackup(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(path);
+        if (directory is null)
+        {
+            return;
+        }
+
+        var backupPath = path + ".bak";
+        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(backupPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.Copy(path, temporaryPath);
+            File.Move(temporaryPath, backupPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            /* A failed backup must not block the save the user asked for. */
+            try
+            {
+                File.Delete(temporaryPath);
+            }
+            catch (Exception cleanupFailure) when (
+                cleanupFailure is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup of an uncommitted backup copy.
+            }
         }
     }
 
@@ -1057,7 +1111,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         var description = items.Count == 1
             ? $"'{items[0].Name}'"
             : $"these {items.Count} items";
-        if (!_messageBoxService.Confirm(
+        if (_settings.ConfirmDeletion &&
+            !_messageBoxService.Confirm(
                 items.Count == 1 ? "Delete Item" : "Delete Items",
                 $"Delete {description} from this archive? Folder contents will also be removed."))
         {
@@ -1105,6 +1160,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 try
                 {
+                    if (!PrepareExportDestination(directory, item.Name))
+                    {
+                        continue;
+                    }
+
                     var output = await Task.Run(() =>
                         _fileTransferService.Export(item.Node, directory)).ConfigureAwait(true);
                     outputs.Add(output);
@@ -1128,6 +1188,39 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Clears an existing export of the same name so the item keeps its archive name.
+    /// Returns false when the user declines to replace it.
+    /// </summary>
+    private bool PrepareExportDestination(string directory, string name)
+    {
+        var destination = Path.Combine(directory, name);
+        var isDirectory = Directory.Exists(destination);
+        if (!isDirectory && !File.Exists(destination))
+        {
+            return true;
+        }
+
+        if (_settings.ConfirmOverwrite &&
+            !_messageBoxService.Confirm(
+                "Replace Existing Item?",
+                $"'{name}' already exists in this folder. Do you want to replace it?"))
+        {
+            return false;
+        }
+
+        if (isDirectory)
+        {
+            Directory.Delete(destination, recursive: true);
+        }
+        else
+        {
+            File.Delete(destination);
+        }
+
+        return true;
     }
 
     private async Task SaveSelectedImageAsAsync(string? formatId)

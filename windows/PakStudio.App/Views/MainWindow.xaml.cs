@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
+using PakStudio.App.Services;
 using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
@@ -377,6 +378,37 @@ public partial class MainWindow : Window
     {
         CancelPendingRenameClick();
         _viewModel.SetSelectedItems(ItemList.SelectedItems.Cast<ArchiveItemViewModel>());
+        PreviewSelectionIfPreferred();
+    }
+
+    /// <summary>Opens Quick Preview for the new selection when that preference is on.</summary>
+    private void PreviewSelectionIfPreferred()
+    {
+        if (!PakScapeSettings.Current.QuickPreviewOnSelection ||
+            _previewWindow is { IsVisible: true })
+        {
+            return;
+        }
+
+        var nodes = ItemList.SelectedItems
+            .Cast<ArchiveItemViewModel>()
+            .Select(item => item.Node)
+            .ToList();
+        if (nodes.Count == 0 || !ArchivePreviewBuilder.OpensInQuickPreview(nodes[0]))
+        {
+            return;
+        }
+
+        ShowQuickPreview(nodes);
+
+        /* Keep the keyboard on the item list so arrow keys keep browsing the archive. */
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() =>
+            {
+                Activate();
+                _ = ItemList.Focus();
+            }));
     }
 
     private void ItemList_OnPreviewKeyDown(object sender, KeyEventArgs e)

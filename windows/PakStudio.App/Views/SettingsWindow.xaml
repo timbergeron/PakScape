@@ -1,0 +1,374 @@
+<Window x:Class="PakStudio.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding SelectedTabTitle}"
+        Width="620"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
+
+        <!-- The themed ComboBox template renders SelectionBoxItem, which ignores DisplayMemberPath. -->
+        <DataTemplate x:Key="SettingsOptionTemplate">
+            <TextBlock Text="{Binding Label}" />
+        </DataTemplate>
+
+        <Style x:Key="SettingsTabButtonStyle" TargetType="RadioButton">
+            <Setter Property="Margin" Value="5,0" />
+            <Setter Property="Width" Value="85" />
+            <Setter Property="Height" Value="63" />
+            <Setter Property="GroupName" Value="SettingsTabs" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="TabBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="11"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource BrandGreenBrush}" />
+                                <Setter TargetName="TabBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource MenuHoverBrush}" />
+                                <Setter TargetName="TabBorder"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource PanelBorderBrush}" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                    <Condition Property="IsChecked" Value="False" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="TabBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource MenuHoverBrush}" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsSliderRepeatButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Width="16"
+                                Height="16"
+                                Background="{DynamicResource PanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource MutedForegroundBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Slider">
+            <Setter Property="Height" Value="22" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="4"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource PanelBorderBrush}"
+                                    CornerRadius="2" />
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge"
+                                                  Style="{StaticResource SettingsSliderRepeatButtonStyle}" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge"
+                                                  Style="{StaticResource SettingsSliderRepeatButtonStyle}" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource SettingsSliderThumbStyle}" />
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsNoteStyle" TargetType="Border">
+            <Setter Property="Margin" Value="0,8,0,0" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+        </Style>
+
+        <Style x:Key="SettingsRowLabelStyle" TargetType="TextBlock">
+            <Setter Property="Width" Value="150" />
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="SettingsToggleStyle" TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="24,6,24,16">
+        <StackPanel HorizontalAlignment="Center"
+                    Margin="0,0,0,8"
+                    Orientation="Horizontal">
+            <RadioButton Style="{StaticResource SettingsTabButtonStyle}"
+                         IsChecked="{Binding IsGeneralSelected}">
+                <StackPanel>
+                    <TextBlock HorizontalAlignment="Center"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="24"
+                               Text="&#xE713;" />
+                    <TextBlock Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Text="General" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton Style="{StaticResource SettingsTabButtonStyle}"
+                         IsChecked="{Binding IsArchiveSelected}">
+                <StackPanel>
+                    <TextBlock HorizontalAlignment="Center"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="24"
+                               Text="&#xE7B8;" />
+                    <TextBlock Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Text="Archive" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton Style="{StaticResource SettingsTabButtonStyle}"
+                         IsChecked="{Binding IsPreviewSelected}">
+                <StackPanel>
+                    <TextBlock HorizontalAlignment="Center"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="24"
+                               Text="&#xE7B3;" />
+                    <TextBlock Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Text="Preview" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton Style="{StaticResource SettingsTabButtonStyle}"
+                         IsChecked="{Binding IsExplorerSelected}">
+                <StackPanel>
+                    <TextBlock HorizontalAlignment="Center"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="24"
+                               Text="&#xE8B7;" />
+                    <TextBlock Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Text="Explorer" />
+                </StackPanel>
+            </RadioButton>
+        </StackPanel>
+
+        <Grid Width="540" HorizontalAlignment="Center">
+            <!-- General -->
+            <StackPanel Margin="16,8"
+                        Visibility="{Binding IsGeneralSelected, Converter={StaticResource BooleanToVisibility}}">
+                <StackPanel Margin="0,4"
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource SettingsRowLabelStyle}" Text="Appearance" />
+                    <ComboBox Width="230"
+                              Margin="18,0,0,0"
+                              ItemTemplate="{StaticResource SettingsOptionTemplate}"
+                              ItemsSource="{Binding AppearanceOptions}"
+                              SelectedValue="{Binding Appearance}"
+                              SelectedValuePath="Value" />
+                </StackPanel>
+
+                <StackPanel Margin="0,4"
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource SettingsRowLabelStyle}" Text="Default view" />
+                    <ComboBox Width="230"
+                              Margin="18,0,0,0"
+                              ItemTemplate="{StaticResource SettingsOptionTemplate}"
+                              ItemsSource="{Binding DefaultViewOptions}"
+                              SelectedValue="{Binding DefaultView}"
+                              SelectedValuePath="Value" />
+                </StackPanel>
+
+                <StackPanel Margin="0,4"
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource SettingsRowLabelStyle}" Text="Default sort" />
+                    <ComboBox Width="230"
+                              Margin="18,0,0,0"
+                              ItemTemplate="{StaticResource SettingsOptionTemplate}"
+                              ItemsSource="{Binding DefaultSortOptions}"
+                              SelectedValue="{Binding DefaultSort}"
+                              SelectedValuePath="Value" />
+                </StackPanel>
+
+                <StackPanel Margin="0,4"
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource SettingsRowLabelStyle}" Text="Sort order" />
+                    <ComboBox Width="230"
+                              Margin="18,0,0,0"
+                              ItemTemplate="{StaticResource SettingsOptionTemplate}"
+                              ItemsSource="{Binding SortOrderOptions}"
+                              SelectedValue="{Binding DefaultSortAscending}"
+                              SelectedValuePath="Value" />
+                </StackPanel>
+
+                <StackPanel Margin="0,4"
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource SettingsRowLabelStyle}"
+                               Margin="0,2,0,0"
+                               VerticalAlignment="Top"
+                               Text="Text size" />
+                    <StackPanel Width="230" Margin="18,0,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       Text="A" />
+                            <Slider Grid.Column="1"
+                                    Margin="8,0"
+                                    IsSnapToTickEnabled="True"
+                                    Maximum="18"
+                                    Minimum="11"
+                                    TickFrequency="1"
+                                    Value="{Binding TextSize}" />
+                            <TextBlock Grid.Column="2"
+                                       VerticalAlignment="Center"
+                                       FontSize="20"
+                                       Text="A" />
+                        </Grid>
+
+                        <UniformGrid Margin="25,2,25,0" Columns="8" Rows="1">
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource MutedForegroundBrush}" />
+                        </UniformGrid>
+
+                        <TextBlock Margin="0,4,0,0"
+                                   HorizontalAlignment="Center"
+                                   FontWeight="Medium"
+                                   Foreground="{DynamicResource MutedForegroundBrush}"
+                                   Text="{Binding TextSizeCaption}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Style="{StaticResource SettingsNoteStyle}">
+                    <TextBlock FontSize="12"
+                               Foreground="{DynamicResource MutedForegroundBrush}"
+                               TextWrapping="Wrap"
+                               Text="The default view applies to newly opened archive windows. PakScape follows the Windows appearance unless you choose a specific mode." />
+                </Border>
+            </StackPanel>
+
+            <!-- Archive -->
+            <StackPanel Margin="16,8"
+                        Visibility="{Binding IsArchiveSelected, Converter={StaticResource BooleanToVisibility}}">
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Confirm before deleting archive items"
+                          IsChecked="{Binding ConfirmDeletion}" />
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Confirm before overwriting exported files"
+                          IsChecked="{Binding ConfirmOverwrite}" />
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Create a backup before saving an archive"
+                          IsChecked="{Binding BackupBeforeSave}" />
+            </StackPanel>
+
+            <!-- Preview -->
+            <StackPanel Margin="16,8"
+                        Visibility="{Binding IsPreviewSelected, Converter={StaticResource BooleanToVisibility}}">
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Open Quick Preview when selecting an item"
+                          IsChecked="{Binding QuickPreviewOnSelection}" />
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Animate models when they open"
+                          IsChecked="{Binding AnimateModels}" />
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Show item markers on BSP level previews"
+                          IsChecked="{Binding ShowBspMarkers}" />
+            </StackPanel>
+
+            <!-- Explorer -->
+            <StackPanel Margin="16,8"
+                        Visibility="{Binding IsExplorerSelected, Converter={StaticResource BooleanToVisibility}}">
+                <DockPanel Margin="0,0,0,12">
+                    <Button Margin="18,0,0,0"
+                            DockPanel.Dock="Right"
+                            Command="{Binding AssociateCommand}"
+                            Content="{Binding AssociateButtonText}" />
+                    <TextBlock VerticalAlignment="Center" Text="PAK/PK3 file association" />
+                </DockPanel>
+
+                <CheckBox Style="{StaticResource SettingsToggleStyle}"
+                          Content="Enable PakScape File Explorer actions"
+                          IsChecked="{Binding ExplorerActionsEnabled}" />
+
+                <Border Style="{StaticResource SettingsNoteStyle}">
+                    <TextBlock FontSize="12"
+                               Foreground="{DynamicResource MutedForegroundBrush}"
+                               TextWrapping="Wrap"
+                               Text="Right-click a PAK/PK3 archive to extract it, or a folder to pack it, straight from File Explorer. PakScape will ask where to save the result." />
+                </Border>
+
+                <Button Margin="0,12,0,0"
+                        Padding="14,6"
+                        HorizontalAlignment="Right"
+                        Command="{Binding ManageAssociationsCommand}"
+                        Content="Manage Default Apps..." />
+            </StackPanel>
+        </Grid>
+    </StackPanel>
+</Window>

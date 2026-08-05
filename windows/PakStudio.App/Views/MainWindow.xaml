@@ -41,6 +41,7 @@
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
         <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsCommand}" />
         <KeyBinding Key="W" Modifiers="Control" Command="{Binding ExitCommand}" />
+        <KeyBinding Key="OemComma" Modifiers="Control" Command="{Binding SettingsCommand}" />
         <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
         <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
         <KeyBinding Key="F2" Command="{Binding RenameCommand}" />
@@ -675,6 +676,10 @@
                 <MenuItem Header="_Add Files..." Command="{Binding AddFilesCommand}" />
                 <MenuItem Header="Add _Folder..." Command="{Binding AddFolderCommand}" />
                 <MenuItem Header="_Export Selected..." Command="{Binding ExportCommand}" />
+                <Separator />
+                <MenuItem Header="Settin_gs..."
+                          Command="{Binding SettingsCommand}"
+                          InputGestureText="Ctrl+," />
                 <Separator />
                 <MenuItem Header="_Close Window"
                           Command="{Binding ExitCommand}"
