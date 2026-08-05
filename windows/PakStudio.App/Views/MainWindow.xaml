@@ -189,6 +189,7 @@
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Stretch" />
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="{x:Static helpers:SplitCursors.VerticalSplit}" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="ResizeBehavior" Value="CurrentAndNext" />
             <Setter Property="ResizeDirection" Value="Columns" />
@@ -827,6 +828,7 @@
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
                           Background="Transparent"
+                          Cursor="{x:Static helpers:SplitCursors.VerticalSplit}"
                           DragCompleted="FolderSplitter_OnDragCompleted"
                           DragStarted="FolderSplitter_OnDragStarted"
                           ResizeBehavior="PreviousAndNext"
@@ -1284,10 +1286,11 @@
                     Visibility="Collapsed"
                     Background="Transparent"
                     BorderThickness="0"
+                    Cursor="{x:Static helpers:SplitCursors.VerticalSplit}"
                     Focusable="False"
                     Click="FolderPaneToggle_OnClick"
                     PreviewMouseLeftButtonDown="FolderPaneIndicator_OnPreviewMouseLeftButtonDown"
-                    MouseMove="FolderPaneIndicator_OnMouseMove"
+                    PreviewMouseMove="FolderPaneIndicator_OnPreviewMouseMove"
                     PreviewMouseLeftButtonUp="FolderPaneIndicator_OnPreviewMouseLeftButtonUp"
                     ToolTip="Drag or click to show folders">
                 <Button.Style>

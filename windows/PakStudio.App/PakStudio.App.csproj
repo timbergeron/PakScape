@@ -3,6 +3,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Referenced only for the split-bar resize cursor, which WPF does not ship. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>PakScape</AssemblyName>
     <Product>PakScape</Product>
     <Title>PakScape for Windows</Title>
@@ -16,6 +18,13 @@
     <NativeAudioLibrary>$(NativeBuildDirectory)\pakscape_audio.dll</NativeAudioLibrary>
     <NativeModelLibrary>$(NativeBuildDirectory)\pakscape_model.dll</NativeModelLibrary>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms is here for one cursor, so keep its types out of the global usings;
+         Application, Button, Point and friends would all become ambiguous with WPF. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\PakStudio.Core\PakStudio.Core.csproj" />

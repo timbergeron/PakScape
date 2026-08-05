@@ -304,7 +304,9 @@ public partial class MainWindow : Window
         FolderPaneCollapsedIndicator.CaptureMouse();
     }
 
-    private void FolderPaneIndicator_OnMouseMove(object sender, MouseEventArgs e)
+    // Tunnelled, because a pressed Button marks every bubbling MouseMove handled while
+    // it holds capture and the drag would never be seen.
+    private void FolderPaneIndicator_OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (!_isFolderPaneIndicatorPressed)
         {
