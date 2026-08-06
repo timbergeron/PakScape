@@ -509,6 +509,12 @@ private final class PassThroughView: NSView {
 }
 
 /// Draws the OpenGL-rendered model and turns pointer input into camera moves.
+///
+/// The frame itself comes from the shared C++ renderer, which speaks fixed-function OpenGL
+/// for Linux and Windows too, so this stays on `NSOpenGLView` rather than forking a Metal
+/// path for one platform. Marking the class deprecated alongside the API it wraps keeps
+/// that choice from burying the build log in warnings.
+@available(macOS, deprecated: 10.14, message: "Bridges the shared OpenGL renderer.")
 @MainActor
 final class ModelRenderView: NSOpenGLView {
     private(set) var viewer: QuakeModelViewer?

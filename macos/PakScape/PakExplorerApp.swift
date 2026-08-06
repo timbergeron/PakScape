@@ -1,10 +1,28 @@
 import SwiftUI
 import AppKit
 
+extension UserDefaults {
+    /// UserDefaults only emits KVO for a property whose name is the defaults key,
+    /// so this has to stay spelled exactly like `PakScapePreferencesKey.appearance`.
+    @objc dynamic var appearance: String? {
+        string(forKey: PakScapePreferencesKey.appearance)
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let maximumVisibleDockRecents = 5
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Watched here rather than from the Settings picker so the choice reaches
+        // every window whether or not Settings is open — including the windows
+        // opened long after the preference was last touched.
+        appearanceObservation = UserDefaults.standard.observe(
+            \.appearance,
+            options: [.initial, .new]
+        ) { _, _ in
+            PakScapeAppearance.applyStoredSetting()
+        }
         FinderServiceManager.shared.applyInitialSettings()
         removeBlankFileMenuItem()
     }
@@ -84,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct PakScapeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage(PakScapePreferencesKey.appearance) private var appearance = "automatic"
 
     init() {
         if #available(macOS 10.12, *) {
@@ -100,7 +117,6 @@ struct PakScapeApp: App {
                 isEditable: file.isEditable
             )
                 .id(ObjectIdentifier(file.document))
-                .preferredColorScheme(preferredColorScheme)
         }
         .commands {
             PakAboutCommands()
@@ -115,14 +131,6 @@ struct PakScapeApp: App {
             PreferencesView()
         }
         .windowResizability(.contentSize)
-    }
-
-    private var preferredColorScheme: ColorScheme? {
-        switch appearance {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
     }
 }
 
@@ -279,7 +287,15 @@ struct PakViewCommands: Commands {
     @FocusedValue(\.pakCommands) private var pakCommands
 
     var body: some Commands {
-        CommandMenu("View") {
+        CommandGroup(after: .sidebar) {
+            Button(pakCommands?.isSidebarCollapsed == true ? "Show Sidebar" : "Hide Sidebar") {
+                pakCommands?.toggleSidebar()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .option])
+            .disabled(pakCommands == nil)
+
+            Divider()
+
             Button("Quick Look") {
                 pakCommands?.quickLook()
             }

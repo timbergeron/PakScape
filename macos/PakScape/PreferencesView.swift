@@ -24,6 +24,47 @@ enum PakScapePreferencesKey {
     static let useQuakeEngineForDemos = "useQuakeEngineForDemos"
 }
 
+func pakScapeWindowAppearance(for setting: String) -> NSAppearance? {
+    switch setting {
+    case "light":
+        return NSAppearance(named: .aqua)
+    case "dark":
+        return NSAppearance(named: .darkAqua)
+    default:
+        // nil lets AppKit follow the macOS system appearance.
+        return nil
+    }
+}
+
+/// The single place the appearance preference reaches AppKit.
+///
+/// `NSApp.appearance` already covers every window the app will ever open — the
+/// SwiftUI documents, the Settings and About panels, and the AppKit preview and
+/// Get Info panels alike — and SwiftUI derives its own `colorScheme` from the
+/// window it draws into. Driving the same preference a second way, per window or
+/// through `preferredColorScheme`, leaves two sources of truth that drift: SwiftUI
+/// holds the last scheme it was handed even after the window has moved on, so the
+/// surfaces repaint dark while the labels are still resolved for the light scheme.
+/// That is the black-text-on-black window, and it is why this is the only setter.
+enum PakScapeAppearance {
+    static func applyStoredSetting() {
+        apply(
+            UserDefaults.standard.string(forKey: PakScapePreferencesKey.appearance)
+                ?? "automatic"
+        )
+    }
+
+    static func apply(_ setting: String) {
+        NSApp.appearance = pakScapeWindowAppearance(for: setting)
+        // A window carrying its own appearance outranks the application's, so it
+        // would sit out every later change. Clearing it puts the window back to
+        // inheriting, which is what every window in the app wants.
+        for window in NSApp.windows where window.appearance != nil {
+            window.appearance = nil
+        }
+    }
+}
+
 func pakScapePreviewAppearance() -> NSAppearance {
     switch UserDefaults.standard.string(forKey: PakScapePreferencesKey.previewBackground) {
     case "light":
@@ -309,6 +350,10 @@ private struct GeneralPreferencesView: View {
 
             PreferencesNote("The default view applies to newly opened archive windows. PakScape follows the system appearance unless you choose a specific mode.")
         }
+        // The picker only records the choice; PakScapeAppearance, watching the
+        // preference from the app delegate, is what applies it. Applying it from
+        // here would only reach the windows that happen to be open while this tab
+        // is on screen.
     }
 }
 

@@ -188,6 +188,8 @@ struct ContentView: View {
 
     private func configureWindowAppearance(_ window: NSWindow?) {
         guard let window else { return }
+        // Deliberately leaves window.appearance alone: it stays nil so the window
+        // inherits whatever PakScapeAppearance has set on NSApp.
         // The Dock automatically builds a document-window section from the
         // Window menu. Our custom Dock menu already provides recent PAKs.
         window.isExcludedFromWindowsMenu = true
@@ -699,6 +701,8 @@ struct ContentView: View {
 }
 
 struct PakCommands {
+    let toggleSidebar: () -> Void
+    let isSidebarCollapsed: Bool
     let deleteFile: () -> Void
     let canDeleteFile: Bool
     let rename: () -> Void
@@ -842,6 +846,10 @@ private extension ContentView {
 
     var currentPakCommands: PakCommands {
         PakCommands(
+            toggleSidebar: {
+                split.toggle()
+            },
+            isSidebarCollapsed: split.isCollapsed,
             deleteFile: {
                 model.deleteSelectedFile()
             },

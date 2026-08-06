@@ -752,6 +752,7 @@ public partial class MainWindow : Window
     {
         FolderSplitterColumn.Width = collapsed ? new GridLength(0) : new GridLength(6);
         FolderSplitter.IsVisible = !collapsed;
+        FolderPaneToggleMenuItem.Header = collapsed ? "_Show Sidebar" : "_Hide Sidebar";
         if (updateIndicator)
         {
             if (!collapsed)

@@ -710,6 +710,10 @@
                 <MenuItem Header="_Open Selection" Command="{Binding OpenSelectedCommand}" InputGestureText="Enter" />
             </MenuItem>
             <MenuItem Header="_View">
+                <MenuItem x:Name="FolderPaneToggleMenuItem"
+                          Header="_Hide Sidebar"
+                          Click="FolderPaneToggle_OnClick" />
+                <Separator />
                 <MenuItem Header="_Large Icons"
                           Command="{Binding ShowLargeIconsCommand}"
                           IsCheckable="True"

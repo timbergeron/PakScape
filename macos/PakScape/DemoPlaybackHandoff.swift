@@ -84,7 +84,7 @@ enum DemoPlaybackHandoff {
             throw DemoPlaybackError.unavailablePort(reason: nil)
         }
 
-        let maps = summary.map(orderedMaps) ?? []
+        let maps = summary.map { orderedMaps($0) } ?? []
         var items = [
             URLQueryItem(name: "source", value: sources[0].absoluteString),
             URLQueryItem(name: "file", value: virtualFileName(demo.fileName)),

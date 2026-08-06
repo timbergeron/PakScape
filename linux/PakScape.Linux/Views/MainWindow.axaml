@@ -133,6 +133,10 @@
           <MenuItem Header="_Open Selection" Command="{Binding OpenSelectedCommand}" InputGesture="Enter" />
         </MenuItem>
         <MenuItem Header="_View">
+          <MenuItem x:Name="FolderPaneToggleMenuItem"
+                    Header="_Hide Sidebar"
+                    Click="OnFolderPaneToggleClick" />
+          <Separator />
           <MenuItem Header="_Large Icons" Command="{Binding ShowLargeIconsCommand}" />
           <MenuItem Header="_Small Icons" Command="{Binding ShowSmallIconsCommand}" />
           <MenuItem Header="_List" Command="{Binding ShowListCommand}" />
