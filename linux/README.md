@@ -1,6 +1,6 @@
 # PakScape for Linux
 
-PakScape for Linux is an Avalonia desktop application for browsing and editing Quake `.pak` and `.pk3` archives. It reuses the tested, platform-neutral C# archive core from the Windows edition while keeping Linux desktop integration and file handling in dedicated projects.
+PakScape for Linux is an Avalonia desktop application for browsing and editing Quake `.pak`, `.pk3`, and KEX Engine `.kpf` archives. It reuses the tested, platform-neutral C# archive core from the Windows edition while keeping Linux desktop integration and file handling in dedicated projects.
 
 ## Supported systems
 
@@ -28,7 +28,7 @@ Run the application during development:
 dotnet run --project linux/PakScape.Linux/PakScape.Linux.csproj
 ```
 
-An archive path may be supplied on the command line. The installed desktop entry uses the same path to open `.pak` and `.pk3` files from Files/Nautilus.
+An archive path may be supplied on the command line. The installed desktop entry uses the same path to open `.pak`, `.pk3`, and `.kpf` files from Files/Nautilus.
 
 The desktop UI follows the Linux system light/dark preference. Archive browsing includes
 inline image and Quake-format thumbnails, sortable name/type/size/modified columns,

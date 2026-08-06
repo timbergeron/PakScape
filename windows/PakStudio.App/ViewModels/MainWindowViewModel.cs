@@ -104,6 +104,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         NewCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("pak"), () => !IsBusy);
         NewPk3Command = new AsyncRelayCommand(() => CreateNewArchiveAsync("pk3"), () => !IsBusy);
+        NewKpfCommand = new AsyncRelayCommand(() => CreateNewArchiveAsync("kpf"), () => !IsBusy);
         OpenCommand = new AsyncRelayCommand(OpenAsync, () => !IsBusy);
         OpenRecentCommand = new AsyncRelayCommand<string>(OpenRecentAsync, path =>
             !IsBusy && !string.IsNullOrWhiteSpace(path));
@@ -394,6 +395,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand NewCommand { get; }
 
     public AsyncRelayCommand NewPk3Command { get; }
+
+    public AsyncRelayCommand NewKpfCommand { get; }
 
     public AsyncRelayCommand OpenCommand { get; }
 

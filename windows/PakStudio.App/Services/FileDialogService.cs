@@ -11,7 +11,7 @@ public sealed class FileDialogService : IFileDialogService
         var dialog = new OpenFileDialog
         {
             Title = "Open Archive",
-            Filter = "Quake archives (*.pak;*.pk3)|*.pak;*.pk3|PAK archives (*.pak)|*.pak|PK3 archives (*.pk3)|*.pk3|All files (*.*)|*.*",
+            Filter = "Quake archives (*.pak;*.pk3;*.kpf)|*.pak;*.pk3;*.kpf|PAK archives (*.pak)|*.pak|PK3 archives (*.pk3)|*.pk3|KPF archives (*.kpf)|*.kpf|All files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };
@@ -21,17 +21,22 @@ public sealed class FileDialogService : IFileDialogService
 
     public string? PickArchiveSavePath(string suggestedFileName, string formatId, string? existingPath = null)
     {
+        var normalizedFormat = formatId.ToLowerInvariant();
+        var filterIndex = normalizedFormat switch
+        {
+            "pk3" => 2,
+            "kpf" => 3,
+            _ => 1,
+        };
         var dialog = new SaveFileDialog
         {
             Title = "Save Archive",
-            Filter = "PAK archives (*.pak)|*.pak|PK3 archives (*.pk3)|*.pk3",
+            Filter = "PAK archives (*.pak)|*.pak|PK3 archives (*.pk3)|*.pk3|KPF archives (*.kpf)|*.kpf",
             FileName = suggestedFileName,
             OverwritePrompt = true,
             AddExtension = true,
-            DefaultExt = string.Equals(formatId, "pk3", StringComparison.OrdinalIgnoreCase)
-                ? ".pk3"
-                : ".pak",
-            FilterIndex = string.Equals(formatId, "pk3", StringComparison.OrdinalIgnoreCase) ? 2 : 1,
+            DefaultExt = $".{normalizedFormat}",
+            FilterIndex = filterIndex,
         };
 
         if (!string.IsNullOrWhiteSpace(existingPath))

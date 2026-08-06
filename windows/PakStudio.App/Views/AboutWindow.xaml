@@ -32,7 +32,7 @@
                        Foreground="{DynamicResource MutedForegroundBrush}"
                        TextAlignment="Center"
                        TextWrapping="Wrap"
-                       Text="Simple Quake .pak &amp; .pk3 explorer inspired by PakScape and originally developed by Peter Engström." />
+                       Text="Simple Quake .pak, .pk3 &amp; .kpf explorer inspired by PakScape and originally developed by Peter Engström." />
 
             <TextBlock Margin="0,12,0,0"
                        HorizontalAlignment="Center"

@@ -485,6 +485,9 @@ public partial class MainWindowViewModel : ObservableObject
     private void NewPk3() => NewWindowRequested?.Invoke("pk3");
 
     [RelayCommand]
+    private void NewKpf() => NewWindowRequested?.Invoke("kpf");
+
+    [RelayCommand]
     private async Task OpenAsync()
     {
         if (IsBusy)
@@ -1392,9 +1395,7 @@ public partial class MainWindowViewModel : ObservableObject
         var path = Document.FilePath;
         if (saveAs || string.IsNullOrWhiteSpace(path))
         {
-            var extension = Document.FormatId.Equals("pk3", StringComparison.OrdinalIgnoreCase)
-                ? ".pk3"
-                : ".pak";
+            var extension = $".{Document.FormatId.ToLowerInvariant()}";
             var suggestedName = string.IsNullOrWhiteSpace(Document.FilePath)
                 ? $"Untitled{extension}"
                 : Path.GetFileName(Document.FilePath);

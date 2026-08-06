@@ -24,9 +24,10 @@ public static class ShellIntegrationService
     [
         (".pak", "PakScape.pak", "Quake PAK archive"),
         (".pk3", "PakScape.pk3", "Quake PK3 archive"),
+        (".kpf", "PakScape.kpf", "Quake KPF archive"),
     ];
 
-    /// <summary>True when both archive types resolve to this copy of PakScape.</summary>
+    /// <summary>True when all archive types resolve to this copy of PakScape.</summary>
     public static bool IsAssociated
     {
         get
@@ -55,7 +56,7 @@ public static class ShellIntegrationService
         }
     }
 
-    /// <summary>Registers the PAK/PK3 ProgIDs so PakScape appears as a handler for both types.</summary>
+    /// <summary>Registers the archive ProgIDs so PakScape appears as a handler for each type.</summary>
     public static void Associate()
     {
         if (ExecutablePath() is not { } executable)

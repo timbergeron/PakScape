@@ -639,11 +639,11 @@ enum PakError: Error, LocalizedError {
         case .archiveTooLarge:
             return "The archive is too large for the Quake PAK format."
         case .invalidZip:
-            return "The PK3 central directory is invalid or unsupported."
+            return "The ZIP archive's central directory is invalid or unsupported."
         case .unsupportedZipFeature(let feature):
-            return "The PK3 uses an unsupported ZIP feature: \(feature)."
+            return "The archive uses an unsupported ZIP feature: \(feature)."
         case .expandedArchiveTooLarge:
-            return "The PK3 would expand beyond PakScape's 2 GiB safety limit."
+            return "The ZIP archive would expand beyond PakScape's 2 GiB safety limit."
         case .unknown(let msg):
             return msg
         }
@@ -1044,7 +1044,7 @@ struct PakLoader {
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            throw PakError.unknown("Failed to unzip PK3 archive")
+            throw PakError.unknown("Failed to unzip ZIP archive")
         }
 
         let root = PakNode(name: "/")
@@ -1501,7 +1501,7 @@ struct PakZipWriter {
         case processFailed
 
         var errorDescription: String? {
-            "Failed to create the PK3 archive."
+            "Failed to create the ZIP archive."
         }
     }
 

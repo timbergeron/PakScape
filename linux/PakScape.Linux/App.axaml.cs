@@ -31,6 +31,7 @@ public partial class App : Application, IDisposable
             {
                 new PakFormatHandler(),
                 new Pk3FormatHandler(),
+                new KpfFormatHandler(),
             };
             _desktop = desktop;
             desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;

@@ -96,6 +96,7 @@
         <MenuItem Header="_File">
           <MenuItem Header="New _PAK" Command="{Binding NewCommand}" InputGesture="Ctrl+N" />
           <MenuItem Header="New P_K3" Command="{Binding NewPk3Command}" InputGesture="Ctrl+Shift+N" />
+          <MenuItem Header="New KP_F" Command="{Binding NewKpfCommand}" />
           <MenuItem Header="_Open…" Command="{Binding OpenCommand}" InputGesture="Ctrl+O" />
           <MenuItem x:Name="RecentMenu" Header="Open _Recent" />
           <Separator />

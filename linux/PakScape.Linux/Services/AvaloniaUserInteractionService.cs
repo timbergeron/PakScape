@@ -26,13 +26,19 @@ public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
         MimeTypes = ["application/x-quake-pk3"],
     };
 
+    private static readonly FilePickerFileType KpfArchiveType = new("Quake KPF archive")
+    {
+        Patterns = ["*.kpf"],
+        MimeTypes = ["application/x-quake-kpf"],
+    };
+
     public async Task<string?> PickArchiveToOpenAsync()
     {
         var files = await Owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open Quake archive",
             AllowMultiple = false,
-            FileTypeFilter = [PakArchiveType, Pk3ArchiveType],
+            FileTypeFilter = [PakArchiveType, Pk3ArchiveType, KpfArchiveType],
         });
         return files.Count > 0 ? files[0].TryGetLocalPath() : null;
     }
@@ -41,15 +47,18 @@ public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
         string suggestedFileName,
         string formatId)
     {
-        var selectedType = string.Equals(formatId, "pk3", StringComparison.OrdinalIgnoreCase)
-            ? Pk3ArchiveType
-            : PakArchiveType;
+        var selectedType = formatId.ToLowerInvariant() switch
+        {
+            "pk3" => Pk3ArchiveType,
+            "kpf" => KpfArchiveType,
+            _ => PakArchiveType,
+        };
         var file = await Owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Quake archive",
             SuggestedFileName = suggestedFileName,
-            DefaultExtension = selectedType == Pk3ArchiveType ? "pk3" : "pak",
-            FileTypeChoices = [PakArchiveType, Pk3ArchiveType],
+            DefaultExtension = formatId.ToLowerInvariant(),
+            FileTypeChoices = [PakArchiveType, Pk3ArchiveType, KpfArchiveType],
             SuggestedFileType = selectedType,
             ShowOverwritePrompt = true,
         });

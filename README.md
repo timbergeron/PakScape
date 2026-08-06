@@ -1,6 +1,6 @@
 # PakScape
 
-PakScape is a Quake `.pak` and `.pk3` archive browser and editor for macOS, Windows, and Linux, inspired by the original PakScape developed by Peter Engström.
+PakScape is a Quake `.pak`, `.pk3`, and KEX Engine `.kpf` archive browser and editor for macOS, Windows, and Linux, inspired by the original PakScape developed by Peter Engström.
 
 ## Platform editions
 
@@ -22,7 +22,7 @@ Each edition uses the platform's native desktop conventions while sharing the sa
 - Turn BSP brush models — ammo boxes, health kits, and prefab props — in the same viewer, textured from the file. PakScape spots them by their content, not their name, so a playable level keeps its flat overview instead.
 - Preview QSS-M audio consistently on every platform: WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus, IT, S3M, XM, MOD, and UMX.
 - Find out what a file is for. `progs.dat` reports its progdefs CRC and how much code it holds, `end1.bin` is read as the DOS text screen it is, and `quake.rc`, `palette.lmp`, `gfx.wad`, and other well-known names each explain themselves in a line.
-- Read and write PAK and PK3 archives with traversal, duplicate-path, symlink, and size validation.
+- Read and write PAK, PK3, and ZIP-based KPF archives with traversal, duplicate-path, symlink, and size validation.
 - Integrate with platform file pickers, recent files, drag and drop, and native keyboard navigation.
 
 GitHub Actions builds and tests all three editions on every push and pull request to `main`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development checklist, [CHANGELOG.md](CHANGELOG.md) for unreleased changes, and [SECURITY.md](SECURITY.md) for vulnerability reporting.

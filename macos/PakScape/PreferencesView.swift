@@ -392,7 +392,7 @@ private struct FinderPreferencesView: View {
     var body: some View {
         PreferencesPage {
             HStack {
-                Text("PAK/PK3 file association")
+                Text("PAK/PK3/KPF file association")
                 Spacer(minLength: 18)
                 Button(isAssociated ? "Associated" : "Associate with PakScape") {
                     PakFileAssociationManager.associate()
@@ -406,7 +406,7 @@ private struct FinderPreferencesView: View {
                     FinderServiceManager.shared.updateRegistration(isEnabled: newValue)
                 }
 
-            PreferencesNote("Use Finder's Services menu to extract selected PAK/PK3 archives or pack selected folders. PakScape will ask where to save the result.")
+            PreferencesNote("Use Finder's Services menu to extract selected PAK/PK3/KPF archives or pack selected folders. PakScape will ask where to save the result.")
 
             HStack {
                 Spacer()

@@ -27,6 +27,8 @@ Notable user-visible changes are documented here.
 
 ### Added
 
+- Cross-platform read/write support for KEX Engine `.kpf` resource archives,
+  including document creation, native file associations, and safe ZIP validation.
 - macOS BSP level previews now open fitted to the panel instead of running under
   the marker controls, and zoom with the scroll wheel or a trackpad pinch, with
   drag to pan and double-click to reset. Each marker checkbox now appears only

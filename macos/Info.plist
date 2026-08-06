@@ -32,6 +32,18 @@
 				<string>com.timbergeron.PakScape.pk3</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Quake KPF File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.timbergeron.PakScape.kpf</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -73,6 +85,7 @@
 			<array>
 				<string>com.timbergeron.PakScape.pak</string>
 				<string>com.timbergeron.PakScape.pk3</string>
+				<string>com.timbergeron.PakScape.kpf</string>
 			</array>
 		</dict>
 		<dict>
@@ -135,6 +148,28 @@
 				<key>public.mime-type</key>
 				<array>
 					<string>application/x-quake-pk3</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.pkware.zip-archive</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Quake KPF archive</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.timbergeron.PakScape.kpf</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kpf</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-quake-kpf</string>
 				</array>
 			</dict>
 		</dict>

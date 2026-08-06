@@ -30,7 +30,8 @@ enum PakFileAssociationManager {
 
     private static let supportedTypes: [UTType] = [
         .pakArchive,
-        .pk3Archive
+        .pk3Archive,
+        .kpfArchive
     ]
 }
 
@@ -60,14 +61,14 @@ final class FinderServiceManager {
 
 final class FinderServiceProvider: NSObject {
     private let fileManager = FileManager.default
-    private static let supportedPakExtensions: Set<String> = ["pak", "pk3"]
+    private static let supportedPakExtensions: Set<String> = ["pak", "pk3", "kpf"]
 
     @objc func extractPakService(_ pboard: NSPasteboard, userData: String?, error errorOut: AutoreleasingUnsafeMutablePointer<NSString?>?) {
         let urls = fileURLs(from: pboard)
         let pakURLs = urls.filter { Self.supportedPakExtensions.contains($0.pathExtension.lowercased()) }
 
         guard !pakURLs.isEmpty else {
-            errorOut?.pointee = "Select a .pak or .pk3 file to extract.".NSStringValue
+            errorOut?.pointee = "Select a .pak, .pk3, or .kpf file to extract.".NSStringValue
             return
         }
 
@@ -187,7 +188,7 @@ private extension FinderServiceProvider {
 
     func loadPak(at url: URL) throws -> PakFile {
         let ext = url.pathExtension.lowercased()
-        if ext == "pk3" {
+        if ext == "pk3" || ext == "kpf" {
             return try PakLoader.loadZip(from: url, name: url.lastPathComponent)
         }
 

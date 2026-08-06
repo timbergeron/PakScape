@@ -434,7 +434,7 @@
                                 DockPanel.Dock="Right"
                                 Command="{Binding AssociateCommand}"
                                 Content="{Binding AssociateButtonText}" />
-                        <TextBlock VerticalAlignment="Center" Text="PAK/PK3 file association" />
+                        <TextBlock VerticalAlignment="Center" Text="PAK/PK3/KPF file association" />
                     </DockPanel>
 
                     <CheckBox Style="{StaticResource SettingsToggleStyle}"
@@ -445,7 +445,7 @@
                         <TextBlock FontSize="12"
                                    Foreground="{DynamicResource MutedForegroundBrush}"
                                    TextWrapping="Wrap"
-                                   Text="Right-click a PAK/PK3 archive to extract it, or a folder to pack it, straight from File Explorer. PakScape will ask where to save the result." />
+                                   Text="Right-click a PAK/PK3/KPF archive to extract it, or a folder to pack it, straight from File Explorer. PakScape will ask where to save the result." />
                     </Border>
 
                     <Button Margin="0,12,0,0"

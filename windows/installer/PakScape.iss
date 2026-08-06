@@ -51,10 +51,15 @@ Root: HKCU; Subkey: "Software\Classes\.pk3\OpenWithProgids"; ValueType: string; 
 Root: HKCU; Subkey: "Software\Classes\PakScape.pk3"; ValueType: string; ValueName: ""; ValueData: "Quake PK3 archive"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\PakScape.pk3\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\PakScape.File.ico"""
 Root: HKCU; Subkey: "Software\Classes\PakScape.pk3\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\PakScape.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.kpf\OpenWithProgids"; ValueType: string; ValueName: "PakScape.kpf"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\PakScape.kpf"; ValueType: string; ValueName: ""; ValueData: "Quake KPF archive"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\PakScape.kpf\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\PakScape.File.ico"""
+Root: HKCU; Subkey: "Software\Classes\PakScape.kpf\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\PakScape.exe"" ""%1"""
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "PakScape"; ValueData: "Software\PakScape\Capabilities"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\PakScape\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "PakScape"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\PakScape\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pak"; ValueData: "PakScape.pak"
 Root: HKCU; Subkey: "Software\PakScape\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pk3"; ValueData: "PakScape.pk3"
+Root: HKCU; Subkey: "Software\PakScape\Capabilities\FileAssociations"; ValueType: string; ValueName: ".kpf"; ValueData: "PakScape.kpf"
 
 [Run]
 Filename: "{app}\PakScape.exe"; Description: "Launch PakScape"; Flags: nowait postinstall skipifsilent

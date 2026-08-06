@@ -12,6 +12,33 @@ public sealed class Pk3FormatHandlerTests
     private readonly Pk3FormatHandler _handler = new();
 
     [Fact]
+    public async Task KpfHandler_RoundTripsZipDataAndPreservesFormatIdentity()
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, "QuakeEX.kpf");
+        var handler = new KpfFormatHandler();
+
+        try
+        {
+            var document = new ArchiveDocument { FormatId = "kpf" };
+            ArchiveTreeEditor.AddFile(document.Root, "localization.json", "{}"u8.ToArray());
+
+            await handler.SaveAsync(document, path, TestContext.Current.CancellationToken);
+            var reopened = await handler.OpenAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.True(handler.CanOpen(path));
+            Assert.False(handler.CanOpen(Path.ChangeExtension(path, ".pk3")));
+            Assert.Equal("kpf", reopened.FormatId);
+            Assert.Equal("QuakeEX.kpf", reopened.DisplayName);
+            Assert.Equal("localization.json", Assert.Single(reopened.Root.Files).Name);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SaveThenOpen_RoundTripsFilesAndEmptyFolders()
     {
         var directory = CreateTemporaryDirectory();

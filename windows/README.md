@@ -4,8 +4,8 @@ This folder contains the Windows desktop edition of PakScape, built as a WPF app
 
 Current capabilities include:
 
-- Open, create, edit, and atomically save Quake PAK and PK3 archives.
-- Work with multiple PAK and PK3 documents in independent archive windows.
+- Open, create, edit, and atomically save Quake PAK, PK3, and KPF archives.
+- Work with multiple PAK, PK3, and KPF documents in independent archive windows.
 - Add files or folders, create folders, rename, delete, and export archive items.
 - Add files, imported folders, or new folders directly from the item context menu.
 - Cut, copy, paste, select all, and drag archive items to or from Windows Explorer.
@@ -20,8 +20,8 @@ Current capabilities include:
 - Open archived files in their registered Windows application.
 - Track recent archives and prompt before discarding unsaved work.
 - Follow the Windows light/dark app-mode setting, including live theme changes.
-- Create either PAK or PK3 documents and open archives passed by Windows.
-- Install per user with PAK/PK3 file associations and a bundled .NET runtime.
+- Create PAK, PK3, or KPF documents and open archives passed by Windows.
+- Install per user with PAK/PK3/KPF file associations and a bundled .NET runtime.
 
 Projects:
 
@@ -52,7 +52,7 @@ repository root:
 ```
 
 The installer is written to `windows\artifacts`, installs per user without an
-administrator prompt, and registers PakScape as an opener for `.pak` and `.pk3`
+administrator prompt, and registers PakScape as an opener for `.pak`, `.pk3`, and `.kpf`
 archives. It includes the .NET runtime and both native preview libraries.
 
 ## Quick Preview
@@ -90,7 +90,7 @@ dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configurat
 
 ## Engineering standards
 
-- PAK and PK3 paths are validated without silently trimming or normalizing significant characters.
+- PAK, PK3, and KPF paths are validated without silently trimming or normalizing significant characters.
 - Imports reject symbolic links, junctions, and unstable files while enforcing 50,000-entry, 256-component path-depth, 1 GiB per-file, and 2 GiB total limits across the existing document and each import.
 - Archive saves and filesystem exports stage and flush their output before committing it.
 - Windows device names, alternate-data-stream separators, trailing periods, and trailing spaces are rejected before export.

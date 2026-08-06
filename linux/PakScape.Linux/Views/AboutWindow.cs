@@ -76,7 +76,7 @@ public sealed class AboutWindow : Window, IDisposable
                         },
                         new TextBlock
                         {
-                            Text = "Simple Quake .pak & .pk3 explorer inspired by PakScape and originally developed by Peter Engström.",
+                            Text = "Simple Quake .pak, .pk3 & .kpf explorer inspired by PakScape and originally developed by Peter Engström.",
                             MaxWidth = 360,
                             HorizontalAlignment = HorizontalAlignment.Center,
                             TextAlignment = TextAlignment.Center,

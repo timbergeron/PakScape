@@ -6,7 +6,7 @@
     <RootNamespace>PakScape.Linux</RootNamespace>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationTitle>PakScape</ApplicationTitle>
-    <Description>Quake PAK and PK3 archive browser and editor</Description>
+    <Description>Quake PAK, PK3, and KPF archive browser and editor</Description>
     <Version>1.0.1</Version>
   </PropertyGroup>
 

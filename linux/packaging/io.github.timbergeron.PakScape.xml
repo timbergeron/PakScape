@@ -14,4 +14,10 @@
     <glob pattern="*.pk3" />
     <glob pattern="*.PK3" />
   </mime-type>
+  <mime-type type="application/x-quake-kpf">
+    <comment>Quake KPF archive</comment>
+    <sub-class-of type="application/zip" />
+    <glob pattern="*.kpf" />
+    <glob pattern="*.KPF" />
+  </mime-type>
 </mime-info>

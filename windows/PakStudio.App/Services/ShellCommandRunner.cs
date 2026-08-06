@@ -41,7 +41,7 @@ public static class ShellCommandRunner
         {
             messageBoxService.ShowError(
                 "PakScape",
-                "Select a .pak or .pk3 archive to extract, or a folder to pack.");
+                "Select a .pak, .pk3, or .kpf archive to extract, or a folder to pack.");
             return true;
         }
 
@@ -115,12 +115,12 @@ public static class ShellCommandRunner
             return;
         }
 
-        var formatId = string.Equals(
-            Path.GetExtension(outputPath),
-            ".pk3",
-            StringComparison.OrdinalIgnoreCase)
-            ? "pk3"
-            : "pak";
+        var formatId = Path.GetExtension(outputPath).ToLowerInvariant() switch
+        {
+            ".pk3" => "pk3",
+            ".kpf" => "kpf",
+            _ => "pak",
+        };
         var document = new ArchiveDocument { FormatId = formatId };
         var transferService = services.GetRequiredService<IArchiveFileTransferService>();
         foreach (var childDirectory in folder.EnumerateDirectories())

@@ -65,6 +65,7 @@ public partial class App : Application
 
         services.AddSingleton<IArchiveFormatHandler, PakFormatHandler>();
         services.AddSingleton<IArchiveFormatHandler, Pk3FormatHandler>();
+        services.AddSingleton<IArchiveFormatHandler, KpfFormatHandler>();
         services.AddSingleton<IArchiveFormatRegistry, ArchiveFormatRegistry>();
         services.AddSingleton<IArchiveService, ArchiveService>();
         services.AddSingleton<IFileDialogService, FileDialogService>();

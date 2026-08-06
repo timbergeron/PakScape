@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 extension UTType {
     static let pakArchive = UTType(importedAs: "com.timbergeron.PakScape.pak")
     static let pk3Archive = UTType(importedAs: "com.timbergeron.PakScape.pk3")
+    static let kpfArchive = UTType(importedAs: "com.timbergeron.PakScape.kpf")
 }
 
 final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
@@ -16,7 +17,7 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
     var fileURL: URL?
 
     static var readableContentTypes: [UTType] {
-        [UTType.pakArchive, UTType.pk3Archive]
+        [UTType.pakArchive, UTType.pk3Archive, UTType.kpfArchive]
     }
 
     static var writableContentTypes: [UTType] {
@@ -34,8 +35,8 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
         let filename = configuration.file.filename ?? "Untitled.pak"
         let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
         let ext = preferredExt ?? ((filename as NSString).pathExtension.lowercased())
-        if ext == "pk3" {
-            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pk3")
+        if ext == "pk3" || ext == "kpf" {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
             try data.write(to: temporary, options: .atomic)
             defer { try? FileManager.default.removeItem(at: temporary) }
             self.pakFile = try PakLoader.loadZip(from: temporary, name: filename)
@@ -54,7 +55,7 @@ final class PakDocument: ReferenceFileDocument, @unchecked Sendable {
         createBackupIfNeeded()
         let preferredExt = configuration.contentType.preferredFilenameExtension?.lowercased()
         let ext = preferredExt ?? "pak"
-        if ext == "pk3" {
+        if ext == "pk3" || ext == "kpf" {
             let zipData = try PakZipWriter.write(root: root, originalData: pakFile.data)
             return FileWrapper(regularFileWithContents: zipData)
         }

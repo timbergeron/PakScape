@@ -401,7 +401,7 @@ private struct AboutView: View {
             Text("PakScape")
                 .font(.title2.weight(.semibold))
 
-            Text("Simple Quake `.pak` & `.pk3` explorer inspired by PakScape and originally developed by Peter Engström.")
+            Text("Simple Quake `.pak`, `.pk3` & `.kpf` explorer inspired by PakScape and originally developed by Peter Engström.")
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)

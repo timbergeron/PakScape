@@ -657,6 +657,7 @@
             <MenuItem Header="_File">
                 <MenuItem Header="New _PAK" Command="{Binding NewCommand}" InputGestureText="Ctrl+N" />
                 <MenuItem Header="New P_K3" Command="{Binding NewPk3Command}" InputGestureText="Ctrl+Shift+N" />
+                <MenuItem Header="New KP_F" Command="{Binding NewKpfCommand}" />
                 <MenuItem Header="_Open..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O" />
                 <MenuItem Header="Open _Recent" ItemsSource="{Binding RecentFiles}">
                     <MenuItem.ItemContainerStyle>

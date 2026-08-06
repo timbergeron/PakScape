@@ -7,13 +7,31 @@ using PakStudio.Core.Validation;
 
 namespace PakStudio.Formats.Pk3;
 
-public sealed class Pk3FormatHandler : IArchiveFormatHandler
+public class Pk3FormatHandler : IArchiveFormatHandler
 {
-    public string FormatId => "pk3";
+    public Pk3FormatHandler()
+        : this("pk3", "Quake PK3 Archive", [".pk3"])
+    {
+    }
 
-    public string DisplayName => "Quake PK3 Archive";
+    protected Pk3FormatHandler(
+        string formatId,
+        string displayName,
+        IReadOnlyList<string> extensions)
+    {
+        FormatId = formatId;
+        DisplayName = displayName;
+        Extensions = extensions;
+        ArchiveLabel = formatId.ToUpperInvariant();
+    }
 
-    public IReadOnlyList<string> Extensions { get; } = [".pk3"];
+    public string FormatId { get; }
+
+    public string DisplayName { get; }
+
+    public IReadOnlyList<string> Extensions { get; }
+
+    private string ArchiveLabel { get; }
 
     public bool CanOpen(string path)
     {
@@ -33,9 +51,9 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             var file = new FileInfo(path);
             if (!file.Exists)
             {
-                throw new FileNotFoundException("The selected PK3 does not exist.", path);
+                throw new FileNotFoundException($"The selected {ArchiveLabel} does not exist.", path);
             }
-            ArchiveSafetyLimits.EnsureTotalSize(0, file.Length, "The PK3 archive");
+            ArchiveSafetyLimits.EnsureTotalSize(0, file.Length, $"The {ArchiveLabel} archive");
 
             await using var stream = new FileStream(
                 path,
@@ -46,7 +64,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
                 useAsync: true);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
 
-            ArchiveSafetyLimits.EnsureEntryCount(archive.Entries.Count, "The PK3 archive");
+            ArchiveSafetyLimits.EnsureEntryCount(archive.Entries.Count, $"The {ArchiveLabel} archive");
 
             var document = new ArchiveDocument
             {
@@ -75,11 +93,11 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
                     continue;
                 }
 
-                ArchiveSafetyLimits.EnsureFileSize(entry.Length, $"PK3 entry '{entryPath}'");
+                ArchiveSafetyLimits.EnsureFileSize(entry.Length, $"{ArchiveLabel} entry '{entryPath}'");
                 ArchiveSafetyLimits.EnsureTotalSize(
                     totalExpandedSize,
                     entry.Length,
-                    "The expanded PK3 archive");
+                    $"The expanded {ArchiveLabel} archive");
 
                 var payload = await ReadEntryAsync(entry, entryPath, cancellationToken)
                     .ConfigureAwait(false);
@@ -99,7 +117,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         }
         catch (InvalidDataException exception)
         {
-            throw new ArchiveCorruptException($"The PK3 is invalid: {exception.Message}");
+            throw new ArchiveCorruptException($"The {ArchiveLabel} is invalid: {exception.Message}");
         }
     }
 
@@ -197,7 +215,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         }
     }
 
-    private static void ValidateDocumentForWrite(ArchiveDocument document)
+    private void ValidateDocumentForWrite(ArchiveDocument document)
     {
         var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -220,10 +238,10 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             {
                 ArchiveNameValidator.ValidateNodeName(childFolder.Name);
                 var path = CombinePath(parentPath, childFolder.Name);
-                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"PK3 entry '{path}'");
+                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"{ArchiveLabel} entry '{path}'");
                 RegisterPath(path, isDirectory: true, filePaths, folderPaths, explicitFolderPaths);
                 entryCount++;
-                ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PK3 archive");
+                ArchiveSafetyLimits.EnsureEntryCount(entryCount, $"The {ArchiveLabel} archive");
                 ValidateFolder(childFolder, path);
             }
 
@@ -231,21 +249,21 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             {
                 ArchiveNameValidator.ValidateNodeName(file.Name);
                 var path = CombinePath(parentPath, file.Name);
-                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"PK3 entry '{path}'");
+                ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"{ArchiveLabel} entry '{path}'");
                 RegisterPath(path, isDirectory: false, filePaths, folderPaths, explicitFolderPaths);
                 entryCount++;
-                ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PK3 archive");
-                ArchiveSafetyLimits.EnsureFileSize(file.Data.LongLength, $"PK3 entry '{path}'");
+                ArchiveSafetyLimits.EnsureEntryCount(entryCount, $"The {ArchiveLabel} archive");
+                ArchiveSafetyLimits.EnsureFileSize(file.Data.LongLength, $"{ArchiveLabel} entry '{path}'");
                 ArchiveSafetyLimits.EnsureTotalSize(
                     totalExpandedSize,
                     file.Data.LongLength,
-                    "The expanded PK3 archive");
+                    $"The expanded {ArchiveLabel} archive");
                 totalExpandedSize += file.Data.LongLength;
             }
         }
     }
 
-    private static async Task<byte[]> ReadEntryAsync(
+    private async Task<byte[]> ReadEntryAsync(
         ZipArchiveEntry entry,
         string entryPath,
         CancellationToken cancellationToken)
@@ -268,7 +286,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             if (actualLength > ArchiveSafetyLimits.MaximumFileSize || actualLength > entry.Length)
             {
                 throw new ArchiveCorruptException(
-                    $"PK3 entry '{entryPath}' expands beyond its declared safe size.");
+                    $"{ArchiveLabel} entry '{entryPath}' expands beyond its declared safe size.");
             }
             output.Write(buffer, 0, read);
         }
@@ -276,12 +294,12 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         if (actualLength != entry.Length)
         {
             throw new ArchiveCorruptException(
-                $"PK3 entry '{entryPath}' does not match its declared expanded size.");
+                $"{ArchiveLabel} entry '{entryPath}' does not match its declared expanded size.");
         }
         return output.ToArray();
     }
 
-    private static (string Path, bool IsDirectory) ValidatePath(string rawPath)
+    private (string Path, bool IsDirectory) ValidatePath(string rawPath)
     {
         var normalized = rawPath.Replace('\\', '/');
         var isDirectory = normalized.EndsWith('/');
@@ -293,12 +311,12 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             path.EndsWith('/') ||
             segments.Any(string.IsNullOrEmpty))
         {
-            throw new ArchiveCorruptException($"PK3 entry '{rawPath}' has an unsafe path.");
+            throw new ArchiveCorruptException($"{ArchiveLabel} entry '{rawPath}' has an unsafe path.");
         }
 
         try
         {
-            ArchiveSafetyLimits.EnsurePathDepth(segments.Length, $"PK3 entry '{rawPath}'");
+            ArchiveSafetyLimits.EnsurePathDepth(segments.Length, $"{ArchiveLabel} entry '{rawPath}'");
             foreach (var segment in segments)
             {
                 ArchiveNameValidator.ValidateNodeName(segment);
@@ -307,13 +325,13 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         catch (ArchiveValidationException exception)
         {
             throw new ArchiveCorruptException(
-                $"PK3 entry '{rawPath}' has an unsafe path: {exception.Message}");
+                $"{ArchiveLabel} entry '{rawPath}' has an unsafe path: {exception.Message}");
         }
 
         return (string.Join('/', segments), isDirectory);
     }
 
-    private static void RegisterPath(
+    private void RegisterPath(
         string path,
         bool isDirectory,
         ISet<string> filePaths,
@@ -328,7 +346,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
             if (filePaths.Contains(prefix))
             {
                 throw new ArchiveCorruptException(
-                    $"PK3 entry '{path}' conflicts with an existing file path.");
+                    $"{ArchiveLabel} entry '{path}' conflicts with an existing file path.");
             }
             folderPaths.Add(prefix);
         }
@@ -337,7 +355,7 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         {
             if (filePaths.Contains(path) || !explicitFolderPaths.Add(path))
             {
-                throw new ArchiveCorruptException($"The PK3 contains duplicate path '{path}'.");
+                throw new ArchiveCorruptException($"The {ArchiveLabel} contains duplicate path '{path}'.");
             }
             folderPaths.Add(path);
         }
@@ -345,17 +363,17 @@ public sealed class Pk3FormatHandler : IArchiveFormatHandler
         {
             if (folderPaths.Contains(path) || !filePaths.Add(path))
             {
-                throw new ArchiveCorruptException($"The PK3 contains duplicate path '{path}'.");
+                throw new ArchiveCorruptException($"The {ArchiveLabel} contains duplicate path '{path}'.");
             }
         }
     }
 
-    private static void RejectSymbolicLink(ZipArchiveEntry entry, string path)
+    private void RejectSymbolicLink(ZipArchiveEntry entry, string path)
     {
         var unixMode = (entry.ExternalAttributes >> 16) & 0xF000;
         if (unixMode == 0xA000)
         {
-            throw new ArchiveCorruptException($"PK3 entry '{path}' is a symbolic link.");
+            throw new ArchiveCorruptException($"{ArchiveLabel} entry '{path}' is a symbolic link.");
         }
     }
 
