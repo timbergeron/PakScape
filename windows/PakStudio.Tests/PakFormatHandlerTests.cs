@@ -96,6 +96,17 @@ public sealed class PakFormatHandlerTests
     }
 
     [Fact]
+    public void Parse_CountsImplicitFoldersTowardTheEntryLimit()
+    {
+        var entries = Enumerable.Range(0, 2_001)
+            .Select(index => ($"{index}/" + string.Concat(Enumerable.Repeat("a/", 23)) + "x", 12, Array.Empty<byte>()))
+            .ToArray();
+        var bytes = CreatePak(entries);
+
+        Assert.Throws<ArchiveValidationException>(() => _handler.Parse(bytes));
+    }
+
+    [Fact]
     public void Serialize_ThenParse_RoundTripsArchive()
     {
         var document = new ArchiveDocument

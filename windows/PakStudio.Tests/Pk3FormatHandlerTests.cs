@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Buffers.Binary;
 using PakStudio.Core.Documents;
 using PakStudio.Core.Operations;
 using PakStudio.Core.Validation;
@@ -183,6 +184,116 @@ public sealed class Pk3FormatHandlerTests
             await Assert.ThrowsAsync<ArchiveValidationException>(() =>
                 _handler.SaveAsync(document, path, TestContext.Current.CancellationToken));
             Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("pk3")]
+    [InlineData("kpf")]
+    public async Task Open_CountsImplicitFoldersTowardTheEntryLimit(string formatId)
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, $"implicit.{formatId}");
+        Pk3FormatHandler handler = formatId == "kpf" ? new KpfFormatHandler() : _handler;
+        try
+        {
+            CreateZip(path, archive =>
+            {
+                for (var index = 0; index < 201; index++)
+                {
+                    archive.CreateEntry($"{index}/" + string.Concat(Enumerable.Repeat("a/", 248)) + "x");
+                }
+            });
+
+            await Assert.ThrowsAsync<ArchiveValidationException>(() =>
+                handler.OpenAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("pk3")]
+    [InlineData("kpf")]
+    public async Task Open_RejectsDirectoryEntriesWithFileData(string formatId)
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, $"directory-data.{formatId}");
+        Pk3FormatHandler handler = formatId == "kpf" ? new KpfFormatHandler() : _handler;
+        try
+        {
+            CreateZip(path, archive =>
+            {
+                using var output = archive.CreateEntry("maps/").Open();
+                output.WriteByte(1);
+            });
+
+            await Assert.ThrowsAsync<ArchiveCorruptException>(() =>
+                handler.OpenAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Open_ValidatesEveryPathBeforeDecodingPayloads()
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, "preflight.pk3");
+        try
+        {
+            CreateZip(path, archive =>
+            {
+                using (var output = archive.CreateEntry("first.txt").Open())
+                {
+                    output.WriteByte(1);
+                }
+                archive.CreateEntry("../outside.txt");
+            });
+            var bytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+            var centralOffset = bytes.AsSpan().IndexOf(new byte[] { 0x50, 0x4B, 0x01, 0x02 });
+            // Give the first payload an unsupported codec. The later unsafe
+            // path must be rejected before any payload decoder is opened.
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(8), 99);
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(centralOffset + 10), 99);
+            await File.WriteAllBytesAsync(path, bytes, TestContext.Current.CancellationToken);
+
+            var error = await Assert.ThrowsAsync<ArchiveCorruptException>(() =>
+                _handler.OpenAsync(path, TestContext.Current.CancellationToken));
+
+            Assert.Contains("unsafe path", error.Message);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Open_AllowsExplicitFoldersAfterImplicitFolders()
+    {
+        var directory = CreateTemporaryDirectory();
+        var path = Path.Combine(directory, "folders.pk3");
+        try
+        {
+            CreateZip(path, archive =>
+            {
+                archive.CreateEntry("maps/episode/start.bsp");
+                archive.CreateEntry("maps/");
+                archive.CreateEntry("maps/episode/");
+            });
+
+            var document = await _handler.OpenAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Equal("start.bsp", Assert.Single(Assert.Single(Assert.Single(document.Root.Folders).Folders).Files).Name);
         }
         finally
         {

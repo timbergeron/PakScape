@@ -204,6 +204,85 @@ public sealed class LinuxArchiveFileTransferServiceTests
         }
     }
 
+    [Fact]
+    public void ImportFileRejectsAnExcessivelyDeepDestination()
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(source, "file.txt");
+            File.WriteAllText(path, "content");
+            var destination = CreateDeepDestination(ArchiveSafetyLimits.MaximumPathDepth);
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Throws<ArchiveValidationException>(() => service.ImportFile(destination, path));
+            Assert.Empty(destination.Children);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ImportDirectoryIncludesDestinationDepthAndLeavesNoPartialTree(bool childIsFolder)
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            var childPath = Path.Combine(source, "child");
+            if (childIsFolder)
+            {
+                Directory.CreateDirectory(childPath);
+            }
+            else
+            {
+                File.WriteAllText(childPath, "content");
+            }
+            var destination = CreateDeepDestination(ArchiveSafetyLimits.MaximumPathDepth - 1);
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Throws<ArchiveValidationException>(() => service.ImportDirectory(destination, source));
+            Assert.Empty(destination.Children);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ImportDirectoryAllowsFilesAtTheMaximumPathDepth()
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(source, "child"), "content");
+            var destination = CreateDeepDestination(ArchiveSafetyLimits.MaximumPathDepth - 2);
+            using var service = new LinuxArchiveFileTransferService();
+
+            var folder = service.ImportDirectory(destination, source);
+
+            Assert.Equal("content", System.Text.Encoding.UTF8.GetString(Assert.Single(folder.Files).Data));
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    private static ArchiveFolderNode CreateDeepDestination(int depth)
+    {
+        var folder = ArchiveFolderNode.CreateRoot();
+        for (var index = 0; index < depth; index++)
+        {
+            folder = ArchiveTreeEditor.CreateFolder(folder, "a");
+        }
+        return folder;
+    }
+
     private static string CreateTemporaryDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), $"pakscape-test-{Guid.NewGuid():N}");

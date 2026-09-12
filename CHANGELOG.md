@@ -30,6 +30,20 @@ Notable user-visible changes are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Windows and Linux imports and new items now include the destination folder in
+  path-depth validation, preventing edits that exceed the save limit.
+- Windows and Linux archive readers count implicit folders toward the entry
+  limit. PK3 and KPF readers validate all directory entries before decoding file
+  data and reject directory entries containing file payloads.
+- Moving a selection from multiple folders now preserves names of items already
+  in the destination folder on Windows and Linux.
+- Windows and Linux wildcard searches no longer use regex backtracking, and
+  `.loc` and `.src` files receive text previews.
+- Linux Undo and Redo release thumbnails belonging to replaced archive nodes.
+- Native audio regression assertions now remain active in Release builds.
+
 ### Added
 
 - Cross-platform read/write support for KEX Engine `.kpf` resource archives,

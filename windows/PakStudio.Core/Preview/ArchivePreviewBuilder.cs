@@ -16,7 +16,7 @@ public static class ArchivePreviewBuilder
         ".cfg", ".txt", ".log", ".md", ".json", ".xml", ".yaml", ".yml",
         ".ini", ".csv", ".qc", ".map", ".ent", ".rc", ".shader", ".def",
         ".menu", ".arena", ".h", ".c", ".cc", ".cpp", ".hpp", ".cs", ".js",
-        ".ts", ".css", ".html", ".htm", ".bat", ".cmd", ".scr", ".skin",
+        ".ts", ".css", ".html", ".htm", ".bat", ".cmd", ".scr", ".skin", ".loc", ".src",
     };
 
     private static readonly HashSet<string> EncodedImageExtensions = new(StringComparer.OrdinalIgnoreCase)

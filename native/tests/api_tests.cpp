@@ -1,6 +1,11 @@
 #include "pakscape_audio.h"
 
 #include <array>
+// These assertions exercise the API, including calls with side effects.
+// Keep them active in the Release configuration used by the build scripts.
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <cstdint>
 #include <vector>

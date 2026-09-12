@@ -4,6 +4,7 @@ using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
 using PakStudio.Core.Validation;
+using PakStudio.Formats.Common;
 
 namespace PakStudio.Formats.Pk3;
 
@@ -70,38 +71,44 @@ public class Pk3FormatHandler : IArchiveFormatHandler
             {
                 FormatId = FormatId,
             };
-            var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var explicitFolderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var paths = new ArchivePathRegistry(ArchiveLabel);
+            var entries = new List<(ZipArchiveEntry Entry, string Path, bool IsDirectory)>();
             long totalExpandedSize = 0;
 
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var (entryPath, isDirectory) = ValidatePath(entry.FullName);
-                RegisterPath(
-                    entryPath,
-                    isDirectory,
-                    filePaths,
-                    folderPaths,
-                    explicitFolderPaths);
+                paths.Register(entryPath, isDirectory);
                 RejectSymbolicLink(entry, entryPath);
 
+                if (isDirectory && entry.Length != 0)
+                {
+                    throw new ArchiveCorruptException(
+                        $"{ArchiveLabel} directory '{entryPath}' contains file data.");
+                }
+                ArchiveSafetyLimits.EnsureFileSize(entry.Length, $"{ArchiveLabel} entry '{entryPath}'");
+                ArchiveSafetyLimits.EnsureTotalSize(
+                    totalExpandedSize,
+                    entry.Length,
+                    $"The expanded {ArchiveLabel} archive");
+                totalExpandedSize += entry.Length;
+                entries.Add((entry, entryPath, isDirectory));
+            }
+
+            // Validate the whole directory, including implicit folders and
+            // expanded sizes, before allocating any entry payloads.
+            foreach (var (entry, entryPath, isDirectory) in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (isDirectory)
                 {
                     ArchiveTreeBuilder.EnsureFolder(document.Root, entryPath);
                     continue;
                 }
 
-                ArchiveSafetyLimits.EnsureFileSize(entry.Length, $"{ArchiveLabel} entry '{entryPath}'");
-                ArchiveSafetyLimits.EnsureTotalSize(
-                    totalExpandedSize,
-                    entry.Length,
-                    $"The expanded {ArchiveLabel} archive");
-
                 var payload = await ReadEntryAsync(entry, entryPath, cancellationToken)
                     .ConfigureAwait(false);
-                totalExpandedSize += payload.LongLength;
                 var modifiedUtc = GetModifiedUtc(entry);
                 ArchiveTreeBuilder.AddFile(document.Root, entryPath, payload, modifiedUtc);
             }
@@ -217,9 +224,7 @@ public class Pk3FormatHandler : IArchiveFormatHandler
 
     private void ValidateDocumentForWrite(ArchiveDocument document)
     {
-        var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var folderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var explicitFolderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var paths = new ArchivePathRegistry(ArchiveLabel);
         var entryCount = 0;
         long totalExpandedSize = 0;
 
@@ -239,7 +244,7 @@ public class Pk3FormatHandler : IArchiveFormatHandler
                 ArchiveNameValidator.ValidateNodeName(childFolder.Name);
                 var path = CombinePath(parentPath, childFolder.Name);
                 ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"{ArchiveLabel} entry '{path}'");
-                RegisterPath(path, isDirectory: true, filePaths, folderPaths, explicitFolderPaths);
+                paths.Register(path, isDirectory: true);
                 entryCount++;
                 ArchiveSafetyLimits.EnsureEntryCount(entryCount, $"The {ArchiveLabel} archive");
                 ValidateFolder(childFolder, path);
@@ -250,7 +255,7 @@ public class Pk3FormatHandler : IArchiveFormatHandler
                 ArchiveNameValidator.ValidateNodeName(file.Name);
                 var path = CombinePath(parentPath, file.Name);
                 ArchiveSafetyLimits.EnsurePathDepth(path.Count(character => character == '/') + 1, $"{ArchiveLabel} entry '{path}'");
-                RegisterPath(path, isDirectory: false, filePaths, folderPaths, explicitFolderPaths);
+                paths.Register(path, isDirectory: false);
                 entryCount++;
                 ArchiveSafetyLimits.EnsureEntryCount(entryCount, $"The {ArchiveLabel} archive");
                 ArchiveSafetyLimits.EnsureFileSize(file.Data.LongLength, $"{ArchiveLabel} entry '{path}'");
@@ -329,43 +334,6 @@ public class Pk3FormatHandler : IArchiveFormatHandler
         }
 
         return (string.Join('/', segments), isDirectory);
-    }
-
-    private void RegisterPath(
-        string path,
-        bool isDirectory,
-        ISet<string> filePaths,
-        ISet<string> folderPaths,
-        ISet<string> explicitFolderPaths)
-    {
-        var segments = path.Split('/');
-        var prefix = string.Empty;
-        foreach (var segment in segments.SkipLast(1))
-        {
-            prefix = prefix.Length == 0 ? segment : $"{prefix}/{segment}";
-            if (filePaths.Contains(prefix))
-            {
-                throw new ArchiveCorruptException(
-                    $"{ArchiveLabel} entry '{path}' conflicts with an existing file path.");
-            }
-            folderPaths.Add(prefix);
-        }
-
-        if (isDirectory)
-        {
-            if (filePaths.Contains(path) || !explicitFolderPaths.Add(path))
-            {
-                throw new ArchiveCorruptException($"The {ArchiveLabel} contains duplicate path '{path}'.");
-            }
-            folderPaths.Add(path);
-        }
-        else
-        {
-            if (folderPaths.Contains(path) || !filePaths.Add(path))
-            {
-                throw new ArchiveCorruptException($"The {ArchiveLabel} contains duplicate path '{path}'.");
-            }
-        }
     }
 
     private void RejectSymbolicLink(ZipArchiveEntry entry, string path)

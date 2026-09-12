@@ -6,6 +6,7 @@ using PakStudio.Core.Operations;
 using PakStudio.Core.Pathing;
 using PakStudio.Core.Validation;
 using PakStudio.Formats.Common.Binary;
+using PakStudio.Formats.Common;
 
 namespace PakStudio.Formats.Pak;
 
@@ -128,7 +129,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
         var entryCount = directoryLength / DirectoryEntrySize;
         ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The PAK archive");
         var directoryEntries = new List<PakDirectoryEntry>(entryCount);
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var paths = new ArchivePathRegistry("PAK");
 
         for (var index = 0; index < entryCount; index++)
         {
@@ -164,10 +165,7 @@ public sealed class PakFormatHandler : IArchiveFormatHandler
                 throw new ArchiveCorruptException($"Entry '{normalizedPath}' overlaps the directory table.");
             }
 
-            if (!seenPaths.Add(normalizedPath))
-            {
-                throw new ArchiveCorruptException($"The archive contains duplicate paths: '{normalizedPath}'.");
-            }
+            paths.Register(normalizedPath, isDirectory: false);
 
             directoryEntries.Add(new PakDirectoryEntry(normalizedPath, fileOffset, fileLength));
         }

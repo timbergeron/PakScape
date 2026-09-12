@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PakScape.Linux.Models;
@@ -10,6 +9,7 @@ using PakStudio.Core.Interfaces;
 using PakStudio.Core.Models;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
+using PakStudio.Core.Pathing;
 using PakStudio.Core.Playback;
 using PakStudio.Core.Preview;
 
@@ -1591,17 +1591,10 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 if (term.Contains('*') || term.Contains('?'))
                 {
-                    var pattern = "^" + Regex.Escape(term)
-                        .Replace(@"\*", ".*", StringComparison.Ordinal)
-                        .Replace(@"\?", ".", StringComparison.Ordinal) + "$";
                     return searchable
                         .Split([' ', '/', '\\'], StringSplitOptions.RemoveEmptyEntries)
                         .Append(item.Node.FullPath)
-                        .Any(part => Regex.IsMatch(
-                            part,
-                            pattern,
-                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                            TimeSpan.FromMilliseconds(100)));
+                        .Any(part => ArchiveSearch.MatchesWildcard(term, part));
                 }
 
                 var compactTerm = CompactSearchText(term);
@@ -1838,8 +1831,10 @@ public partial class MainWindowViewModel : ObservableObject
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
         OnPropertyChanged(nameof(IsSearchActive));
-        RebuildFolderTree(Document.Root);
-        SetSelectedItems([]);
+        // Restoring history replaces node identities, so discard thumbnails
+        // holding the old nodes just as an ordinary mutation does.
+        _currentFolder = Document.Root;
+        RefreshAfterMutation();
         OnPropertyChanged(nameof(WindowTitle));
         NotifyNavigationStateChanged();
     }

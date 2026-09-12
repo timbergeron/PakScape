@@ -24,6 +24,7 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
             throw new FileNotFoundException("The selected file does not exist.", sourcePath);
         }
 
+        ArchiveSafetyLimits.EnsurePathDepth(destination.Depth + 1, "The imported file");
         var budget = new ImportBudget(destination);
         budget.RegisterEntry();
         var data = ReadFileWithLimits(file, budget);
@@ -48,7 +49,7 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
 
         var preflightBudget = new ImportBudget(destination);
         preflightBudget.RegisterEntry();
-        PreflightDirectory(source.FullName, preflightBudget);
+        PreflightDirectory(source.FullName, preflightBudget, destination.Depth + 1);
         var importedRoot = ArchiveTreeEditor.CreateFolder(destination, source.Name);
         try
         {
@@ -184,10 +185,11 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
         }
     }
 
-    private static void PreflightDirectory(string sourcePath, ImportBudget budget)
+    private static void PreflightDirectory(string sourcePath, ImportBudget budget, int depth)
     {
         var pending = new Stack<(string Path, int Depth)>();
-        pending.Push((sourcePath, 1));
+        ArchiveSafetyLimits.EnsurePathDepth(depth, "The selected folder");
+        pending.Push((sourcePath, depth));
 
         while (pending.TryPop(out var pendingDirectory))
         {
@@ -197,10 +199,10 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
                 RejectReparsePoint(info);
 
                 budget.RegisterEntry();
+                ArchiveSafetyLimits.EnsurePathDepth(pendingDirectory.Depth + 1, "The selected folder");
                 if (info is DirectoryInfo childDirectory)
                 {
                     var childDepth = pendingDirectory.Depth + 1;
-                    ArchiveSafetyLimits.EnsurePathDepth(childDepth, "The selected folder");
                     pending.Push((childDirectory.FullName, childDepth));
                     continue;
                 }

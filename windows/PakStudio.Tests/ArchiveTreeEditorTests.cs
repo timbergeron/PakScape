@@ -8,6 +8,55 @@ namespace PakStudio.Tests;
 public sealed class ArchiveTreeEditorTests
 {
     [Fact]
+    public void AdditionsRejectExcessiveDestinationDepthWithoutChangingTheTree()
+    {
+        var destination = ArchiveFolderNode.CreateRoot();
+        for (var depth = 0; depth < ArchiveSafetyLimits.MaximumPathDepth; depth++)
+        {
+            destination = ArchiveTreeEditor.CreateFolder(destination, "a");
+        }
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.CreateFolder(destination));
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.AddFile(destination, "x", [1]));
+        Assert.Empty(destination.Children);
+    }
+
+    [Fact]
+    public void AddFileAllowsTheMaximumPathDepth()
+    {
+        var destination = ArchiveFolderNode.CreateRoot();
+        for (var depth = 1; depth < ArchiveSafetyLimits.MaximumPathDepth; depth++)
+        {
+            destination = ArchiveTreeEditor.CreateFolder(destination, "a");
+        }
+
+        var file = ArchiveTreeEditor.AddFile(destination, "x", [1]);
+
+        Assert.Same(file, Assert.Single(destination.Files));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MoveToPreservesItemsAlreadyAtTheDestination(bool incomingFirst)
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var source = ArchiveTreeEditor.CreateFolder(root, "source");
+        var destination = ArchiveTreeEditor.CreateFolder(root, "destination");
+        var incoming = ArchiveTreeEditor.AddFile(source, "readme.txt", [1]);
+        var resident = ArchiveTreeEditor.AddFile(destination, "readme.txt", [2]);
+
+        ArchiveTreeEditor.MoveTo(
+            incomingFirst ? [incoming, resident] : [resident, incoming], destination);
+
+        Assert.Equal("readme.txt", resident.Name);
+        Assert.Equal("readme (2).txt", incoming.Name);
+        Assert.Same(destination, incoming.Parent);
+        Assert.Same(destination, resident.Parent);
+        Assert.Empty(source.Files);
+    }
+
+    [Fact]
     public void AddFile_GeneratesCaseInsensitiveUniqueName()
     {
         var root = ArchiveFolderNode.CreateRoot();

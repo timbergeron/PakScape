@@ -73,10 +73,13 @@ public sealed class ArchivePreviewBuilderTests
         }
     }
 
-    [Fact]
-    public void CfgFilesArePreviewedAsText()
+    [Theory]
+    [InlineData("autoexec.cfg")]
+    [InlineData("progs.src")]
+    [InlineData("DM6.LOC")]
+    public void QuakeTextFilesArePreviewedAsText(string fileName)
     {
-        var file = new ArchiveFileNode("autoexec.cfg", "echo hello\n"u8.ToArray());
+        var file = new ArchiveFileNode(fileName, "echo hello\n"u8.ToArray());
 
         var preview = ArchivePreviewBuilder.Build(file);
 

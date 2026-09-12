@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using PakStudio.App.Commands;
@@ -11,6 +10,7 @@ using PakStudio.Core.Interfaces;
 using PakStudio.Core.Models;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Operations;
+using PakStudio.Core.Pathing;
 using PakStudio.Core.Playback;
 using PakStudio.Core.Preview;
 using PakStudio.Core.Validation;
@@ -2123,17 +2123,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 if (term.Contains('*') || term.Contains('?'))
                 {
-                    var pattern = "^" + Regex.Escape(term)
-                        .Replace(@"\*", ".*", StringComparison.Ordinal)
-                        .Replace(@"\?", ".", StringComparison.Ordinal) + "$";
                     return searchable
                         .Split([' ', '/', '\\'], StringSplitOptions.RemoveEmptyEntries)
                         .Append(item.SearchPath ?? string.Empty)
-                        .Any(part => Regex.IsMatch(
-                            part,
-                            pattern,
-                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                            TimeSpan.FromMilliseconds(100)));
+                        .Any(part => ArchiveSearch.MatchesWildcard(term, part));
                 }
 
                 var compactTerm = CompactSearchText(term);

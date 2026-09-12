@@ -11,6 +11,7 @@ public static class ArchiveTreeEditor
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArchiveNameValidator.ValidateNodeName(suggestedName);
+        ArchiveSafetyLimits.EnsurePathDepth(parent.Depth + 1, $"'{suggestedName}'");
 
         var name = GetAvailableName(parent, suggestedName, preserveExtension: false);
         var folder = new ArchiveFolderNode(name)
@@ -30,6 +31,7 @@ public static class ArchiveTreeEditor
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(data);
         ArchiveNameValidator.ValidateNodeName(suggestedName);
+        ArchiveSafetyLimits.EnsurePathDepth(parent.Depth + 1, $"'{suggestedName}'");
 
         var name = GetAvailableName(parent, suggestedName, preserveExtension: true);
         var file = new ArchiveFileNode(name, data.ToArray())
@@ -165,17 +167,16 @@ public static class ArchiveTreeEditor
         }
 
         EnsureDepthFits(sources, destination);
-        if (sources.All(source => ReferenceEquals(source.Parent, destination)))
-        {
-            return sources;
-        }
+        // Reserve the names of items already at the destination before
+        // resolving collisions for items arriving from other folders.
+        var moving = sources.Where(source => !ReferenceEquals(source.Parent, destination)).ToList();
 
-        foreach (var source in sources)
+        foreach (var source in moving)
         {
             Remove(source);
         }
 
-        foreach (var source in sources)
+        foreach (var source in moving)
         {
             source.Name = GetAvailableName(
                 destination,
@@ -325,16 +326,10 @@ public static class ArchiveTreeEditor
         IEnumerable<ArchiveNode> sources,
         ArchiveFolderNode destination)
     {
-        var destinationDepth = 0;
-        for (var current = destination; current.Parent is not null; current = current.Parent)
-        {
-            destinationDepth++;
-        }
-
         foreach (var source in sources)
         {
             ArchiveSafetyLimits.EnsurePathDepth(
-                destinationDepth + GetSubtreeDepth(source),
+                destination.Depth + GetSubtreeDepth(source),
                 $"'{source.Name}'");
         }
     }

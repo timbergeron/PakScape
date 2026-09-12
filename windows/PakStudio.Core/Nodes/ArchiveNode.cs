@@ -19,6 +19,19 @@ public abstract class ArchiveNode
 
     public ArchiveFolderNode? Parent { get; internal set; }
 
+    public int Depth
+    {
+        get
+        {
+            var depth = 0;
+            for (var parent = Parent; parent is not null; parent = parent.Parent)
+            {
+                depth++;
+            }
+            return depth;
+        }
+    }
+
     public string FullPath =>
         Parent is null
             ? "/"
