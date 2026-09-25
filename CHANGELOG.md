@@ -32,6 +32,8 @@ Notable user-visible changes are documented here.
 
 ### Fixed
 
+- Windows file browsing now supports typing a filename prefix to select an item
+  in all four views, including cycling matches by repeating the first letter.
 - Windows and Linux imports and new items now include the destination folder in
   path-depth validation, preventing edits that exceed the save limit.
 - Windows and Linux archive readers count implicit folders toward the entry

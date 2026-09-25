@@ -1104,6 +1104,9 @@
                     <Grid>
                         <ListView x:Name="ItemList"
                                   ItemsSource="{Binding CurrentItems}"
+                                  IsTextSearchEnabled="True"
+                                  IsTextSearchCaseSensitive="False"
+                                  TextSearch.TextPath="Name"
                                   SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                                   SelectionMode="Extended"
                                   SelectionChanged="ItemList_OnSelectionChanged"
