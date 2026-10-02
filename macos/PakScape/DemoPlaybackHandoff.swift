@@ -40,6 +40,41 @@ enum DemoPlaybackHandoff {
     /// Long enough to restart playback, short enough that a forgotten window stops listening.
     static let sessionLifetime: TimeInterval = 15 * 60
 
+    /// Snapshots the current document so new archives and unsaved map edits
+    /// accompany playback just like saved files do.
+    static func archivePackages(
+        pakFile: PakFile?,
+        maps: [String],
+        maximumBytes: Int
+    ) throws -> [DemoPlaybackAsset] {
+        guard let pakFile else { return [] }
+        let wanted = Set(maps.map { $0.lowercased() }.filter { !$0.isEmpty })
+        guard !wanted.isEmpty else { return [] }
+        var stack = [pakFile.root]
+        var providesMap = false
+        while let node = stack.popLast() {
+            for child in node.children ?? [] {
+                if child.isFolder {
+                    stack.append(child)
+                } else if (child.name as NSString).pathExtension.lowercased() == "bsp",
+                          wanted.contains((child.name as NSString).deletingPathExtension.lowercased()) {
+                    providesMap = true
+                }
+            }
+        }
+        guard providesMap else { return [] }
+        let budget = try PakImportBudget(existingRoot: pakFile.root)
+        guard budget.totalSize <= maximumBytes else {
+            throw DemoPlaybackError.tooLarge(limit: maximumSessionBytes)
+        }
+        let data = try PakZipWriter.write(root: pakFile.root, originalData: pakFile.data)
+        guard data.count <= maximumBytes else {
+            throw DemoPlaybackError.tooLarge(limit: maximumSessionBytes)
+        }
+        let name = (pakFile.name as NSString).deletingPathExtension + ".pk3"
+        return [DemoPlaybackAsset(fileName: name, data: data)]
+    }
+
     /// The origin allowed to read the served assets, derived from ``playerURL``.
     static var playerOrigin: String {
         guard let components = URLComponents(string: playerURL),

@@ -1833,7 +1833,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             var summary = QuakeDemoInspector.Inspect(file.Data);
             var uri = DemoPlaybackHandoff.BuildLaunchUri(
                 new DemoPlaybackAsset(file.Name, file.Data),
-                ArchivePackages(summary),
+                DemoPlaybackPackages.Build(
+                    Document,
+                    summary?.Segments.Select(segment => segment.Map) ?? [],
+                    DemoPlaybackHandoff.MaximumSessionBytes - file.Data.Length),
                 summary,
                 LoopbackAssetServer.Shared);
 
@@ -1844,58 +1847,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             _messageBoxService.ShowError("Play Demo Failed", exception.Message);
         }
-    }
-
-    /// <summary>
-    /// Offers the open archive to the player only when it actually holds a map the demo
-    /// visits, so a large archive is not shipped across for a stock level.
-    /// </summary>
-    private IReadOnlyList<DemoPlaybackAsset> ArchivePackages(QuakeDemoSummary? summary)
-    {
-        if (summary is null || Document?.FilePath is not { Length: > 0 } path || !File.Exists(path))
-        {
-            return [];
-        }
-
-        var wanted = new HashSet<string>(
-            summary.Segments.Select(segment => segment.Map).Where(map => map.Length > 0),
-            StringComparer.OrdinalIgnoreCase);
-        if (wanted.Count == 0 || !ContainsAnyMap(Document.Root, wanted))
-        {
-            return [];
-        }
-
-        var info = new FileInfo(path);
-        if (info.Length > DemoPlaybackHandoff.MaximumSessionBytes)
-        {
-            return [];
-        }
-
-        try
-        {
-            return [new DemoPlaybackAsset(Path.GetFileName(path), File.ReadAllBytes(path))];
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private static bool ContainsAnyMap(ArchiveFolderNode folder, HashSet<string> wanted)
-    {
-        foreach (var file in folder.Files)
-        {
-            if (string.Equals(Path.GetExtension(file.Name), ".bsp", StringComparison.OrdinalIgnoreCase) &&
-                wanted.Contains(Path.GetFileNameWithoutExtension(file.Name)))
-            {
-                return true;
-            }
-        }
-        return folder.Folders.Any(child => ContainsAnyMap(child, wanted));
     }
 
     private bool CanSaveSelectedImageAs(string? formatId)

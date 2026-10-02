@@ -156,6 +156,14 @@ struct PakNodePlacement {
 }
 
 enum PakTreeMutation {
+    static func depth(of target: PakNode, in root: PakNode) -> Int? {
+        if root === target { return 0 }
+        for child in root.children ?? [] {
+            if let depth = depth(of: target, in: child) { return depth + 1 }
+        }
+        return nil
+    }
+
     static func placements(for ids: Set<PakNode.ID>, in root: PakNode) -> [PakNodePlacement] {
         var result: [PakNodePlacement] = []
 
@@ -960,6 +968,9 @@ struct PakLoader {
             throw PakError.duplicatePath(path)
         }
         filePaths.insert(fileKey)
+        guard filePaths.count + folderPaths.count <= PakSafetyLimits.maximumEntryCount else {
+            throw PakError.tooManyEntries
+        }
     }
 
     // Build a folder/file tree from flat entry list
@@ -981,7 +992,9 @@ struct PakLoader {
                     current.children?.append(fileNode)
                 } else {
                     // Folder node
-                    if let existingFolder = current.children?.first(where: { $0.name == part && $0.entry == nil }) {
+                    if let existingFolder = current.children?.first(where: {
+                        $0.isFolder && $0.name.caseInsensitiveCompare(part) == .orderedSame
+                    }) {
                         current = existingFolder
                     } else {
                         let newFolder = PakNode(name: part)
@@ -1072,6 +1085,9 @@ struct PakLoader {
             options: []
         )
         for item in contents {
+            guard depth >= 1, depth <= PakSafetyLimits.maximumPathDepth else {
+                throw PakError.unsafePath(item.path)
+            }
             try budget.registerEntry()
             try PakPathValidator.validateNodeName(item.lastPathComponent)
             let values = try item.resourceValues(forKeys: resourceKeys)
@@ -1081,9 +1097,6 @@ struct PakLoader {
 
             if values.isDirectory == true {
                 let childDepth = depth + 1
-                guard childDepth <= PakSafetyLimits.maximumPathDepth else {
-                    throw PakError.unsafePath(item.path)
-                }
                 let folder = PakNode(name: item.lastPathComponent)
                 parent.children?.append(folder)
                 try buildTree(from: item, into: folder, budget: &budget, depth: childDepth)
@@ -1249,6 +1262,9 @@ enum PakZipValidator {
             }
 
             let expandedSize = Int(expandedSizeValue)
+            guard !isDirectory || expandedSize == 0 else {
+                throw PakError.invalidZip
+            }
             guard expandedSize <= PakSafetyLimits.maximumFileSize,
                   totalExpandedSize <= PakSafetyLimits.maximumTotalSize - expandedSize else {
                 throw PakError.expandedArchiveTooLarge
@@ -1345,6 +1361,9 @@ enum PakZipValidator {
                 throw PakError.duplicatePath(path)
             }
             filePaths.insert(key)
+        }
+        guard filePaths.count + folderPaths.count <= PakSafetyLimits.maximumEntryCount else {
+            throw PakError.expandedArchiveTooLarge
         }
     }
 

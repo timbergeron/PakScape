@@ -8,6 +8,56 @@ namespace PakStudio.Tests;
 public sealed class ArchiveTreeEditorTests
 {
     [Fact]
+    public void AdditionsRejectTheEntryLimitWithoutChangingTheTree()
+    {
+        var root = CreateFullArchive();
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.CreateFolder(root));
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.AddFile(root, "extra", [1]));
+        Assert.Equal(ArchiveSafetyLimits.MaximumEntryCount, root.Files.Count);
+        Assert.Empty(root.Folders);
+    }
+
+    [Fact]
+    public void MoveBetweenArchivesChecksTheDestinationEntryLimitBeforeDetaching()
+    {
+        var destination = CreateFullArchive();
+        var source = ArchiveFolderNode.CreateRoot();
+        var file = ArchiveTreeEditor.AddFile(source, "extra", [1]);
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.MoveTo([file], destination));
+        Assert.Same(file, Assert.Single(source.Files));
+        Assert.Same(source, file.Parent);
+        Assert.Equal(ArchiveSafetyLimits.MaximumEntryCount, destination.Files.Count);
+    }
+
+    [Fact]
+    public void MoveRejectsAStaleSelectionBeforeRemovingOtherItems()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var destination = ArchiveTreeEditor.CreateFolder(root, "destination");
+        var valid = ArchiveTreeEditor.AddFile(root, "valid.txt", [1]);
+        var stale = ArchiveTreeEditor.AddFile(root, "stale.txt", [2]);
+        root.Files.Remove(stale);
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.MoveTo([valid, stale], destination));
+        Assert.Same(valid, Assert.Single(root.Files));
+        Assert.Same(root, valid.Parent);
+        Assert.Empty(destination.Children);
+    }
+
+    private static ArchiveFolderNode CreateFullArchive()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        // Populate directly to avoid repeatedly scanning the whole fixture.
+        for (var index = 0; index < ArchiveSafetyLimits.MaximumEntryCount; index++)
+        {
+            root.Files.Add(new ArchiveFileNode($"file{index}", []));
+        }
+        return root;
+    }
+
+    [Fact]
     public void AdditionsRejectExcessiveDestinationDepthWithoutChangingTheTree()
     {
         var destination = ArchiveFolderNode.CreateRoot();

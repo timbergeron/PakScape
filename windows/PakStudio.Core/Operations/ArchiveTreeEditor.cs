@@ -18,6 +18,7 @@ public static class ArchiveTreeEditor
         {
             Parent = parent,
         };
+        EnsureCopyFits([folder], parent);
         parent.Folders.Add(folder);
         return folder;
     }
@@ -34,11 +35,14 @@ public static class ArchiveTreeEditor
         ArchiveSafetyLimits.EnsurePathDepth(parent.Depth + 1, $"'{suggestedName}'");
 
         var name = GetAvailableName(parent, suggestedName, preserveExtension: true);
-        var file = new ArchiveFileNode(name, data.ToArray())
+        // Validate before copying the payload or changing the destination.
+        var file = new ArchiveFileNode(name, data)
         {
             Parent = parent,
             ModifiedUtc = modifiedUtc,
         };
+        EnsureCopyFits([file], parent);
+        file.Data = data.ToArray();
         parent.Files.Add(file);
         return file;
     }
@@ -157,6 +161,16 @@ public static class ArchiveTreeEditor
             throw new ArchiveValidationException("The archive root cannot be moved.");
         }
 
+        // Validate the whole selection before detaching any items. A stale
+        // clipboard node must not leave an earlier item partially removed.
+        foreach (var source in sources)
+        {
+            if (!source.Parent!.Children.Contains(source))
+            {
+                throw new ArchiveValidationException("The item is no longer present in its parent folder.");
+            }
+        }
+
         foreach (var folder in sources.OfType<ArchiveFolderNode>())
         {
             if (IsDescendantOrSelf(destination, folder))
@@ -167,6 +181,12 @@ public static class ArchiveTreeEditor
         }
 
         EnsureDepthFits(sources, destination);
+        var destinationRoot = GetRoot(destination);
+        var incoming = sources.Where(source => !ReferenceEquals(GetRoot(source), destinationRoot)).ToList();
+        if (incoming.Count > 0)
+        {
+            EnsureCopyFits(incoming, destination);
+        }
         // Reserve the names of items already at the destination before
         // resolving collisions for items arriving from other folders.
         var moving = sources.Where(source => !ReferenceEquals(source.Parent, destination)).ToList();
@@ -285,11 +305,7 @@ public static class ArchiveTreeEditor
         IReadOnlyCollection<ArchiveNode> sources,
         ArchiveFolderNode destination)
     {
-        var root = destination;
-        while (root.Parent is { } parent)
-        {
-            root = parent;
-        }
+        var root = GetRoot(destination);
 
         var entryCount = 0;
         long totalSize = 0;
@@ -302,6 +318,15 @@ public static class ArchiveTreeEditor
             AccumulateStatistics(source, ref entryCount, ref totalSize);
         }
         EnsureDepthFits(sources, destination);
+    }
+
+    private static ArchiveFolderNode GetRoot(ArchiveNode node)
+    {
+        while (node.Parent is { } parent)
+        {
+            node = parent;
+        }
+        return (ArchiveFolderNode)node;
     }
 
     private static void AccumulateStatistics(ArchiveNode node, ref int entryCount, ref long totalSize)

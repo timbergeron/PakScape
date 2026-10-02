@@ -32,6 +32,16 @@ Notable user-visible changes are documented here.
 
 ### Fixed
 
+- Demo playback now includes a bounded snapshot of the open archive on every
+  platform, including new documents, PK3/KPF maps, and unsaved edits.
+- macOS PAK loading merges folder paths case-insensitively and counts implicit
+  folders toward the entry limit; ZIP preflight also counts implicit folders and
+  rejects directory entries containing file data.
+- macOS imports, pastes, moves, and new folders validate destination path depth
+  before modifying the document.
+- Windows and Linux direct additions enforce archive entry and size limits, and
+  moves validate the entire selection and cross-archive limits before detaching
+  any items.
 - Windows file browsing now supports typing a filename prefix to select an item
   in all four views, including cycling matches by repeating the first letter.
 - Windows and Linux imports and new items now include the destination folder in

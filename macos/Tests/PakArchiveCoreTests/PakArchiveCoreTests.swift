@@ -3,6 +3,89 @@ import XCTest
 @testable import PakArchiveCore
 
 final class PakArchiveCoreTests: XCTestCase {
+    func testLoaderMergesFoldersWhosePathsDifferOnlyByCase() throws {
+        let loaded = try PakLoader.load(
+            data: makeEmptyPak(paths: ["Maps/first.bsp", "maps/second.bsp"]),
+            name: "mixed-case.pak"
+        )
+        XCTAssertEqual(loaded.root.children?.count, 1)
+        XCTAssertEqual(loaded.root.children?.first?.children?.count, 2)
+        XCTAssertNoThrow(try PakWriter.write(root: loaded.root, originalData: loaded.data))
+    }
+
+    func testLoaderCountsImplicitFoldersBeforeBuildingTheTree() {
+        let paths = (0...PakSafetyLimits.maximumEntryCount / 2).map { "folder\($0)/file" }
+        XCTAssertThrowsError(try PakLoader.load(data: makeEmptyPak(paths: paths), name: "large.pak")) { error in
+            guard let pakError = error as? PakError, case .tooManyEntries = pakError else {
+                return XCTFail("Expected tooManyEntries, got \(error)")
+            }
+        }
+    }
+
+    func testZipValidatorCountsImplicitFoldersBeforeExtraction() {
+        let paths = (0...PakSafetyLimits.maximumEntryCount / 2).map { ("folder\($0)/file", Data()) }
+        XCTAssertThrowsError(try PakZipValidator.validate(data: makeStoredZip(entries: paths))) { error in
+            guard let pakError = error as? PakError, case .expandedArchiveTooLarge = pakError else {
+                return XCTFail("Expected expandedArchiveTooLarge, got \(error)")
+            }
+        }
+    }
+
+    func testZipValidatorRejectsDirectoryPayloads() {
+        XCTAssertThrowsError(try PakZipValidator.validate(
+            data: makeStoredZip(entries: [("folder/", Data([1]))])
+        )) { error in
+            guard let pakError = error as? PakError, case .invalidZip = pakError else {
+                return XCTFail("Expected invalidZip, got \(error)")
+            }
+        }
+        XCTAssertNoThrow(try PakZipValidator.validate(
+            data: makeStoredZip(entries: [("folder/", Data())])
+        ))
+    }
+
+    func testDirectoryImportChecksDepthForFilesAndEmptyFolders() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data([1]).write(to: directory.appendingPathComponent("file"))
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("empty"), withIntermediateDirectories: false
+        )
+        let parent = PakNode(name: "destination")
+        var budget = PakImportBudget()
+        XCTAssertNoThrow(try PakLoader.buildTree(
+            from: directory, into: parent, budget: &budget, depth: PakSafetyLimits.maximumPathDepth
+        ))
+        XCTAssertEqual(parent.children?.count, 2)
+        let rejected = PakNode(name: "destination")
+        var rejectedBudget = PakImportBudget()
+        XCTAssertThrowsError(try PakLoader.buildTree(
+            from: directory, into: rejected, budget: &rejectedBudget,
+            depth: PakSafetyLimits.maximumPathDepth + 1
+        ))
+        XCTAssertTrue(rejected.children?.isEmpty == true)
+        XCTAssertEqual(rejectedBudget.entryCount, 0)
+    }
+
+    func testTreeDepthIncludesTheDestinationForPasteValidation() throws {
+        let root = PakNode(name: "/")
+        var destination = root
+        for _ in 0..<PakSafetyLimits.maximumPathDepth {
+            let child = PakNode(name: "a")
+            destination.children?.append(child)
+            destination = child
+        }
+        XCTAssertEqual(PakTreeMutation.depth(of: destination, in: root), PakSafetyLimits.maximumPathDepth)
+        XCTAssertEqual(PakTreeMutation.depth(of: root, in: root), 0)
+        XCTAssertNil(PakTreeMutation.depth(of: PakNode(name: "detached"), in: root))
+        var budget = PakImportBudget()
+        XCTAssertThrowsError(try budget.registerTree(
+            PakNode(name: "pasted"), depth: try XCTUnwrap(PakTreeMutation.depth(of: destination, in: root)) + 1
+        ))
+        XCTAssertEqual(budget.entryCount, 0)
+    }
+
     func testSkyboxFaceSetFindsAllSixFacesFromAnyFace() {
         let suffixes = ["rt", "bk", "lf", "ft", "up", "dn"]
         let nodes = suffixes.map { PakNode(name: "storm_\($0).tga", entry: PakEntry(name: "", offset: 0, length: 1)) }
@@ -1210,6 +1293,69 @@ final class PakArchiveCoreTests: XCTestCase {
         progs.children?.append(viewModel)
         root.children?.append(contentsOf: [maps, progs])
         return (root, start, viewModel)
+    }
+
+    private func makeEmptyPak(paths: [String]) -> Data {
+        var data = Data("PACK".utf8)
+        appendInt32(12, to: &data)
+        appendInt32(paths.count * 64, to: &data)
+        for path in paths {
+            var name = [UInt8](repeating: 0, count: 56)
+            for (index, byte) in path.utf8.prefix(55).enumerated() { name[index] = byte }
+            data.append(contentsOf: name)
+            appendInt32(12, to: &data)
+            appendInt32(0, to: &data)
+        }
+        return data
+    }
+
+    private func makeStoredZip(entries: [(String, Data)]) -> Data {
+        var data = Data()
+        var central = Data()
+        for (path, payload) in entries {
+            let name = Data(path.utf8)
+            let offset = UInt32(data.count)
+            var crc = UInt32.max
+            for byte in payload {
+                crc ^= UInt32(byte)
+                for _ in 0..<8 { crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xEDB8_8320) }
+            }
+            crc ^= UInt32.max
+            appendUInt32(0x0403_4B50, to: &data)
+            appendUInt16(20, to: &data)
+            for _ in 0..<4 { appendUInt16(0, to: &data) }
+            appendUInt32(crc, to: &data)
+            appendUInt32(UInt32(payload.count), to: &data)
+            appendUInt32(UInt32(payload.count), to: &data)
+            appendUInt16(UInt16(name.count), to: &data)
+            appendUInt16(0, to: &data)
+            data.append(name)
+            data.append(payload)
+
+            appendUInt32(0x0201_4B50, to: &central)
+            appendUInt16(20, to: &central)
+            appendUInt16(20, to: &central)
+            for _ in 0..<4 { appendUInt16(0, to: &central) }
+            appendUInt32(crc, to: &central)
+            appendUInt32(UInt32(payload.count), to: &central)
+            appendUInt32(UInt32(payload.count), to: &central)
+            appendUInt16(UInt16(name.count), to: &central)
+            for _ in 0..<4 { appendUInt16(0, to: &central) }
+            appendUInt32(0, to: &central)
+            appendUInt32(offset, to: &central)
+            central.append(name)
+        }
+        let directoryOffset = UInt32(data.count)
+        data.append(central)
+        appendUInt32(0x0605_4B50, to: &data)
+        appendUInt16(0, to: &data)
+        appendUInt16(0, to: &data)
+        appendUInt16(UInt16(entries.count), to: &data)
+        appendUInt16(UInt16(entries.count), to: &data)
+        appendUInt32(UInt32(central.count), to: &data)
+        appendUInt32(directoryOffset, to: &data)
+        appendUInt16(0, to: &data)
+        return data
     }
 
     private func makePak(path: String, payload: Data) -> Data {

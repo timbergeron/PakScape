@@ -3,6 +3,58 @@ import XCTest
 @testable import PakArchiveCore
 
 final class DemoPlaybackHandoffTests: XCTestCase {
+    func testArchivePackagesIncludeCurrentMapsFromEveryDocumentFormat() throws {
+        for name in ["Untitled.pak", "edited.pk3", "edited.kpf"] {
+            let pakFile = PakFile.empty(name: name)
+            let maps = PakNode(name: "maps")
+            let map = PakNode(name: "custom.bsp")
+            map.localData = Data([1])
+            maps.children?.append(map)
+            let program = PakNode(name: "progs.dat")
+            program.localData = Data([2, 3])
+            pakFile.root.children?.append(contentsOf: [maps, program])
+            map.localData = Data([4, 5, 6])
+            let version = pakFile.version
+
+            let packages = try DemoPlaybackHandoff.archivePackages(
+                pakFile: pakFile, maps: ["CUSTOM"], maximumBytes: 4096
+            )
+            let package = try XCTUnwrap(packages.first)
+            XCTAssertEqual(packages.count, 1)
+            XCTAssertEqual(package.fileName, (name as NSString).deletingPathExtension + ".pk3")
+            let archiveURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pk3")
+            try package.data.write(to: archiveURL)
+            defer { try? FileManager.default.removeItem(at: archiveURL) }
+            let loaded = try PakLoader.loadZip(from: archiveURL, name: package.fileName)
+            let loadedMap = try XCTUnwrap(loaded.root.children?.first(where: { $0.name == "maps" })?.children?.first)
+            XCTAssertEqual(loadedMap.localData, Data([4, 5, 6]))
+            XCTAssertEqual(loaded.root.children?.first(where: { $0.name == "progs.dat" })?.localData, Data([2, 3]))
+            XCTAssertTrue(pakFile.data.isEmpty)
+            XCTAssertEqual(pakFile.version, version)
+            XCTAssertTrue(pakFile.root.children?.first === maps)
+        }
+    }
+
+    func testArchivePackagesSkipUnrelatedMapsAndEnforceTheRemainingBudget() throws {
+        let pakFile = PakFile.empty(name: "new.pak")
+        let map = PakNode(name: "custom.bsp")
+        map.localData = Data([1, 2])
+        pakFile.root.children?.append(map)
+        XCTAssertTrue(try DemoPlaybackHandoff.archivePackages(
+            pakFile: pakFile, maps: ["e1m1"], maximumBytes: 0
+        ).isEmpty)
+        // Bound both expanded data and ZIP record overhead.
+        for limit in [1, 64] {
+            XCTAssertThrowsError(try DemoPlaybackHandoff.archivePackages(
+                pakFile: pakFile, maps: ["custom"], maximumBytes: limit
+            )) { error in
+                guard let playbackError = error as? DemoPlaybackError, case .tooLarge = playbackError else {
+                    return XCTFail("Expected tooLarge, got \(error)")
+                }
+            }
+        }
+    }
+
     func testVirtualFileNameStripsPathsAndUnsafeCharacters() {
         XCTAssertEqual(DemoPlaybackHandoff.virtualFileName("../../etc/passwd"), "passwd")
         XCTAssertEqual(DemoPlaybackHandoff.virtualFileName("demos/run 1.dem"), "run_1.dem")

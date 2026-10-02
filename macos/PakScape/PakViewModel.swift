@@ -615,7 +615,11 @@ final class PakViewModel: NSObject, ObservableObject {
             let summary = QuakeDemoInspector.inspect(data)
             let url = try DemoPlaybackHandoff.launchURL(
                 demo: DemoPlaybackAsset(fileName: node.name, data: data),
-                packages: archivePackages(providingMapsFor: summary),
+                packages: DemoPlaybackHandoff.archivePackages(
+                    pakFile: pakFile,
+                    maps: summary?.segments.map { $0.map } ?? [],
+                    maximumBytes: DemoPlaybackHandoff.maximumSessionBytes - data.count
+                ),
                 summary: summary
             )
             NSWorkspace.shared.open(url)
@@ -664,35 +668,6 @@ final class PakViewModel: NSObject, ObservableObject {
             try? fileManager.removeItem(at: temporaryRoot)
             throw error
         }
-    }
-
-    /// Offers the open archive to the player only when it actually holds a map the demo
-    /// visits, so a large PAK is not shipped across for a stock level.
-    private func archivePackages(providingMapsFor summary: QuakeDemoSummary?) -> [DemoPlaybackAsset] {
-        guard let summary, let pakFile, !pakFile.data.isEmpty else { return [] }
-
-        let wanted = Set(summary.segments.map { $0.map.lowercased() }.filter { !$0.isEmpty })
-        guard !wanted.isEmpty else { return [] }
-
-        var provides = false
-        var stack = [pakFile.root]
-        while let node = stack.popLast(), !provides {
-            for child in node.children ?? [] {
-                if child.isFolder {
-                    stack.append(child)
-                    continue
-                }
-                let name = (child.name as NSString).deletingPathExtension.lowercased()
-                if (child.name as NSString).pathExtension.lowercased() == "bsp",
-                   wanted.contains(name) {
-                    provides = true
-                    break
-                }
-            }
-        }
-        guard provides else { return [] }
-
-        return [DemoPlaybackAsset(fileName: pakFile.name, data: pakFile.data)]
     }
 
     func canPreviewAudio(_ node: PakNode) -> Bool {
@@ -843,20 +818,20 @@ final class PakViewModel: NSObject, ObservableObject {
 
     @discardableResult
     func pasteIntoCurrentFolder() -> [PakNode] {
-        guard isEditable, let destination = currentFolder else { return [] }
+        guard isEditable, let destination = currentFolder,
+              let root = pakFile?.root,
+              let destinationDepth = PakTreeMutation.depth(of: destination, in: root) else { return [] }
 
         if let payload = clipboard {
             let isSameDocumentMove = payload.isCut && payload.sourceModel === self
-            if !isSameDocumentMove {
-                do {
-                    var budget = try PakImportBudget(existingRoot: pakFile?.root)
-                    for template in payload.nodes {
-                        try budget.registerTree(template)
-                    }
-                } catch {
-                    presentWarning(title: "Couldn’t Paste Items", message: error.localizedDescription)
-                    return []
+            do {
+                var budget = try PakImportBudget(existingRoot: isSameDocumentMove ? nil : root)
+                for template in payload.nodes {
+                    try budget.registerTree(template, depth: destinationDepth + 1)
                 }
+            } catch {
+                presentWarning(title: "Couldn’t Paste Items", message: error.localizedDescription)
+                return []
             }
 
             if isSameDocumentMove {
@@ -1144,6 +1119,11 @@ final class PakViewModel: NSObject, ObservableObject {
         guard values.isSymbolicLink != true else {
             throw PakError.unsafePath(url.lastPathComponent)
         }
+        guard let root = pakFile?.root,
+              let destinationDepth = PakTreeMutation.depth(of: folder, in: root),
+              destinationDepth + 1 <= PakSafetyLimits.maximumPathDepth else {
+            throw PakError.unsafePath(url.lastPathComponent)
+        }
         try budget.registerEntry()
 
         let name = availableName(for: url.lastPathComponent, in: folder)
@@ -1151,7 +1131,7 @@ final class PakViewModel: NSObject, ObservableObject {
 
         if values.isDirectory == true {
             let node = PakNode(name: name)
-            try PakLoader.buildTree(from: url, into: node, budget: &budget)
+            try PakLoader.buildTree(from: url, into: node, budget: &budget, depth: destinationDepth + 2)
             PakLoader.sortNodeRecursively(node)
             return node
         }
@@ -1957,7 +1937,16 @@ final class PakViewModel: NSObject, ObservableObject {
     @discardableResult
     func addFolder(in folder: PakNode?) -> PakNode? {
         guard isEditable,
-              let target = folder ?? currentFolder ?? pakFile?.root else { return nil }
+              let root = pakFile?.root,
+              let target = folder ?? currentFolder ?? pakFile?.root,
+              let targetDepth = PakTreeMutation.depth(of: target, in: root) else { return nil }
+        do {
+            var budget = try PakImportBudget(existingRoot: root)
+            try budget.registerTree(PakNode(name: "New Folder"), depth: targetDepth + 1)
+        } catch {
+            presentWarning(title: "Couldn’t Create Folder", message: error.localizedDescription)
+            return nil
+        }
         target.children = target.children ?? []
 
         let baseName = "New Folder"
