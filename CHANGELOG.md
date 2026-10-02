@@ -32,6 +32,15 @@ Notable user-visible changes are documented here.
 
 ### Fixed
 
+- Windows replacement exports prepare the complete output before replacing the
+  original; Windows and Linux exports reject missing file payloads.
+- Replacement imports on every platform validate the resulting archive's entry
+  and size limits, allowing replacements at capacity while preserving originals
+  if reading or validation fails.
+- macOS clipboard copies reject unreadable files, omit descendants of selected
+  folders, and preserve live edits made after Cut when moving within a document.
+  Deleted cut items are rejected before modifying the destination.
+- macOS ZIP saving accepts empty folders at the maximum supported path depth.
 - Demo playback now includes a bounded snapshot of the open archive on every
   platform, including new documents, PK3/KPF maps, and unsaved edits.
 - macOS PAK loading merges folder paths case-insensitively and counts implicit

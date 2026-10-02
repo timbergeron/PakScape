@@ -8,6 +8,83 @@ namespace PakStudio.Tests;
 public sealed class ArchiveTreeEditorTests
 {
     [Fact]
+    public void ReplacementAtTheEntryLimitCountsOnlyTheResultingTree()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var existing = ArchiveTreeEditor.AddFile(root, "original.txt", [1]);
+        for (var index = 1; index < ArchiveSafetyLimits.MaximumEntryCount; index++)
+        {
+            root.Files.Add(new ArchiveFileNode($"file{index}", []));
+        }
+
+        var replacement = Assert.IsType<ArchiveFileNode>(
+            ArchiveTreeEditor.ReplaceWith(existing, new ArchiveFileNode("incoming.txt", [2, 3])));
+
+        Assert.Equal("original.txt", replacement.Name);
+        Assert.Equal(new byte[] { 2, 3 }, replacement.Data);
+        Assert.Same(root, replacement.Parent);
+        Assert.Null(existing.Parent);
+        Assert.Equal(ArchiveSafetyLimits.MaximumEntryCount, root.Files.Count);
+    }
+
+    [Fact]
+    public void ReplacementRejectsExcessiveNetEntriesWithoutRemovingTheOriginal()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var existing = ArchiveTreeEditor.AddFile(root, "original.txt", [1]);
+        for (var index = 1; index < ArchiveSafetyLimits.MaximumEntryCount; index++)
+        {
+            root.Files.Add(new ArchiveFileNode($"file{index}", []));
+        }
+        var incoming = new ArchiveFolderNode("incoming");
+        incoming.Files.Add(new ArchiveFileNode("file", [2]));
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.ReplaceWith(existing, incoming));
+        Assert.Contains(existing, root.Files);
+        Assert.Same(root, existing.Parent);
+        Assert.Empty(root.Folders);
+    }
+
+    [Fact]
+    public void FolderReplacementReleasesTheWholeOldSubtreeBudget()
+    {
+        var root = ArchiveFolderNode.CreateRoot();
+        var existing = ArchiveTreeEditor.CreateFolder(root, "maps");
+        for (var index = 1; index < ArchiveSafetyLimits.MaximumEntryCount; index++)
+        {
+            existing.Files.Add(new ArchiveFileNode($"file{index}", []));
+        }
+        var staged = ArchiveFolderNode.CreateRoot();
+        var incoming = ArchiveTreeEditor.CreateFolder(staged, "incoming");
+        ArchiveTreeEditor.AddFile(incoming, "new.bsp", [2]);
+
+        var replacement = Assert.IsType<ArchiveFolderNode>(ArchiveTreeEditor.ReplaceWith(existing, incoming));
+
+        Assert.Same(replacement, Assert.Single(root.Folders));
+        Assert.Equal("maps", replacement.Name);
+        Assert.Equal("new.bsp", Assert.Single(replacement.Files).Name);
+        Assert.Null(existing.Parent);
+        Assert.Same(staged, incoming.Parent);
+    }
+
+    [Fact]
+    public void ReplacementChecksDestinationDepthBeforeRemovingTheOriginal()
+    {
+        var destination = ArchiveFolderNode.CreateRoot();
+        for (var depth = 1; depth < ArchiveSafetyLimits.MaximumPathDepth; depth++)
+        {
+            destination = ArchiveTreeEditor.CreateFolder(destination, "a");
+        }
+        var existing = ArchiveTreeEditor.AddFile(destination, "original", [1]);
+        var incoming = new ArchiveFolderNode("incoming");
+        incoming.Files.Add(new ArchiveFileNode("too-deep", [2]));
+
+        Assert.Throws<ArchiveValidationException>(() => ArchiveTreeEditor.ReplaceWith(existing, incoming));
+        Assert.Same(existing, Assert.Single(destination.Files));
+        Assert.Empty(destination.Folders);
+    }
+
+    [Fact]
     public void AdditionsRejectTheEntryLimitWithoutChangingTheTree()
     {
         var root = CreateFullArchive();

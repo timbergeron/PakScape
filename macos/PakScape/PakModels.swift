@@ -156,6 +156,36 @@ struct PakNodePlacement {
 }
 
 enum PakTreeMutation {
+    static func clipboardSnapshot(of node: PakNode, originalData: Data?) throws -> PakNode {
+        let copy = PakNode(name: node.name)
+        if node.isFolder {
+            copy.children = try node.children?.map { try clipboardSnapshot(of: $0, originalData: originalData) }
+        } else {
+            copy.localData = try PakNodeData.data(for: node, originalData: originalData)
+        }
+        return copy
+    }
+
+    static func validatedMovePlacements(
+        for ids: Set<PakNode.ID>, in root: PakNode, to destination: PakNode
+    ) throws -> [PakNodePlacement] {
+        let sources = placements(for: ids, in: root)
+        guard sources.count == ids.count else {
+            throw PakError.unknown("One or more cut items are no longer in this archive.")
+        }
+        guard destination.isFolder, let destinationDepth = depth(of: destination, in: root) else {
+            throw PakError.unknown("The destination folder is no longer in this archive.")
+        }
+        var budget = PakImportBudget()
+        for source in sources {
+            guard depth(of: destination, in: source.node) == nil else {
+                throw PakError.unknown("A folder cannot be moved into itself or one of its subfolders.")
+            }
+            try budget.registerTree(source.node, depth: destinationDepth + 1)
+        }
+        return sources
+    }
+
     static func depth(of target: PakNode, in root: PakNode) -> Int? {
         if root === target { return 0 }
         for child in root.children ?? [] {
@@ -712,6 +742,16 @@ struct PakImportBudget {
         } else {
             try commitFile(size: node.fileSize, name: node.name)
         }
+    }
+
+    mutating func unregisterTree(_ node: PakNode) throws {
+        var removed = PakImportBudget()
+        try removed.registerTree(node)
+        guard removed.entryCount <= entryCount, removed.totalSize <= totalSize else {
+            throw PakError.unknown("The item is no longer included in the import budget.")
+        }
+        entryCount -= removed.entryCount
+        totalSize -= removed.totalSize
     }
 }
 
@@ -1566,10 +1606,10 @@ struct PakZipWriter {
         budget: inout PakImportBudget,
         depth: Int = 1
     ) throws {
-        guard depth <= PakSafetyLimits.maximumPathDepth else {
-            throw PakError.unsafePath("archive path")
-        }
         for node in nodes {
+            guard depth <= PakSafetyLimits.maximumPathDepth else {
+                throw PakError.unsafePath("archive path")
+            }
             try budget.registerEntry()
             try PakPathValidator.validateNodeName(node.name)
             if node.isFolder {

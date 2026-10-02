@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- This service has no WPF dependencies; exercise Windows export behavior in the portable suite. -->
+    <Compile Include="../PakStudio.App/Services/ArchiveFileTransferService.cs"
+             Link="Services/ArchiveFileTransferService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="../../native/build/linux/libpakscape_audio.so"
           Link="libpakscape_audio.so"
           CopyToOutputDirectory="PreserveNewest"

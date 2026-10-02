@@ -8,7 +8,7 @@ public interface IArchiveFileTransferService
 
     ArchiveFolderNode ImportDirectory(ArchiveFolderNode destination, string sourcePath);
 
-    string Export(ArchiveNode node, string destinationDirectory);
+    string Export(ArchiveNode node, string destinationDirectory, bool replaceExisting = false);
 
     IReadOnlyList<string> ExportToTemporaryLocation(IReadOnlyList<ArchiveNode> nodes);
 

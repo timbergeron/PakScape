@@ -1163,13 +1163,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 try
                 {
-                    if (!PrepareExportDestination(directory, item.Name))
+                    if (!PrepareExportDestination(directory, item.Name, out var replaceExisting))
                     {
                         continue;
                     }
 
                     var output = await Task.Run(() =>
-                        _fileTransferService.Export(item.Node, directory)).ConfigureAwait(true);
+                        _fileTransferService.Export(item.Node, directory, replaceExisting)).ConfigureAwait(true);
                     outputs.Add(output);
                 }
                 catch (Exception exception)
@@ -1194,11 +1194,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Clears an existing export of the same name so the item keeps its archive name.
+    /// Confirms replacement while retaining the existing item until the export is prepared.
     /// Returns false when the user declines to replace it.
     /// </summary>
-    private bool PrepareExportDestination(string directory, string name)
+    private bool PrepareExportDestination(string directory, string name, out bool replaceExisting)
     {
+        replaceExisting = false;
         var destination = Path.Combine(directory, name);
         var isDirectory = Directory.Exists(destination);
         if (!isDirectory && !File.Exists(destination))
@@ -1214,15 +1215,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return false;
         }
 
-        if (isDirectory)
-        {
-            Directory.Delete(destination, recursive: true);
-        }
-        else
-        {
-            File.Delete(destination);
-        }
-
+        replaceExisting = true;
         return true;
     }
 
@@ -2373,18 +2366,20 @@ public sealed class MainWindowViewModel : ViewModelBase
                     {
                         continue;
                     }
+                    var importDestination = decision == ImportConflictDecision.Replace
+                        ? ArchiveFolderNode.CreateRoot()
+                        : destination;
                     var node = await Task.Run(() =>
                     {
                         var attributes = File.GetAttributes(path);
                         return attributes.HasFlag(FileAttributes.Directory)
-                            ? (ArchiveNode)_fileTransferService.ImportDirectory(destination, path)
-                            : _fileTransferService.ImportFile(destination, path);
+                            ? (ArchiveNode)_fileTransferService.ImportDirectory(importDestination, path)
+                            : _fileTransferService.ImportFile(importDestination, path);
                     }).ConfigureAwait(true);
                     if (decision == ImportConflictDecision.Replace && existing is not null)
                     {
                         // Read and validate the incoming item before removing the original.
-                        ArchiveTreeEditor.Remove(existing);
-                        ArchiveTreeEditor.Rename(node, existing.Name);
+                        node = ArchiveTreeEditor.ReplaceWith(existing, node);
                         imported.Remove(existing);
                     }
                     imported.Add(node);

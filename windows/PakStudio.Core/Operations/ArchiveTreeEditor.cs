@@ -92,6 +92,26 @@ public static class ArchiveTreeEditor
         node.Parent = null;
     }
 
+    /// <summary>Installs an already-read replacement after validating the resulting archive.</summary>
+    public static ArchiveNode ReplaceWith(ArchiveNode existing, ArchiveNode replacement)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        ArgumentNullException.ThrowIfNull(replacement);
+        var parent = existing.Parent
+            ?? throw new ArchiveValidationException("The archive root cannot be replaced.");
+        if (!parent.Children.Contains(existing))
+        {
+            throw new ArchiveValidationException("The item is no longer present in its parent folder.");
+        }
+
+        var clone = CloneDetached(replacement, copyFileData: false);
+        clone.Name = existing.Name;
+        EnsureCopyFits([clone], parent, excluding: existing);
+        Remove(existing);
+        Attach(parent, clone);
+        return clone;
+    }
+
     public static IReadOnlyList<ArchiveNode> CreateSnapshot(IEnumerable<ArchiveNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -303,7 +323,8 @@ public static class ArchiveTreeEditor
 
     private static void EnsureCopyFits(
         IReadOnlyCollection<ArchiveNode> sources,
-        ArchiveFolderNode destination)
+        ArchiveFolderNode destination,
+        ArchiveNode? excluding = null)
     {
         var root = GetRoot(destination);
 
@@ -311,7 +332,7 @@ public static class ArchiveTreeEditor
         long totalSize = 0;
         foreach (var child in root.Children)
         {
-            AccumulateStatistics(child, ref entryCount, ref totalSize);
+            AccumulateStatistics(child, ref entryCount, ref totalSize, excluding);
         }
         foreach (var source in sources)
         {
@@ -329,8 +350,13 @@ public static class ArchiveTreeEditor
         return (ArchiveFolderNode)node;
     }
 
-    private static void AccumulateStatistics(ArchiveNode node, ref int entryCount, ref long totalSize)
+    private static void AccumulateStatistics(
+        ArchiveNode node, ref int entryCount, ref long totalSize, ArchiveNode? excluding = null)
     {
+        if (ReferenceEquals(node, excluding))
+        {
+            return;
+        }
         entryCount++;
         ArchiveSafetyLimits.EnsureEntryCount(entryCount, "The resulting archive");
         if (node is ArchiveFileNode file)
@@ -343,7 +369,7 @@ public static class ArchiveTreeEditor
 
         foreach (var child in ((ArchiveFolderNode)node).Children)
         {
-            AccumulateStatistics(child, ref entryCount, ref totalSize);
+            AccumulateStatistics(child, ref entryCount, ref totalSize, excluding);
         }
     }
 

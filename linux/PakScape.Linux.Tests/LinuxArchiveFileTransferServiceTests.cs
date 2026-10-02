@@ -8,6 +8,100 @@ namespace PakScape.Linux.Tests;
 
 public sealed class LinuxArchiveFileTransferServiceTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ExportReplacementSupportsFilesAndFolders(bool sourceFolder, bool destinationFolder)
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "item");
+            if (destinationFolder)
+            {
+                Directory.CreateDirectory(destination);
+                File.WriteAllText(Path.Combine(destination, "old.txt"), "old");
+            }
+            else
+            {
+                File.WriteAllText(destination, "old");
+            }
+            var root = ArchiveFolderNode.CreateRoot();
+            ArchiveNode item;
+            if (sourceFolder)
+            {
+                var folder = ArchiveTreeEditor.CreateFolder(root, "item");
+                ArchiveTreeEditor.AddFile(folder, "new.txt", [1, 2]);
+                item = folder;
+            }
+            else
+            {
+                item = ArchiveTreeEditor.AddFile(root, "item", [1, 2]);
+            }
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Equal(destination, service.Export(item, directory, replaceExisting: true));
+
+            Assert.Equal(new byte[] { 1, 2 }, File.ReadAllBytes(
+                sourceFolder ? Path.Combine(destination, "new.txt") : destination));
+            Assert.False(File.Exists(Path.Combine(destination, "old.txt")));
+            Assert.Single(Directory.EnumerateFileSystemEntries(directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FailedFolderReplacementPreservesTheOriginalAndRemovesStaging()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var destination = Directory.CreateDirectory(Path.Combine(directory, "item"));
+            File.WriteAllText(Path.Combine(destination.FullName, "old.txt"), "original");
+            var folder = new ArchiveFolderNode("item");
+            folder.Files.Add(new ArchiveFileNode("valid.txt", [1]));
+            folder.Files.Add(new ArchiveFileNode("invalid\\name", [2]));
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.Throws<ArchiveValidationException>(() => service.Export(folder, directory, replaceExisting: true));
+
+            Assert.Equal("original", File.ReadAllText(Path.Combine(destination.FullName, "old.txt")));
+            Assert.Single(Directory.EnumerateFileSystemEntries(destination.FullName));
+            Assert.Single(Directory.EnumerateFileSystemEntries(directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FailedFileReplacementPreservesTheOriginal()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "item");
+            File.WriteAllText(destination, "original");
+            var file = new ArchiveFileNode("item", null!);
+            using var service = new LinuxArchiveFileTransferService();
+
+            Assert.ThrowsAny<ArgumentException>(() => service.Export(file, directory, replaceExisting: true));
+
+            Assert.Equal("original", File.ReadAllText(destination));
+            Assert.Single(Directory.EnumerateFileSystemEntries(directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public void DirectoryImportPreservesCaseCollisionsAcrossFilesAndFolders()
     {

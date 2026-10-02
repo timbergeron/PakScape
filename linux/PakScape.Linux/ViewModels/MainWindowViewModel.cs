@@ -1683,18 +1683,20 @@ public partial class MainWindowViewModel : ObservableObject
                     {
                         continue;
                     }
+                    var importDestination = decision == ImportConflictDecision.Replace
+                        ? ArchiveFolderNode.CreateRoot()
+                        : destination;
                     var node = await Task.Run(() =>
                     {
                         var attributes = File.GetAttributes(path);
                         return attributes.HasFlag(FileAttributes.Directory)
-                            ? (ArchiveNode)_fileTransferService.ImportDirectory(destination, path)
-                            : _fileTransferService.ImportFile(destination, path);
+                            ? (ArchiveNode)_fileTransferService.ImportDirectory(importDestination, path)
+                            : _fileTransferService.ImportFile(importDestination, path);
                     });
                     if (decision == ImportConflictDecision.Replace && existing is not null)
                     {
                         // Read and validate the incoming item before removing the original.
-                        ArchiveTreeEditor.Remove(existing);
-                        ArchiveTreeEditor.Rename(node, existing.Name);
+                        node = ArchiveTreeEditor.ReplaceWith(existing, node);
                         imported.Remove(existing);
                     }
                     imported.Add(node);

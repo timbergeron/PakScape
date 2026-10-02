@@ -824,42 +824,42 @@ final class PakViewModel: NSObject, ObservableObject {
 
         if let payload = clipboard {
             let isSameDocumentMove = payload.isCut && payload.sourceModel === self
+            let removedPlacements: [PakNodePlacement]
+            let templates: [PakNode]
+            let residents: [PakNode]
             do {
-                var budget = try PakImportBudget(existingRoot: isSameDocumentMove ? nil : root)
-                for template in payload.nodes {
-                    try budget.registerTree(template, depth: destinationDepth + 1)
+                if isSameDocumentMove {
+                    let placements = try PakTreeMutation.validatedMovePlacements(
+                        for: Set(payload.originalIDs), in: root, to: destination
+                    )
+                    removedPlacements = placements.filter { $0.parent !== destination }
+                    residents = placements.filter { $0.parent === destination }.map { $0.node }
+                    // Read the live nodes so renames and changes made after Cut survive.
+                    templates = removedPlacements.map { $0.node }
+                } else {
+                    var budget = try PakImportBudget(existingRoot: root)
+                    for template in payload.nodes {
+                        try budget.registerTree(template, depth: destinationDepth + 1)
+                    }
+                    removedPlacements = []
+                    residents = []
+                    templates = payload.nodes
                 }
             } catch {
                 presentWarning(title: "Couldn’t Paste Items", message: error.localizedDescription)
                 return []
             }
 
-            if isSameDocumentMove {
-                for id in payload.originalIDs {
-                    if let original = findNode(with: id, in: pakFile?.root),
-                       destination === original || isDescendant(destination, of: original) {
-                        let alert = NSAlert()
-                        alert.alertStyle = .warning
-                        alert.messageText = "Cannot Move Into Itself"
-                        alert.informativeText = "You cannot move a folder into itself or one of its subfolders."
-                        alert.runModal()
-                        return []
-                    }
-                }
+            if isSameDocumentMove, templates.isEmpty {
+                clipboard = nil
+                selectedNodes = residents
+                selectedFile = residents.first
+                return residents
             }
-
-            let removedPlacements: [PakNodePlacement]
-            if isSameDocumentMove, let root = pakFile?.root {
-                removedPlacements = PakTreeMutation.placements(for: Set(payload.originalIDs), in: root)
-                removeNodes(withIDs: Set(payload.originalIDs), from: root)
-            } else {
-                // Cross-document cut/paste is intentionally a copy. Keeping Undo
-                // scoped to one archive avoids partially undoing a two-window move.
-                removedPlacements = []
-            }
+            PakTreeMutation.apply(removing: removedPlacements, inserting: [])
 
             var inserted: [PakNode] = []
-            for template in payload.nodes {
+            for template in templates {
                 let clone = cloneNode(template)
                 clone.name = availableName(for: clone.name, in: destination)
                 insert(node: clone, into: destination)
@@ -879,9 +879,9 @@ final class PakViewModel: NSObject, ObservableObject {
                 clipboard = nil
             }
 
-            selectedNodes = inserted
-            selectedFile = inserted.first
-            return inserted
+            selectedNodes = residents + inserted
+            selectedFile = selectedNodes.first
+            return selectedNodes
         }
 
         let urls = pasteboardFileURLs()
@@ -891,12 +891,14 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     private func createClipboard(isCut: Bool) {
-        guard !selectedNodes.isEmpty else { return }
+        guard !selectedNodes.isEmpty, let root = pakFile?.root else { return }
+        let nodes = PakTreeMutation.placements(for: Set(selectedNodes.map { $0.id }), in: root).map { $0.node }
+        guard !nodes.isEmpty else { return }
 
         do {
-            let exportedURLs = try exportSelectionForPasteboard(nodes: selectedNodes)
-            let snapshots = selectedNodes.map { cloneNodeForClipboard($0) }
-            let ids = isCut ? selectedNodes.map { $0.id } : []
+            let snapshots = try nodes.map { try PakTreeMutation.clipboardSnapshot(of: $0, originalData: pakFile?.data) }
+            let exportedURLs = try exportSelectionForPasteboard(nodes: nodes)
+            let ids = isCut ? nodes.map { $0.id } : []
             clipboard = ClipboardPayload(
                 nodes: snapshots,
                 isCut: isCut,
@@ -912,21 +914,6 @@ final class PakViewModel: NSObject, ObservableObject {
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
-    }
-
-    private func cloneNodeForClipboard(_ node: PakNode) -> PakNode {
-        let copy = PakNode(name: node.name)
-        if node.isFolder {
-            copy.children = node.children?.map { cloneNodeForClipboard($0) }
-        } else {
-            if let data = node.localData {
-                copy.localData = data
-            } else if let data = extractData(for: node) {
-                copy.localData = data
-            }
-            copy.entry = nil
-        }
-        return copy
     }
 
     private func cloneNode(_ node: PakNode) -> PakNode {
@@ -966,17 +953,6 @@ final class PakViewModel: NSObject, ObservableObject {
         folder.children?.append(node)
     }
 
-    private func removeNodes(withIDs ids: Set<PakNode.ID>, from root: PakNode?) {
-        guard let root else { return }
-        if var children = root.children {
-            children.removeAll { ids.contains($0.id) }
-            root.children = children
-        }
-        for child in root.children ?? [] where child.isFolder {
-            removeNodes(withIDs: ids, from: child)
-        }
-    }
-
     private func findNode(with id: PakNode.ID, in root: PakNode?) -> PakNode? {
         guard let root else { return nil }
         if root.id == id { return root }
@@ -1003,18 +979,6 @@ final class PakViewModel: NSObject, ObservableObject {
         }
 
         return nil
-    }
-
-    private func isDescendant(_ node: PakNode, of possibleAncestor: PakNode) -> Bool {
-        for child in possibleAncestor.children ?? [] {
-            if child === node {
-                return true
-            }
-            if isDescendant(node, of: child) {
-                return true
-            }
-        }
-        return false
     }
 
     private func pasteboardFileURLs() -> [URL] {
@@ -1065,6 +1029,9 @@ final class PakViewModel: NSObject, ObservableObject {
             }
             do {
                 var candidateBudget = budget
+                if replace, let existing {
+                    try candidateBudget.unregisterTree(existing)
+                }
                 let node = try createNodeFromFileURL(url, in: folder, budget: &candidateBudget)
                 if replace, let existing {
                     node.name = existing.name

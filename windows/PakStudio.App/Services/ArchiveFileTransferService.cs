@@ -63,36 +63,35 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
         }
     }
 
-    public string Export(ArchiveNode node, string destinationDirectory)
+    public string Export(ArchiveNode node, string destinationDirectory, bool replaceExisting = false)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
         ObjectDisposedException.ThrowIf(_disposed, this);
+        WindowsFileNameValidator.Validate(node.Name);
         Directory.CreateDirectory(destinationDirectory);
 
-        var outputPath = GetAvailableFileSystemPath(
-            destinationDirectory,
-            node.Name,
-            node is ArchiveFileNode);
-        if (node is ArchiveFileNode file)
-        {
-            WriteFileAtomically(outputPath, file.Data);
-            return outputPath;
-        }
-
-        var stagingPath = Path.Combine(
-            destinationDirectory,
-            $".pakscape-export-{Guid.NewGuid():N}.tmp");
-        Directory.CreateDirectory(stagingPath);
+        var outputPath = replaceExisting
+            ? Path.Combine(destinationDirectory, node.Name)
+            : GetAvailableFileSystemPath(destinationDirectory, node.Name, node is ArchiveFileNode);
+        var stagingPath = Path.Combine(destinationDirectory, $".pakscape-export-{Guid.NewGuid():N}.tmp");
         try
         {
-            WriteFolder((ArchiveFolderNode)node, stagingPath);
-            Directory.Move(stagingPath, outputPath);
+            if (node is ArchiveFileNode file)
+            {
+                WriteFileAtomically(stagingPath, file.Data);
+            }
+            else
+            {
+                Directory.CreateDirectory(stagingPath);
+                WriteFolder((ArchiveFolderNode)node, stagingPath);
+            }
+            ArchiveExportCommit.Commit(stagingPath, outputPath, replaceExisting);
             return outputPath;
         }
         finally
         {
-            TryDeleteDirectory(stagingPath);
+            ArchiveExportCommit.Cleanup(stagingPath);
         }
     }
 
@@ -305,6 +304,7 @@ public sealed class ArchiveFileTransferService : IArchiveFileTransferService, ID
 
     private static void WriteFileAtomically(string path, byte[] data)
     {
+        ArgumentNullException.ThrowIfNull(data);
         var directory = Path.GetDirectoryName(path)
             ?? throw new ArchiveValidationException("The output path has no parent folder.");
         var temporaryPath = Path.Combine(

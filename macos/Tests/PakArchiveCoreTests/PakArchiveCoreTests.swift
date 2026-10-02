@@ -3,6 +3,109 @@ import XCTest
 @testable import PakArchiveCore
 
 final class PakArchiveCoreTests: XCTestCase {
+    func testClipboardSnapshotRejectsMissingDataAndPreservesEmptyFiles() throws {
+        let missing = PakNode(name: "missing", entry: PakEntry(name: "missing", offset: 99, length: 1))
+        XCTAssertThrowsError(try PakTreeMutation.clipboardSnapshot(of: missing, originalData: Data()))
+        let empty = PakNode(name: "empty")
+        empty.localData = Data()
+        let snapshot = try PakTreeMutation.clipboardSnapshot(of: empty, originalData: nil)
+        XCTAssertFalse(snapshot.isFolder)
+        XCTAssertEqual(snapshot.localData, Data())
+    }
+
+    func testClipboardSelectionOmitsDescendantsOfSelectedFolders() {
+        let root = PakNode(name: "/")
+        let folder = PakNode(name: "maps")
+        let file = PakNode(name: "custom.bsp")
+        file.localData = Data([1])
+        folder.children = [file]
+        root.children = [folder]
+        let selection = PakTreeMutation.placements(for: [folder.id, file.id], in: root)
+        XCTAssertEqual(selection.map { $0.node }, [folder])
+    }
+
+    func testCutMoveReadsLiveItemsAndRejectsDeletedItems() throws {
+        let root = PakNode(name: "/")
+        let destination = PakNode(name: "destination")
+        let file = PakNode(name: "original")
+        file.localData = Data([1])
+        root.children = [destination, file]
+        let snapshot = try PakTreeMutation.clipboardSnapshot(of: file, originalData: nil)
+        file.name = "renamed"
+        file.localData = Data([2])
+        let placements = try PakTreeMutation.validatedMovePlacements(for: [file.id], in: root, to: destination)
+        XCTAssertTrue(placements.first?.node === file)
+        XCTAssertEqual(placements.first?.node.name, "renamed")
+        XCTAssertEqual(placements.first?.node.localData, Data([2]))
+        XCTAssertEqual(snapshot.name, "original")
+        root.children = [destination]
+        XCTAssertThrowsError(try PakTreeMutation.validatedMovePlacements(for: [file.id], in: root, to: destination))
+        XCTAssertTrue(destination.children?.isEmpty == true)
+    }
+
+    func testCutMoveRejectsSelfAndExcessiveDepthBeforeMutation() throws {
+        let root = PakNode(name: "/")
+        let source = PakNode(name: "source")
+        let file = PakNode(name: "file")
+        file.localData = Data([1])
+        source.children = [file]
+        root.children = [source]
+        XCTAssertThrowsError(try PakTreeMutation.validatedMovePlacements(for: [source.id], in: root, to: source))
+        var destination = root
+        for _ in 0..<PakSafetyLimits.maximumPathDepth {
+            let child = PakNode(name: "a")
+            destination.children?.append(child)
+            destination = child
+        }
+        XCTAssertThrowsError(try PakTreeMutation.validatedMovePlacements(for: [file.id], in: root, to: destination))
+        XCTAssertEqual(source.children, [file])
+        XCTAssertTrue(destination.children?.isEmpty == true)
+    }
+
+    func testReplacementBudgetReleasesEntriesAndBytesWithoutChangingTheOriginalBudget() throws {
+        let root = PakNode(name: "/")
+        let existing = PakNode(name: "original", entry: PakEntry(name: "original", offset: 0, length: PakSafetyLimits.maximumFileSize))
+        let resident = PakNode(name: "resident", entry: PakEntry(name: "resident", offset: 0, length: PakSafetyLimits.maximumFileSize))
+        root.children = [existing, resident]
+        let budget = try PakImportBudget(existingRoot: root)
+        var candidate = budget
+        try candidate.unregisterTree(existing)
+        try candidate.registerTree(existing)
+        XCTAssertEqual(candidate.totalSize, PakSafetyLimits.maximumTotalSize)
+        XCTAssertEqual(candidate.entryCount, 2)
+        XCTAssertEqual(budget.totalSize, PakSafetyLimits.maximumTotalSize)
+        var emptyBudget = PakImportBudget()
+        XCTAssertThrowsError(try emptyBudget.unregisterTree(existing))
+        XCTAssertEqual(emptyBudget.entryCount, 0)
+        XCTAssertEqual(emptyBudget.totalSize, 0)
+    }
+
+    func testReplacementBudgetFitsAtTheEntryLimit() throws {
+        let root = PakNode(name: "/")
+        root.children = (0..<PakSafetyLimits.maximumEntryCount).map { PakNode(name: "item\($0)") }
+        let existing = try XCTUnwrap(root.children?.first)
+        var budget = try PakImportBudget(existingRoot: root)
+        try budget.unregisterTree(existing)
+        let replacement = PakNode(name: "replacement")
+        replacement.localData = Data([1])
+        XCTAssertNoThrow(try budget.registerTree(replacement))
+        XCTAssertEqual(budget.entryCount, PakSafetyLimits.maximumEntryCount)
+    }
+
+    func testZipWriterAcceptsAnEmptyFolderAtTheMaximumDepth() throws {
+        let root = PakNode(name: "/")
+        var folder = root
+        for _ in 0..<PakSafetyLimits.maximumPathDepth {
+            let child = PakNode(name: "a")
+            folder.children = [child]
+            folder = child
+        }
+        let data = try PakZipWriter.write(root: root, originalData: nil)
+        XCTAssertNoThrow(try PakZipValidator.validate(data: data))
+        folder.children = [PakNode(name: "too-deep")]
+        XCTAssertThrowsError(try PakZipWriter.write(root: root, originalData: nil))
+    }
+
     func testLoaderMergesFoldersWhosePathsDifferOnlyByCase() throws {
         let loaded = try PakLoader.load(
             data: makeEmptyPak(paths: ["Maps/first.bsp", "maps/second.bsp"]),
