@@ -42,6 +42,8 @@ Notable user-visible changes are documented here.
 - Windows and Linux direct additions enforce archive entry and size limits, and
   moves validate the entire selection and cross-archive limits before detaching
   any items.
+- Windows and Linux bulk imports reuse their validated import budget when
+  building child items, avoiding repeated full-archive scans.
 - Windows file browsing now supports typing a filename prefix to select an item
   in all four views, including cycling matches by repeating the first letter.
 - Windows and Linux imports and new items now include the destination folder in

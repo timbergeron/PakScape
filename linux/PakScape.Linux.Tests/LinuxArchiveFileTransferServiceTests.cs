@@ -9,6 +9,35 @@ namespace PakScape.Linux.Tests;
 public sealed class LinuxArchiveFileTransferServiceTests
 {
     [Fact]
+    public void DirectoryImportPreservesCaseCollisionsAcrossFilesAndFolders()
+    {
+        var source = CreateTemporaryDirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(source, "maps"));
+            Directory.CreateDirectory(Path.Combine(source, "MAPS"));
+            File.WriteAllBytes(Path.Combine(source, "maps", "first.bsp"), [1]);
+            File.WriteAllBytes(Path.Combine(source, "MAPS", "second.bsp"), [2]);
+            File.WriteAllBytes(Path.Combine(source, "readme"), [3]);
+            File.WriteAllBytes(Path.Combine(source, "README"), [4]);
+            var root = ArchiveFolderNode.CreateRoot();
+            using var service = new LinuxArchiveFileTransferService();
+
+            var imported = service.ImportDirectory(root, source);
+
+            Assert.Equal(2, imported.Folders.Count);
+            Assert.Equal(2, imported.Files.Count);
+            Assert.Equal(4, imported.Children.Select(node => node.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.Equal(new byte[] { 1, 2, 3, 4 }, ArchiveTreeBuilder.FlattenFiles(imported)
+                .Select(entry => Assert.Single(entry.File.Data)).Order().ToArray());
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RecentFilesDegradeGracefullyWhenStateStorageIsReadOnly()
     {
         var service = new XdgRecentFilesService("/proc/pakscape-read-only-test");

@@ -255,20 +255,25 @@ public sealed class LinuxArchiveFileTransferService : IArchiveFileTransferServic
                 : new FileInfo(entry);
             RejectLink(info);
             budget.RegisterEntry();
+            ArchiveSafetyLimits.EnsurePathDepth(destination.Depth + 1, "The imported item");
 
             if (info is DirectoryInfo directory)
             {
                 var childDepth = depth + 1;
                 ArchiveSafetyLimits.EnsurePathDepth(childDepth, "The selected folder");
-                var folder = ArchiveTreeEditor.CreateFolder(destination, directory.Name);
+                // The import budget validates the whole document incrementally.
+                // Avoid rescanning it for every child in a large folder import.
+                var name = ArchiveTreeEditor.GetAvailableName(destination, directory.Name, preserveExtension: false);
+                var folder = ArchiveTreeBuilder.EnsureFolder(destination, name);
                 PopulateFolder(folder, directory.FullName, budget, childDepth);
             }
             else
             {
                 var file = (FileInfo)info;
-                ArchiveTreeEditor.AddFile(
+                var name = ArchiveTreeEditor.GetAvailableName(destination, file.Name, preserveExtension: true);
+                ArchiveTreeBuilder.AddFile(
                     destination,
-                    file.Name,
+                    name,
                     ReadFileWithLimits(file, budget),
                     file.LastWriteTimeUtc);
             }
