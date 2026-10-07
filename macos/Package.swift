@@ -16,6 +16,7 @@ let package = Package(
             path: "PakScape",
             exclude: [
                 "Assets.xcassets",
+                "PrivacyInfo.xcprivacy",
                 "BspLevelPreviewRenderer.swift",
                 "ContentView.swift",
                 "FinderServices.swift",
