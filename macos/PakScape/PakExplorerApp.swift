@@ -380,6 +380,7 @@ private final class AboutWindowPresenter {
 private struct AboutView: View {
     private let projectURL = URL(string: "https://github.com/timbergeron/PakScape")
     private let displayString = "github.com/timbergeron/PakScape"
+    private let privacyURL = URL(string: "https://github.com/timbergeron/PakScape/blob/main/docs/PRIVACY.md")
     private var versionText: String? {
         let bundle = Bundle.main
         guard let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String else {
@@ -396,6 +397,10 @@ private struct AboutView: View {
                     .frame(width: 120, height: 120)
                     .cornerRadius(18)
                     .shadow(radius: 2)
+            }
+
+            if let privacyURL {
+                Link("Privacy Policy", destination: privacyURL)
             }
 
             Text("PakScape")
