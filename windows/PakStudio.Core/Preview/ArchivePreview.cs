@@ -33,7 +33,7 @@ public readonly record struct BspLevelPreviewOptions(
 }
 
 /// <summary>
-/// A model the viewer renders interactively. MD3 and MD5 name their skins, so the
+/// A model the viewer renders interactively. MD3, MD5, and IQM name their textures, so the
 /// resolver finds those entries in the same archive.
 /// </summary>
 public sealed record PreviewModel(

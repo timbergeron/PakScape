@@ -108,6 +108,7 @@ public sealed class ModelPreviewSession : IDisposable
                 ModelFormat.Mdl => "Quake MDL",
                 ModelFormat.Md3 => "Quake III MD3",
                 ModelFormat.Md5 => "Doom 3 MD5",
+                ModelFormat.Iqm => "Inter-Quake Model",
                 ModelFormat.Spr => "Quake sprite",
                 ModelFormat.Bsp => "Quake brush model",
                 _ => "Model",

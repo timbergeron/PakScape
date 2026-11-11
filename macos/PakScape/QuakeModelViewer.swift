@@ -8,12 +8,14 @@ enum QuakeModelFormat: Int32 {
     case md5 = 3
     case spr = 4
     case bsp = 5
+    case iqm = 6
 
     var displayName: String {
         switch self {
         case .mdl: return "Quake MDL"
         case .md3: return "Quake III MD3"
         case .md5: return "Doom 3 MD5"
+        case .iqm: return "Inter-Quake Model"
         case .spr: return "Quake sprite"
         case .bsp: return "Quake brush model"
         case .unknown: return "Model"
@@ -45,7 +47,7 @@ enum QuakeModelViewerError: LocalizedError {
 /// BSP covers the brush models Quake stores its ammo boxes and health kits as.
 enum QuakeModelFormats {
     static let extensions: Set<String> = [
-        "mdl", "md3", "md5mesh", "md5", "spr", "spr32", "bsp",
+        "mdl", "md3", "md5mesh", "md5", "iqm", "spr", "spr32", "bsp",
     ]
 
     static func supports(fileExtension: String) -> Bool {
@@ -62,7 +64,7 @@ enum QuakeModelFormats {
     }
 }
 
-/// Finds the skins an MD3 or MD5 mesh names inside the open archive. Shader paths
+/// Finds the textures an MD3, MD5, or IQM mesh names inside the open archive. Shader paths
 /// are written against the game directory, use either slash, and often name an
 /// extension the archive does not carry, so every plausible spelling is tried.
 struct QuakeModelTextureResolver {

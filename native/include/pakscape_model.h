@@ -34,7 +34,8 @@ enum pkm_format {
     PKM_FORMAT_MD3 = 2,
     PKM_FORMAT_MD5 = 3,
     PKM_FORMAT_SPR = 4,
-    PKM_FORMAT_BSP = 5
+    PKM_FORMAT_BSP = 5,
+    PKM_FORMAT_IQM = 6
 };
 
 /* Keyboard nudges. Each one moves the camera goal by a fixed step. */
@@ -63,8 +64,8 @@ typedef struct pkm_model_stats {
 } pkm_model_stats;
 
 /*
- * The model formats QSS-M loads: MDL, MD3, MD5, SPR sprites, and the brush models
- * stored as BSP. A .bsp holds either a brush model or a playable level, so the
+ * Supported extensions include MDL, MD3, MD5, IQM, SPR sprites, and BSP brush
+ * models. A .bsp holds either a brush model or a playable level, so the
  * extension alone does not decide: ask pkm_bsp_is_brush_model as well.
  */
 PKM_API int pkm_supports_extension(const char *extension);
@@ -92,9 +93,9 @@ PKM_API int pkm_model_format(const pkm_model *model);
 PKM_API int pkm_model_get_stats(const pkm_model *model, pkm_model_stats *stats);
 
 /*
- * MD3 and MD5 reference their skins by path. The host resolves each request
- * against the open archive and uploads straight RGBA8 pixels; surfaces without a
- * texture fall back to a neutral studio material. MDL skins are embedded, so
+ * MD3, MD5, and IQM reference their textures by path. The host resolves each
+ * request against the open archive and uploads straight RGBA8 pixels. Surfaces
+ * without a texture use a neutral studio material. MDL skins are embedded, so
  * those models report no requests.
  */
 PKM_API int pkm_model_texture_request_count(const pkm_model *model);
@@ -186,7 +187,7 @@ PKM_API void pkm_view_reset(pkm_view *view);
  * Advances damping, inertia, idle auto-rotation, and model playback. Returns 1
  * when the next frame differs from the one already on screen, so an idle viewer
  * costs nothing. Animated MDL and MD3 meshes default to ten frames a second;
- * sprites use intervals stored in the file, or the same default when absent.
+ * IQM and sprites use timing from the file when available.
  */
 PKM_API int pkm_view_advance(pkm_view *view, double elapsed_seconds);
 

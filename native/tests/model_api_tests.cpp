@@ -688,6 +688,170 @@ void testMd5() {
     pkm_model_destroy(model);
 }
 
+std::vector<unsigned char> buildIqm(bool animated, float frameRate = 4.0f) {
+    constexpr int headerSize = 124;
+    constexpr int textOffset = headerSize;
+    const int textSize = animated ? 16 : 15;
+    const int meshesOffset = textOffset + textSize;
+    const int arraysOffset = meshesOffset + 24;
+    const int trianglesOffset = arraysOffset + 4 * 20;
+    const int positionsOffset = trianglesOffset + 12;
+    const int uvOffset = positionsOffset + 36;
+    const int indicesOffset = uvOffset + 24;
+    const int weightsOffset = indicesOffset + 12;
+    const int jointsOffset = weightsOffset + 12;
+    const int posesOffset = jointsOffset + 2 * 48;
+    const int animationsOffset = posesOffset + 2 * 88;
+    const int framesOffset = animationsOffset + 20;
+
+    std::vector<unsigned char> bytes;
+    appendPadded(bytes, "INTERQUAKEMODEL", 16);
+    const int header[] = {
+        2, animated ? framesOffset + 4 : jointsOffset, 0,
+        textSize, textOffset, 1, meshesOffset, animated ? 4 : 2, 3, arraysOffset,
+        1, trianglesOffset, 0,
+        animated ? 2 : 0, animated ? jointsOffset : 0,
+        animated ? 2 : 0, animated ? posesOffset : 0,
+        animated ? 1 : 0, animated ? animationsOffset : 0,
+        animated ? 2 : 0, animated ? 1 : 0, animated ? framesOffset : 0, 0,
+        0, 0, 0, 0
+    };
+    for (const int value : header) {
+        appendI32(bytes, value);
+    }
+    appendPadded(bytes, std::string("\0body\0skin.tga\0", 15), textSize);
+    for (const int value : {1, 6, 0, 3, 0, 1}) {
+        appendI32(bytes, value);
+    }
+    const int arrays[][5] = {
+        {0, 0, 7, 3, positionsOffset}, {1, 0, 7, 2, uvOffset},
+        {4, 0, 1, 4, indicesOffset}, {5, 0, 1, 4, weightsOffset}
+    };
+    // Reserve the same space for vertex descriptors in both fixtures.
+    for (const auto &array : arrays) {
+        for (const int value : array) {
+            appendI32(bytes, value);
+        }
+    }
+    for (const int index : {0, 2, 1}) {
+        appendI32(bytes, index);
+    }
+    for (const float value : {0.f, -10.f, -10.f, 0.f, 10.f, -10.f, 0.f, 0.f, 10.f,
+                              0.f, 1.f, 1.f, 1.f, 0.5f, 0.f}) {
+        appendFloat(bytes, value);
+    }
+    bytes.insert(bytes.end(), {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0});
+    bytes.insert(bytes.end(), {255, 0, 0, 0, 128, 127, 0, 0, 255, 0, 0, 0});
+    if (!animated) {
+        return bytes;
+    }
+
+    const float localTransform[] = {0, 0, 0, 0, 0, 0, 1, 1, 1, 1};
+    for (const int parent : {-1, 0}) {
+        appendI32(bytes, 0);
+        appendI32(bytes, parent);
+        for (const float value : localTransform) {
+            appendFloat(bytes, value);
+        }
+    }
+    for (const int parent : {-1, 0}) {
+        appendI32(bytes, parent);
+        appendI32(bytes, parent == -1 ? 4 : 0);  // animate root Z translation
+        for (const float value : localTransform) {
+            appendFloat(bytes, value);
+        }
+        for (int channel = 0; channel < 10; channel++) {
+            appendFloat(bytes, channel == 2 ? 1.f : 0.f);
+        }
+    }
+    appendI32(bytes, 1);
+    appendI32(bytes, 0);
+    appendI32(bytes, 2);
+    appendFloat(bytes, frameRate);
+    appendI32(bytes, 1);
+    appendI16(bytes, 0);
+    appendI16(bytes, 10);
+    return bytes;
+}
+
+void testIqm() {
+    check(pkm_supports_extension(".IQM") == 1, "IQM is supported regardless of case");
+    for (const bool animated : {false, true}) {
+        const std::vector<unsigned char> bytes = buildIqm(animated);
+        char error[256]{};
+        pkm_model *model = pkm_model_create(bytes.data(), bytes.size(), ".iqm", error, sizeof(error));
+        check(model != nullptr, animated ? "animated IQM parses" : "static IQM with unaligned sections parses");
+        if (model == nullptr) {
+            std::fprintf(stderr, "  iqm error: %s\n", error);
+            continue;
+        }
+
+        pkm_model_stats stats{};
+        pkm_model_get_stats(model, &stats);
+        check(stats.format == PKM_FORMAT_IQM, "the IQM format is reported");
+        check(stats.surface_count == 1 && stats.vertex_count == 3 && stats.triangle_count == 1,
+              "IQM mesh statistics match its geometry");
+        check(stats.frame_count == (animated ? 2 : 1), "IQM frame count matches the file");
+        char name[128]{};
+        pkm_model_texture_request_name(model, 0, name, sizeof(name));
+        check(std::string(name) == "skin.tga", "IQM material becomes a texture request");
+        pkm_model_texture_request_surface(model, 0, name, sizeof(name));
+        check(std::string(name) == "body", "IQM texture request keeps the mesh name");
+
+        pkm_view *view = pkm_view_create(model);
+        pkm_view_set_auto_rotate(view, 0);
+        pkm_view_set_animation_enabled(view, 0);
+        const auto first = renderFrame(view, 96, 96);
+        check(brightPixelCount(first) > 80, "IQM geometry renders");
+        if (animated) {
+            pkm_view_set_animation_enabled(view, 1);
+            pkm_view_advance(view, 0.1);
+            pkm_view_set_animation_enabled(view, 0);
+            check(renderFrame(view, 96, 96) == first, "IQM respects the clip frame rate");
+            pkm_view_set_animation_enabled(view, 1);
+            for (int step = 0; step < 3; step++) {
+                pkm_view_advance(view, 0.1);
+            }
+            pkm_view_set_animation_enabled(view, 0);
+            check(renderFrame(view, 96, 96) != first, "IQM applies the animated joint hierarchy");
+        }
+        pkm_view_destroy(view);
+        pkm_model_destroy(model);
+    }
+
+    const auto fast = buildIqm(true, 60.0f);
+    pkm_model *fastModel = pkm_model_create(fast.data(), fast.size(), "iqm", nullptr, 0);
+    check(fastModel != nullptr, "60 fps IQM parses");
+    if (fastModel != nullptr) {
+        pkm_view *view = pkm_view_create(fastModel);
+        pkm_view_set_auto_rotate(view, 0);
+        pkm_view_set_animation_enabled(view, 0);
+        const auto first = renderFrame(view, 96, 96);
+        pkm_view_set_animation_enabled(view, 1);
+        pkm_view_advance(view, 0.018);
+        pkm_view_set_animation_enabled(view, 0);
+        check(renderFrame(view, 96, 96) != first, "60 fps IQM advances within 18 milliseconds");
+        pkm_view_destroy(view);
+        pkm_model_destroy(fastModel);
+    }
+
+    const auto bytes = buildIqm(true);
+    for (size_t size = 0; size < bytes.size(); size++) {
+        pkm_model *model = pkm_model_create(bytes.data(), size, "iqm", nullptr, 0);
+        check(model == nullptr, "truncated IQM is rejected");
+        pkm_model_destroy(model);
+    }
+
+    // Version, mesh count, vertex array count, frame count, and first blend index.
+    for (const size_t offset : {size_t{16}, size_t{36}, size_t{44}, size_t{92}, size_t{316}}) {
+        auto invalid = bytes;
+        invalid[offset] = 255;
+        pkm_model *model = pkm_model_create(invalid.data(), invalid.size(), "iqm", nullptr, 0);
+        check(model == nullptr, "IQM with an invalid version, offset, count, or joint index is rejected");
+        pkm_model_destroy(model);
+    }
+}
+
 void testSpr() {
     const std::vector<unsigned char> bytes = buildSpr(3, 0);
     char error[256]{};
@@ -929,6 +1093,7 @@ int main() {
     testMdl();
     testMd3();
     testMd5();
+    testIqm();
     testSpr();
     testBsp();
     testAutoRotate();

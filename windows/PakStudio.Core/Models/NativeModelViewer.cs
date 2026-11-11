@@ -12,6 +12,7 @@ public enum ModelFormat
     Md5 = 3,
     Spr = 4,
     Bsp = 5,
+    Iqm = 6,
 }
 
 public enum ModelNudge
@@ -42,7 +43,7 @@ public sealed record EmbeddedModelTexture(string Name, byte[] RgbaPixels, int Wi
 
 /// <summary>
 /// Cross-platform managed owner for PakScape's private model viewer, which parses
-/// MDL, MD3, and MD5 meshes plus SPR sprites and BSP brush models, and software
+/// MDL, MD3, MD5, and IQM meshes plus SPR sprites and BSP brush models, and software
 /// renders them with an orbit camera.
 /// </summary>
 public sealed class NativeModelViewer : IDisposable

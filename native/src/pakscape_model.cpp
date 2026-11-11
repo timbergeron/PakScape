@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <thread>
@@ -375,7 +376,7 @@ struct pkm_model {
      * so the renderer stays the single-mesh path the other formats use.
      */
     std::vector<Surface> spriteFrames;
-    /* MDL/MD3 poses have identical surface topology and are decoded up front. */
+    /* Animated mesh poses have identical topology and are decoded up front. */
     std::vector<std::vector<Surface>> animationFrames;
     std::vector<float> frameIntervals;
     int activeFrame = 0;
@@ -1195,6 +1196,479 @@ bool parseMd5(const Reader &reader, pkm_model &model, std::string &error) {
     model.frameCount = 1;
     model.skinCount = 0;
     return true;
+}
+
+/* ------------------------------------------------------------------ IQM --- */
+
+constexpr int kIqmHeaderSize = 124;
+constexpr int kIqmChannels = 10;
+constexpr size_t kMaxIqmDecodedBytes = 128 * 1024 * 1024;
+constexpr float kMinIqmFrameInterval = 0.001f;
+
+bool iqmRange(const Reader &reader, int offset, size_t count, size_t stride) {
+    // Some exporters omit padding. Reader assembles values byte by byte.
+    return count == 0 ||
+           (offset >= kIqmHeaderSize &&
+            count <= reader.size() / stride && reader.has(offset, count * stride));
+}
+
+struct IqmTransform {
+    Vec3 axes[3];
+    Vec3 origin;
+
+    Vec3 direction(const Vec3 &v) const {
+        return axes[0] * v.x + axes[1] * v.y + axes[2] * v.z;
+    }
+
+    IqmTransform operator*(const IqmTransform &other) const {
+        return {{direction(other.axes[0]), direction(other.axes[1]), direction(other.axes[2])},
+                direction(other.origin) + origin};
+    }
+
+    Vec3 normal(const Vec3 &v) const {
+        const Vec3 x = cross(axes[1], axes[2]);
+        const Vec3 y = cross(axes[2], axes[0]);
+        const Vec3 z = cross(axes[0], axes[1]);
+        // The cofactor matrix transforms normals, including under nonuniform scale.
+        const float sign = dot(axes[0], x) < 0.0f ? -1.0f : 1.0f;
+        return normalize((x * v.x + y * v.y + z * v.z) * sign);
+    }
+};
+
+bool iqmLocalTransform(const float (&channels)[kIqmChannels], IqmTransform &transform,
+                       IqmTransform *inverse = nullptr) {
+    Joint rotation;
+    float length = 0.0f;
+    for (int axis = 0; axis < 4; axis++) {
+        length = std::hypot(length, channels[3 + axis]);
+    }
+    if (!std::isfinite(length) || length <= 0.0f) {
+        return false;
+    }
+    for (int axis = 0; axis < 4; axis++) {
+        rotation.rotation[axis] = channels[3 + axis] / length;
+    }
+    const Vec3 x = rotateByJoint(rotation, {1, 0, 0});
+    const Vec3 y = rotateByJoint(rotation, {0, 1, 0});
+    const Vec3 z = rotateByJoint(rotation, {0, 0, 1});
+    const float sx = channels[7], sy = channels[8], sz = channels[9];
+    transform = {{x * sx, y * sy, z * sz}, {channels[0], channels[1], channels[2]}};
+    if (inverse != nullptr) {
+        if (sx == 0.0f || sy == 0.0f || sz == 0.0f) {
+            return false;
+        }
+        // Undo rotation first, then undo the local scale.
+        const Vec3 inverseScale{1.0f / sx, 1.0f / sy, 1.0f / sz};
+        inverse->axes[0] = {x.x * inverseScale.x, y.x * inverseScale.y, z.x * inverseScale.z};
+        inverse->axes[1] = {x.y * inverseScale.x, y.y * inverseScale.y, z.y * inverseScale.z};
+        inverse->axes[2] = {x.z * inverseScale.x, y.z * inverseScale.y, z.z * inverseScale.z};
+        inverse->origin = inverse->direction(transform.origin) * -1.0f;
+    }
+    return true;
+}
+
+struct IqmPose {
+    int parent = -1;
+    int mask = 0;
+    float offsets[kIqmChannels];
+    float scales[kIqmChannels];
+    IqmTransform inverseBind;
+};
+
+struct IqmBlend {
+    int joints[4]{};
+    float weights[4]{};
+};
+
+bool decodeIqmAnimation(const Reader &reader, int jointCount, int joints, int poses,
+                        int frameCount, int channelCount, int frames,
+                        const std::vector<std::vector<IqmBlend>> &blends, pkm_model &model) {
+    std::vector<IqmPose> skeleton(jointCount);
+    int channelsPerFrame = 0;
+    for (int joint = 0; joint < jointCount; joint++) {
+        IqmPose &pose = skeleton[joint];
+        const size_t jointOffset = static_cast<size_t>(joints) + joint * 48;
+        const size_t poseOffset = static_cast<size_t>(poses) + joint * 88;
+        int jointParent = -1;
+        reader.int32(jointOffset + 4, jointParent);
+        reader.int32(poseOffset, pose.parent);
+        reader.int32(poseOffset + 4, pose.mask);
+        if (jointParent != pose.parent || pose.parent >= joint ||
+            pose.mask < 0 || pose.mask >= (1 << kIqmChannels)) {
+            return false;
+        }
+        float bind[kIqmChannels];
+        for (int channel = 0; channel < kIqmChannels; channel++) {
+            if (!reader.float32(jointOffset + 8 + 4 * channel, bind[channel]) ||
+                !reader.float32(poseOffset + 8 + 4 * channel, pose.offsets[channel]) ||
+                !reader.float32(poseOffset + 48 + 4 * channel, pose.scales[channel])) {
+                return false;
+            }
+            channelsPerFrame += (pose.mask >> channel) & 1;
+        }
+        IqmTransform localBind;
+        if (!iqmLocalTransform(bind, localBind, &pose.inverseBind)) {
+            return false;
+        }
+        if (pose.parent >= 0) {
+            pose.inverseBind = pose.inverseBind * skeleton[pose.parent].inverseBind;
+        }
+    }
+    if (channelsPerFrame != channelCount) {
+        return false;
+    }
+
+    model.animationFrames.reserve(frameCount);
+    std::vector<IqmTransform> global(jointCount);
+    std::vector<IqmTransform> skin(jointCount);
+    size_t cursor = static_cast<size_t>(frames);
+    for (int frame = 0; frame < frameCount; frame++) {
+        for (int joint = 0; joint < jointCount; joint++) {
+            const IqmPose &pose = skeleton[joint];
+            float channels[kIqmChannels];
+            for (int channel = 0; channel < kIqmChannels; channel++) {
+                channels[channel] = pose.offsets[channel];
+                if ((pose.mask & (1 << channel)) != 0) {
+                    int sample = 0;
+                    reader.int16(cursor, sample);
+                    cursor += 2;
+                    channels[channel] += static_cast<std::uint16_t>(sample) * pose.scales[channel];
+                    if (!std::isfinite(channels[channel])) {
+                        return false;
+                    }
+                }
+            }
+            if (!iqmLocalTransform(channels, global[joint])) {
+                return false;
+            }
+            if (pose.parent >= 0) {
+                global[joint] = global[pose.parent] * global[joint];
+            }
+            skin[joint] = global[joint] * pose.inverseBind;
+        }
+
+        model.animationFrames.push_back(model.surfaces);
+        auto &surfaces = model.animationFrames.back();
+        for (size_t mesh = 0; mesh < surfaces.size(); mesh++) {
+            auto &vertices = surfaces[mesh].vertices;
+            for (size_t index = 0; index < vertices.size(); index++) {
+                const IqmBlend &blend = blends[mesh][index];
+                Vertex &vertex = vertices[index];
+                IqmTransform transform{};
+                float total = 0.0f;
+                for (int slot = 0; slot < 4; slot++) {
+                    const float weight = blend.weights[slot];
+                    if (weight == 0.0f) {
+                        continue;
+                    }
+                    const IqmTransform &joint = skin[blend.joints[slot]];
+                    for (int axis = 0; axis < 3; axis++) {
+                        transform.axes[axis] = transform.axes[axis] + joint.axes[axis] * weight;
+                    }
+                    transform.origin = transform.origin + joint.origin * weight;
+                    total += weight;
+                }
+                if (total > 0.0f) {
+                    vertex.position = (transform.direction(vertex.position) + transform.origin) *
+                                      (1.0f / total);
+                    vertex.normal = transform.normal(vertex.normal);
+                    if (!std::isfinite(dot(vertex.position, vertex.position)) ||
+                        !std::isfinite(dot(vertex.normal, vertex.normal))) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool parseIqm(const Reader &file, pkm_model &model, std::string &error) {
+    constexpr char magic[] = "INTERQUAKEMODEL";
+    int version = 0;
+    int fileSize = 0;
+    if (!file.has(0, kIqmHeaderSize) || std::memcmp(file.data(), magic, sizeof(magic)) != 0) {
+        error = "The file is not an Inter-Quake Model.";
+        return false;
+    }
+    file.int32(16, version);
+    if (version != 2) {
+        error = "Only version 2 IQM models are supported.";
+        return false;
+    }
+    file.int32(20, fileSize);
+    error = "The IQM model contains invalid or unsupported data.";
+    if (fileSize < kIqmHeaderSize || !file.has(0, fileSize)) {
+        return false;
+    }
+    const Reader reader(file.data(), fileSize);
+    int textSize, text, meshCount, meshes, arrayCount, vertexCount, arrays, triangleCount, triangles;
+    int jointCount, joints, poseCount, poses, animationCount, animations, frameCount, channelCount, frames;
+    reader.int32(28, textSize);
+    reader.int32(32, text);
+    reader.int32(36, meshCount);
+    reader.int32(40, meshes);
+    reader.int32(44, arrayCount);
+    reader.int32(48, vertexCount);
+    reader.int32(52, arrays);
+    reader.int32(56, triangleCount);
+    reader.int32(60, triangles);
+    reader.int32(68, jointCount);
+    reader.int32(72, joints);
+    reader.int32(76, poseCount);
+    reader.int32(80, poses);
+    reader.int32(84, animationCount);
+    reader.int32(88, animations);
+    reader.int32(92, frameCount);
+    reader.int32(96, channelCount);
+    reader.int32(100, frames);
+
+    if (meshCount == 0) {
+        error = "The IQM file contains no meshes to preview.";
+        return false;
+    }
+    if (textSize < 0 || meshCount < 0 || meshCount > kMaxSurfaces ||
+        arrayCount <= 0 || vertexCount <= 0 || vertexCount > kMaxVertices ||
+        triangleCount <= 0 || triangleCount > kMaxTriangles ||
+        jointCount < 0 || jointCount > kMaxJoints || frameCount < 0 || frameCount > kMaxFrames ||
+        animationCount < 0 || animationCount > kMaxFrames ||
+        channelCount < 0 || channelCount > jointCount * kIqmChannels ||
+        !iqmRange(reader, text, textSize, 1) || !iqmRange(reader, meshes, meshCount, 24) ||
+        !iqmRange(reader, arrays, arrayCount, 20) ||
+        !iqmRange(reader, triangles, triangleCount, 12) ||
+        !iqmRange(reader, animations, animationCount, 20)) {
+        return false;
+    }
+
+    const bool animated = frameCount > 0 && jointCount > 0;
+    if (frameCount > 0 && (!animated || poseCount != jointCount ||
+        !iqmRange(reader, joints, jointCount, 48) || !iqmRange(reader, poses, poseCount, 88) ||
+        !iqmRange(reader, frames, static_cast<size_t>(frameCount) * channelCount, 2))) {
+        return false;
+    }
+
+    enum ArrayType { Position, Texcoord, Normal, Tangent, BlendIndices, BlendWeights };
+    enum Component { UByte = 1, UShort = 3, Int = 4, UInt = 5, Float = 7 };
+    struct Array {
+        int offset = 0;
+        int format = 0;
+        int stride = 0;
+    };
+    Array attributes[BlendWeights + 1]{};
+    for (int index = 0; index < arrayCount; index++) {
+        const size_t entry = static_cast<size_t>(arrays) + static_cast<size_t>(index) * 20;
+        int type, format, components, offset;
+        reader.int32(entry, type);
+        if (type < Position || type > BlendWeights || type == Tangent ||
+            (!animated && type >= BlendIndices)) {
+            continue;
+        }
+        reader.int32(entry + 8, format);
+        reader.int32(entry + 12, components);
+        reader.int32(entry + 16, offset);
+        int componentSize = 0;
+        if (type < BlendIndices && format == Float && components == (type == Texcoord ? 2 : 3)) {
+            componentSize = 4;
+        } else if (type >= BlendIndices && components == 4) {
+            if (format == UByte) {
+                componentSize = 1;
+            } else if (type == BlendIndices && format == UShort) {
+                componentSize = 2;
+            } else if ((type == BlendIndices && (format == Int || format == UInt)) ||
+                       (type == BlendWeights && format == Float)) {
+                componentSize = 4;
+            }
+        }
+        const int stride = components * componentSize;
+        if (componentSize == 0 || attributes[type].offset != 0 ||
+            !iqmRange(reader, offset, vertexCount, stride)) {
+            return false;
+        }
+        attributes[type] = {offset, format, stride};
+    }
+    if (attributes[Position].offset == 0 ||
+        (animated && (attributes[BlendIndices].offset == 0 || attributes[BlendWeights].offset == 0))) {
+        return false;
+    }
+
+    const auto readText = [&](int index, std::string &value) {
+        if (index == 0 && textSize == 0) {
+            value.clear();
+            return true;
+        }
+        if (index < 0 || index >= textSize) {
+            return false;
+        }
+        const auto *start = reader.data() + text + index;
+        // The host texture-request APIs use 512-byte name buffers.
+        const auto *end = static_cast<const unsigned char *>(
+            std::memchr(start, 0, std::min(textSize - index, 512)));
+        if (end == nullptr) {
+            return false;
+        }
+        value.assign(reinterpret_cast<const char *>(start), end - start);
+        return true;
+    };
+
+    size_t totalVertices = 0, totalTriangles = 0;
+    size_t bytesPerFrame = 0;
+    std::vector<std::vector<IqmBlend>> blends;
+    for (int mesh = 0; mesh < meshCount; mesh++) {
+        const size_t entry = static_cast<size_t>(meshes) + mesh * 24;
+        int name, material, firstVertex, vertices, firstTriangle, faces;
+        reader.int32(entry, name);
+        reader.int32(entry + 4, material);
+        reader.int32(entry + 8, firstVertex);
+        reader.int32(entry + 12, vertices);
+        reader.int32(entry + 16, firstTriangle);
+        reader.int32(entry + 20, faces);
+        if (firstVertex < 0 || firstTriangle < 0 || vertices <= 0 || faces <= 0 ||
+            firstVertex > vertexCount - vertices || firstTriangle > triangleCount - faces) {
+            return false;
+        }
+        totalVertices += vertices;
+        totalTriangles += faces;
+        if (totalVertices > kMaxVertices || totalTriangles > kMaxTriangles ||
+            (animated && (totalVertices * frameCount > kMaxAnimatedVertices ||
+                          totalTriangles * frameCount > kMaxAnimatedTriangles))) {
+            error = "The IQM model is too large to preview.";
+            return false;
+        }
+
+        Surface surface;
+        std::string texture;
+        if (!readText(name, surface.name) || !readText(material, texture)) {
+            return false;
+        }
+        if (animated) {
+            // Each decoded frame copies the surface, its name, vertices, and indices.
+            bytesPerFrame += sizeof(Surface) + surface.name.size() + 1 +
+                             vertices * sizeof(Vertex) + faces * 3 * sizeof(int);
+            if (bytesPerFrame > kMaxIqmDecodedBytes / (frameCount + 1)) {
+                error = "The IQM animation is too large to preview.";
+                return false;
+            }
+        }
+        if (!texture.empty()) {
+            surface.texture = static_cast<int>(model.requestNames.size());
+            model.requestSurfaces.push_back(surface.name);
+            model.requestNames.push_back(std::move(texture));
+            model.textures.emplace_back();
+        }
+        surface.vertices.resize(vertices);
+        if (animated) {
+            blends.emplace_back(vertices);
+        }
+        for (int index = 0; index < vertices; index++) {
+            const size_t source = firstVertex + index;
+            Vertex &vertex = surface.vertices[index];
+            const auto offset = [&](ArrayType type) {
+                return attributes[type].offset + source * attributes[type].stride;
+            };
+            if (!reader.vec3(offset(Position), vertex.position) ||
+                !std::isfinite(dot(vertex.position, vertex.position))) {
+                return false;
+            }
+            // Keep texel coordinates in range for the software sampler.
+            constexpr float maxUv = static_cast<float>(1 << 30) / kMaxTextureDimension;
+            if (attributes[Texcoord].offset != 0 &&
+                (!reader.float32(offset(Texcoord), vertex.u) ||
+                 !reader.float32(offset(Texcoord) + 4, vertex.v) ||
+                 std::abs(vertex.u) > maxUv || std::abs(vertex.v) > maxUv)) {
+                return false;
+            }
+            if (attributes[Normal].offset != 0) {
+                if (!reader.vec3(offset(Normal), vertex.normal) ||
+                    !std::isfinite(dot(vertex.normal, vertex.normal))) {
+                    return false;
+                }
+                vertex.normal = normalize(vertex.normal);
+            }
+            if (!animated) {
+                continue;
+            }
+            IqmBlend &blend = blends.back()[index];
+            for (int slot = 0; slot < 4; slot++) {
+                if (attributes[BlendWeights].format == UByte) {
+                    blend.weights[slot] = reader.data()[offset(BlendWeights) + slot] / 255.0f;
+                } else if (!reader.float32(offset(BlendWeights) + 4 * slot, blend.weights[slot]) ||
+                           blend.weights[slot] < 0.0f || blend.weights[slot] > 1.0f) {
+                    return false;
+                }
+                if (blend.weights[slot] == 0.0f) {
+                    continue;
+                }
+                int &joint = blend.joints[slot];
+                switch (attributes[BlendIndices].format) {
+                    case UByte:
+                        joint = reader.data()[offset(BlendIndices) + slot];
+                        break;
+                    case UShort:
+                        reader.int16(offset(BlendIndices) + 2 * slot, joint);
+                        joint = static_cast<std::uint16_t>(joint);
+                        break;
+                    default:
+                        reader.int32(offset(BlendIndices) + 4 * slot, joint);
+                        break;
+                }
+                if (joint < 0 || joint >= jointCount) {
+                    return false;
+                }
+            }
+        }
+
+        surface.indices.reserve(static_cast<size_t>(faces) * 3);
+        for (int face = 0; face < faces; face++) {
+            const size_t triangle = static_cast<size_t>(triangles) + 12 * (firstTriangle + face);
+            // IQM stores clockwise triangles. The viewer computes CCW face normals.
+            for (const int corner : {0, 2, 1}) {
+                int index;
+                reader.int32(triangle + 4 * corner, index);
+                if (index < firstVertex || index >= firstVertex + vertices) {
+                    return false;
+                }
+                surface.indices.push_back(index - firstVertex);
+            }
+        }
+        if (attributes[Normal].offset == 0) {
+            std::vector<int> smoothingKeys(vertices);
+            for (int index = 0; index < vertices; index++) {
+                smoothingKeys[index] = index;
+            }
+            computeSmoothNormals(surface, smoothingKeys);
+        }
+        model.surfaces.push_back(std::move(surface));
+    }
+
+    model.format = PKM_FORMAT_IQM;
+    model.frameCount = std::max(1, frameCount);
+    if (!animated) {
+        return true;
+    }
+    if (static_cast<size_t>(frameCount) * jointCount > kMaxAnimatedVertices) {
+        error = "The IQM animation is too large to preview.";
+        return false;
+    }
+    model.frameIntervals.assign(frameCount, kDefaultModelInterval);
+    // Play all stored frames through the existing viewer timeline, with each clip's rate.
+    for (int clip = 0; clip < animationCount; clip++) {
+        const size_t entry = static_cast<size_t>(animations) + clip * 20;
+        int first, count;
+        float rate;
+        reader.int32(entry + 4, first);
+        reader.int32(entry + 8, count);
+        if (first < 0 || count < 0 || first > frameCount - count ||
+            !reader.float32(entry + 12, rate) || rate < 0.0f) {
+            return false;
+        }
+        if (rate > 0.0f) {
+            const float interval = 1.0f / std::max(rate, std::numeric_limits<float>::min());
+            std::fill_n(model.frameIntervals.begin() + first, count,
+                        std::max(interval, kMinIqmFrameInterval));
+        }
+    }
+    return decodeIqmAnimation(reader, jointCount, joints, poses, frameCount, channelCount,
+                              frames, blends, model);
 }
 
 /* ------------------------------------------------------------------ SPR --- */
@@ -2341,7 +2815,7 @@ extern "C" {
 int pkm_supports_extension(const char *extension) {
     const std::string value = lowerExtension(extension);
     return (value == "mdl" || value == "md3" || value == "md5mesh" || value == "md5" ||
-            value == "spr" || value == "spr32" || value == "bsp")
+            value == "iqm" || value == "spr" || value == "spr32" || value == "bsp")
                ? 1
                : 0;
 }
@@ -2381,6 +2855,8 @@ pkm_model *pkm_model_create(const void *model_data, size_t model_size, const cha
             parsed = parseMdl(reader, model, error);
         } else if (format == "md3") {
             parsed = parseMd3(reader, model, error);
+        } else if (format == "iqm") {
+            parsed = parseIqm(reader, model, error);
         } else if (format == "spr" || format == "spr32") {
             parsed = parseSpr(reader, model, error);
         } else if (format == "bsp") {

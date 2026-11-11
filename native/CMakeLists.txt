@@ -167,7 +167,7 @@ install(TARGETS pakscape_audio
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES include/pakscape_audio.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# The model viewer parses MDL, MD3, and MD5 meshes and exposes both a portable
+# The model viewer parses MDL, MD3, MD5, and IQM meshes and exposes both a portable
 # software fallback and an OpenGL presentation path. OpenGL is supplied by the
 # desktop platform rather than bundled into the application.
 add_library(pakscape_model SHARED src/pakscape_model.cpp)

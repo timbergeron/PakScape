@@ -17,7 +17,7 @@ using PakStudio.Core.Preview;
 namespace PakScape.Linux.Controls;
 
 /// <summary>
-/// Interactive MDL, MD3, MD5, sprite, and BSP brush model preview: drag to orbit,
+/// Interactive MDL, MD3, MD5, IQM, sprite, and BSP brush model preview: drag to orbit,
 /// right-drag to pan, wheel to zoom, and a turntable that starts on its own once the
 /// pane goes idle. Sprites skip the turntable and play their frames instead.
 /// </summary>

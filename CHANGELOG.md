@@ -1,5 +1,8 @@
 # Changelog
 
+- Added interactive IQM v2 model previews with embedded skeletal animations
+  and archive texture lookup on macOS, Windows, and Linux.
+
 - Added duplicate-item prompts when dragging, adding, or pasting files from disk:
   Keep Both, Stop, or Replace on macOS; Keep Both, Skip, Cancel, or Replace
   on Windows and Linux. Replacement preserves undo history and only removes

@@ -17,10 +17,9 @@ private library; the exported ABI does not expose third-party types.
 
 ## `pakscape_model`
 
-Parses the QSS-M model formats — Quake MDL, Quake III MD3, and Doom 3 MD5 —
+Parses Quake MDL, Quake III MD3, Doom 3 MD5, and Inter-Quake Model (IQM v2) meshes
 and renders them for Quick Preview through the platform's OpenGL context, with a
-portable software fallback. It has no third-party
-dependencies.
+portable software fallback. It has no third-party dependencies.
 
 Keeping the parser, the orbit camera, and the rasterizer in one library means
 every edition shares the same interaction feel and the same picture: damped
@@ -30,17 +29,17 @@ Each app forwards input and owns the platform OpenGL surface; the BGRA API remai
 available for thumbnails, fallback rendering, and headless tests.
 
 MDL and MD3 poses are decoded as animations and loop at ten frames per second
-by default. The view API keeps playback separate from the idle turntable and
-lets each host pause it or apply a playback-speed multiplier.
+by default. The viewer loops through the embedded IQM frames in file order and
+uses the clip rates for timing. The view API keeps playback separate from the
+idle turntable and lets each host pause it or apply a playback-speed multiplier.
 
 Frames are rasterized in horizontal bands across worker threads, at screen
 resolution while the camera is moving and supersampled once it settles, so
 dragging stays responsive without giving up a clean still image.
 
-MDL skins are embedded, so those models preview on their own. MD3 and MD5 name
-their skins instead, so the library reports each request and the app resolves it
-against the open archive; surfaces with no skin fall back to a neutral studio
-material.
+MDL skins are embedded, so those models preview on their own. For MD3, MD5, and
+IQM, the library reports the texture paths and the app resolves them against the
+open archive. Surfaces without a texture use a neutral studio material.
 
 BSP brush models are read from the first hull the way the engine draws it: edges
 walked through the surfedge list, a plane for each face normal, and the texinfo

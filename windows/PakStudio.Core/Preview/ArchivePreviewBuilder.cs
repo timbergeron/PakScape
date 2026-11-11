@@ -37,7 +37,7 @@ public static class ArchivePreviewBuilder
      */
     private static readonly HashSet<string> ModelExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mdl", ".md3", ".md5mesh", ".md5", ".spr", ".spr32", ".bsp",
+        ".mdl", ".md3", ".md5mesh", ".md5", ".iqm", ".spr", ".spr32", ".bsp",
     };
 
     private static readonly HashSet<string> QuickPreviewOnOpenExtensions =
