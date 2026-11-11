@@ -73,6 +73,9 @@ final class PakViewModel: NSObject, ObservableObject {
         get { Self.sharedClipboard }
         set { Self.sharedClipboard = newValue }
     }
+    static let archiveDragType = NSPasteboard.PasteboardType("com.timbergeron.pakscape.archive-item-drag")
+    private var draggedArchiveItemIDs: Set<PakNode.ID> = []
+    private var archiveDropTarget: (id: PakNode.ID, version: UUID, move: PakTreeMove?)?
     private static let previewableAudioExtensions: Set<String> = [
         "wav", "mp3", "flac", "ogg", "opus", "it", "s3m", "xm", "mod", "umx",
     ]
@@ -928,24 +931,8 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     private func availableName(for originalName: String, in folder: PakNode) -> String {
-        let existing = Set((folder.children ?? []).map { $0.name.lowercased() })
-        if !existing.contains(originalName.lowercased()) {
-            return originalName
-        }
-
-        let ext = (originalName as NSString).pathExtension
-        let base = (originalName as NSString).deletingPathExtension
-
-        var attempt = 1
-        while true {
-            let suffix = attempt == 1 ? " copy" : " copy \(attempt)"
-            let candidateBase = base + suffix
-            let candidate = ext.isEmpty ? candidateBase : "\(candidateBase).\(ext)"
-            if !existing.contains(candidate.lowercased()) {
-                return candidate
-            }
-            attempt += 1
-        }
+        let names = Set((folder.children ?? []).map { $0.name.lowercased() })
+        return PakTreeMutation.availableName(for: originalName, reservedNames: names)
     }
 
     private func insert(node: PakNode, into folder: PakNode) {
@@ -1850,6 +1837,68 @@ final class PakViewModel: NSObject, ObservableObject {
         }
     }
     
+    func archiveDragWriter(for node: PakNode) -> NSPasteboardWriting? {
+        let url = try? exportToTemporaryLocation(node: node)
+        guard isEditable else { return url.map { $0 as NSURL } }
+
+        let item = NSPasteboardItem()
+        item.setData(Data([1]), forType: Self.archiveDragType)
+        if let url {
+            item.setString(url.absoluteString, forType: .fileURL)
+        }
+        return item
+    }
+
+    func beginArchiveDrag(ids: Set<PakNode.ID>) {
+        draggedArchiveItemIDs = isEditable ? ids : []
+        archiveDropTarget = nil
+    }
+
+    func endArchiveDrag() {
+        draggedArchiveItemIDs.removeAll()
+        archiveDropTarget = nil
+    }
+
+    var isDraggingArchiveItems: Bool { !draggedArchiveItemIDs.isEmpty }
+
+    func canDropArchiveItems(into destination: PakNode) -> Bool {
+        archiveMove(into: destination) != nil
+    }
+
+    func dropArchiveItems(into destination: PakNode) -> Bool {
+        guard let move = archiveMove(into: destination) else { return false }
+        endArchiveDrag()
+        applyArchiveMove(move)
+        return true
+    }
+
+    private func archiveMove(into destination: PakNode) -> PakTreeMove? {
+        guard isEditable, destination.isFolder, !draggedArchiveItemIDs.isEmpty, let pakFile else {
+            return nil
+        }
+        if let target = archiveDropTarget, target.id == destination.id, target.version == pakFile.version {
+            return target.move
+        }
+
+        let move = try? PakTreeMutation.planMove(
+            for: draggedArchiveItemIDs, in: pakFile.root, to: destination
+        )
+        archiveDropTarget = (destination.id, pakFile.version, move)
+        return move
+    }
+
+    private func applyArchiveMove(_ move: PakTreeMove, undo: Bool = false) {
+        registerUndo(actionName: "Move") { target in
+            target.applyArchiveMove(move, undo: !undo)
+        }
+        move.apply(undo: undo)
+        stopAudioPreview()
+        selectedNodes = []
+        selectedFile = nil
+        selectionResetVersion = UUID()
+        notifyDocumentChanged()
+    }
+
     func importFiles(urls: [URL], to folder: PakNode) {
         guard isEditable else { return }
         _ = pasteFileURLs(urls, into: folder)

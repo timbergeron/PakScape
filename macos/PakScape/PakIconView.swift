@@ -200,6 +200,8 @@ struct PakIconView: NSViewRepresentable {
         collectionView.dataSource = context.coordinator
         collectionView.register(PakIconItem.self, forItemWithIdentifier: PakIconItem.reuseIdentifier)
         collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collectionView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        collectionView.registerForDraggedTypes([PakViewModel.archiveDragType])
         collectionView.onHandledKeyDown = { [weak coordinator = context.coordinator] event in
             coordinator?.handleKeyDown(event) ?? false
         }
@@ -312,15 +314,50 @@ struct PakIconView: NSViewRepresentable {
             return iconItem
         }
 
-        func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-            guard indexPath.item >= 0 && indexPath.item < parent.nodes.count else { return nil }
-            let node = parent.nodes[indexPath.item]
-            do {
-                let url = try parent.viewModel.exportToTemporaryLocation(node: node)
-                return url as NSURL
-            } catch {
-                return nil
-            }
+        func collectionView(
+            _ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath
+        ) -> NSPasteboardWriting? {
+            guard parent.nodes.indices.contains(indexPath.item) else { return nil }
+            return parent.viewModel.archiveDragWriter(for: parent.nodes[indexPath.item])
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView, draggingSession session: NSDraggingSession,
+            willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>
+        ) {
+            cancelPendingRename()
+            parent.viewModel.beginArchiveDrag(ids: Set(indexPaths.compactMap { indexPath in
+                parent.nodes.indices.contains(indexPath.item) ? parent.nodes[indexPath.item].id : nil
+            }))
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView, draggingSession session: NSDraggingSession,
+            endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation
+        ) {
+            parent.viewModel.endArchiveDrag()
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView, validateDrop info: NSDraggingInfo,
+            proposedIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
+            dropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
+        ) -> NSDragOperation {
+            let location = collectionView.convert(info.draggingLocation, from: nil)
+            guard let indexPath = collectionView.indexPathForItem(at: location),
+                  parent.nodes.indices.contains(indexPath.item),
+                  parent.viewModel.canDropArchiveItems(into: parent.nodes[indexPath.item]) else { return [] }
+            proposedIndexPath.pointee = indexPath as NSIndexPath
+            dropOperation.pointee = .on
+            return .move
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo,
+            indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation
+        ) -> Bool {
+            guard dropOperation == .on, parent.nodes.indices.contains(indexPath.item) else { return false }
+            return parent.viewModel.dropArchiveItems(into: parent.nodes[indexPath.item])
         }
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {

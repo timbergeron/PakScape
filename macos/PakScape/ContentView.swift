@@ -247,13 +247,11 @@ struct ContentView: View {
         List(selection: $model.currentFolder) {
             if let root = model.pakFile?.root {
                 // Root node itself
-                Label("/", systemImage: "folder.fill")
-                    .tag(root)
+                sidebarFolderRow(root, name: "/")
 
                 // Recursive children
                 OutlineGroup(root.folderChildren ?? [], children: \.folderChildren) { node in
-                    Label(node.name, systemImage: "folder.fill")
-                        .tag(node)
+                    sidebarFolderRow(node, name: node.name)
                 }
             } else {
                 Text("Open a Quake .pak file (File → Open PAK…)")
@@ -265,6 +263,34 @@ struct ContentView: View {
         // Held at its usable width and clipped, so a collapse slides the sidebar
         // out of view instead of reflowing every label on the way down.
         .frame(minWidth: SidebarSplitState.minWidth, alignment: .leading)
+    }
+
+    private func sidebarFolderRow(_ folder: PakNode, name: String) -> some View {
+        Label(name, systemImage: "folder.fill")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [PakViewModel.archiveDragType.rawValue],
+                delegate: ArchiveFolderDropDelegate(model: model, folder: folder)
+            )
+            .tag(folder)
+    }
+
+    private struct ArchiveFolderDropDelegate: DropDelegate {
+        let model: PakViewModel
+        let folder: PakNode
+
+        func validateDrop(info: DropInfo) -> Bool {
+            model.canDropArchiveItems(into: folder)
+        }
+
+        func dropUpdated(info: DropInfo) -> DropProposal? {
+            DropProposal(operation: model.canDropArchiveItems(into: folder) ? .move : .forbidden)
+        }
+
+        func performDrop(info: DropInfo) -> Bool {
+            model.dropArchiveItems(into: folder)
+        }
     }
 
     private var detailView: some View {
@@ -324,6 +350,7 @@ struct ContentView: View {
                 .dropDestination(for: URL.self) { urls, _ in
                     let fileURLs = urls.filter(\.isFileURL)
                     guard model.isEditable,
+                          !model.isDraggingArchiveItems,
                           let folder = model.currentFolder,
                           !fileURLs.isEmpty else { return false }
                     model.importFiles(urls: fileURLs, to: folder)

@@ -824,6 +824,9 @@
                     CornerRadius="0">
                 <TreeView x:Name="FolderTree"
                           ItemsSource="{Binding FolderRoots}"
+                          AllowDrop="True"
+                          DragOver="ArchiveItems_OnDragOver"
+                          Drop="ArchiveItems_OnDrop"
                           SelectedItemChanged="FolderTree_OnSelectedItemChanged" />
             </Border>
 
@@ -1112,12 +1115,13 @@
                                   SelectionChanged="ItemList_OnSelectionChanged"
                                   MouseDoubleClick="ItemList_OnMouseDoubleClick"
                                   AllowDrop="True"
-                                  DragOver="ItemList_OnDragOver"
-                                  Drop="ItemList_OnDrop"
+                                  DragOver="ArchiveItems_OnDragOver"
+                                  Drop="ArchiveItems_OnDrop"
                                   PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
                                   PreviewMouseLeftButtonUp="ItemList_OnPreviewMouseLeftButtonUp"
                                   PreviewMouseWheel="ItemList_OnPreviewMouseWheel"
                                   MouseMove="ItemList_OnMouseMove"
+                                  LostMouseCapture="ItemList_OnLostMouseCapture"
                                   PreviewKeyDown="ItemList_OnPreviewKeyDown"
                                   PreviewMouseRightButtonDown="ItemList_OnPreviewMouseRightButtonDown"
                                   ScrollViewer.CanContentScroll="True"

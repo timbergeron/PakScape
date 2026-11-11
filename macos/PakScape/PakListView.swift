@@ -137,6 +137,8 @@ struct PakListView: NSViewRepresentable {
         tableView.doubleAction = #selector(Coordinator.tableViewDoubleClicked(_:))
         tableView.target = context.coordinator
         tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        tableView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        tableView.registerForDraggedTypes([PakViewModel.archiveDragType])
 
         let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         nameColumn.title = "Name"
@@ -439,14 +441,44 @@ struct PakListView: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-            guard row >= 0 && row < parent.nodes.count else { return nil }
-            let node = parent.nodes[row]
-            do {
-                let url = try parent.viewModel.exportToTemporaryLocation(node: node)
-                return url as NSURL
-            } catch {
-                return nil
-            }
+            guard parent.nodes.indices.contains(row) else { return nil }
+            return parent.viewModel.archiveDragWriter(for: parent.nodes[row])
+        }
+
+        func tableView(
+            _ tableView: NSTableView, draggingSession session: NSDraggingSession,
+            willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet
+        ) {
+            cancelPendingRename()
+            parent.viewModel.beginArchiveDrag(ids: Set(rowIndexes.compactMap { row in
+                parent.nodes.indices.contains(row) ? parent.nodes[row].id : nil
+            }))
+        }
+
+        func tableView(
+            _ tableView: NSTableView, draggingSession session: NSDraggingSession,
+            endedAt screenPoint: NSPoint, operation: NSDragOperation
+        ) {
+            parent.viewModel.endArchiveDrag()
+        }
+
+        func tableView(
+            _ tableView: NSTableView, validateDrop info: NSDraggingInfo,
+            proposedRow: Int, proposedDropOperation: NSTableView.DropOperation
+        ) -> NSDragOperation {
+            let row = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
+            guard parent.nodes.indices.contains(row),
+                  parent.viewModel.canDropArchiveItems(into: parent.nodes[row]) else { return [] }
+            tableView.setDropRow(row, dropOperation: .on)
+            return .move
+        }
+
+        func tableView(
+            _ tableView: NSTableView, acceptDrop info: NSDraggingInfo,
+            row: Int, dropOperation: NSTableView.DropOperation
+        ) -> Bool {
+            guard dropOperation == .on, parent.nodes.indices.contains(row) else { return false }
+            return parent.viewModel.dropArchiveItems(into: parent.nodes[row])
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {

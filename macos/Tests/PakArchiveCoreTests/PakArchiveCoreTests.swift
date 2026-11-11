@@ -1231,6 +1231,53 @@ final class PakArchiveCoreTests: XCTestCase {
         XCTAssertTrue(root.children?[2] === third)
     }
 
+    func testArchiveDropMovesLiveItemsAndUndoRestoresTheirNamesAndOrder() throws {
+        let root = PakNode(name: "/")
+        let source = PakNode(name: "source")
+        let destination = PakNode(name: "destination")
+        let moved = PakNode(name: "item.txt")
+        moved.localData = Data([1])
+        let sibling = PakNode(name: "sibling.txt")
+        sibling.localData = Data([2])
+        let secondMoved = PakNode(name: "other.txt")
+        secondMoved.localData = Data([4])
+        let existing = PakNode(name: "ITEM.TXT")
+        existing.localData = Data([3])
+        source.children = [moved, sibling, secondMoved]
+        destination.children = [existing]
+        root.children = [source, destination]
+
+        let move = try XCTUnwrap(PakTreeMutation.planMove(
+            for: [moved.id, secondMoved.id, existing.id], in: root, to: destination
+        ))
+        move.apply()
+        XCTAssertEqual(source.children, [sibling])
+        XCTAssertEqual(destination.children, [existing, moved, secondMoved])
+        XCTAssertTrue(destination.children?.last === secondMoved)
+        XCTAssertEqual(moved.name, "item copy.txt")
+        XCTAssertEqual(moved.localData, Data([1]))
+
+        move.apply(undo: true)
+        XCTAssertEqual(source.children, [moved, sibling, secondMoved])
+        XCTAssertEqual(destination.children, [existing])
+        XCTAssertEqual(moved.name, "item.txt")
+
+        move.apply()
+        XCTAssertEqual(destination.children?.map(\.name), ["ITEM.TXT", "item copy.txt", "other.txt"])
+    }
+
+    func testArchiveDropRejectsCyclesAndIgnoresSameFolderDrops() throws {
+        let root = PakNode(name: "/")
+        let folder = PakNode(name: "folder")
+        let child = PakNode(name: "child")
+        root.children = [folder]
+        folder.children = [child]
+
+        XCTAssertThrowsError(try PakTreeMutation.planMove(for: [folder.id], in: root, to: child))
+        XCTAssertNil(try PakTreeMutation.planMove(for: [child.id], in: root, to: folder))
+        XCTAssertEqual(folder.children, [child])
+    }
+
     func testTreeMutationMoveInverseRestoresBothFolders() throws {
         let root = PakNode(name: "/")
         let sourceFolder = PakNode(name: "source")

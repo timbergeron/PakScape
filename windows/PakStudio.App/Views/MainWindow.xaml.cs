@@ -14,6 +14,7 @@ using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
+using PakStudio.Core.Validation;
 
 namespace PakStudio.App.Views;
 
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     private const double FolderPaneMinContentWidth = 260;
     private static readonly TimeSpan FolderPaneAnimationDuration = TimeSpan.FromMilliseconds(160);
     private static readonly TimeSpan FolderPaneAnimationInterval = TimeSpan.FromMilliseconds(16);
+    private const string ArchiveItemDragFormat = "PakScape.ArchiveItemDrag";
     private const string DetailsColumnDragFormat = "PakScape.DetailsColumnKey";
 
     private static readonly Duration ColumnDragFadeInDuration = new(TimeSpan.FromMilliseconds(90));
@@ -41,7 +43,9 @@ public partial class MainWindow : Window
     private string? _startupArchivePath;
     private string _startupFormatId = "pak";
     private Point? _dragStartPoint;
+    private ListViewItem? _deferredSelectionItem;
     private bool _isStartingDrag;
+    private ArchiveItemDrag? _archiveItemDrag;
     private bool _isFolderPaneIndicatorPressed;
     private bool _isDraggingFolderPaneIndicator;
     private bool _suppressFolderPaneIndicatorClick;
@@ -770,12 +774,34 @@ public partial class MainWindow : Window
 
     private void ItemList_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        ResetItemDragGesture();
         CancelPendingRenameClick();
         _renameClickCandidate = null;
+        if (FindVisualAncestor<TextBox>(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
         var container = ItemsControl.ContainerFromElement(
             ItemList,
             e.OriginalSource as DependencyObject) as ListViewItem;
         _dragStartPoint = container is not null ? e.GetPosition(ItemList) : null;
+
+        // WPF collapses an extended selection on mouse-down, before drag-out can
+        // use it. Defer that click until mouse-up so dragging keeps every item.
+        if (e.ClickCount == 1 &&
+            Keyboard.Modifiers == ModifierKeys.None &&
+            container is { IsSelected: true } &&
+            ItemList.SelectedItems.Count > 1)
+        {
+            _deferredSelectionItem = container;
+            e.Handled = true;
+            container.Focus();
+            // Capture the item, not the list: list capture enables WPF's
+            // mouse-over range selection and would change the drag payload.
+            container.CaptureMouse();
+            return;
+        }
 
         /* Explorer-style slow double click: clicking the name of an item that is
            already the lone selection starts an inline rename. Selection has not
@@ -794,6 +820,31 @@ public partial class MainWindow : Window
 
     private void ItemList_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        var deferredSelectionItem = _deferredSelectionItem;
+        var dragStart = _dragStartPoint;
+        ResetItemDragGesture();
+        if (deferredSelectionItem is not null)
+        {
+            var current = e.GetPosition(ItemList);
+            if (dragStart is { } start &&
+                Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance &&
+                Keyboard.Modifiers == ModifierKeys.None &&
+                deferredSelectionItem.IsSelected)
+            {
+                // Complete the deferred click through WPF so its Shift-selection
+                // anchor follows the clicked item as well as the visible selection.
+                deferredSelectionItem.RaiseEvent(new MouseButtonEventArgs(
+                    e.MouseDevice, e.Timestamp, MouseButton.Left)
+                {
+                    RoutedEvent = MouseLeftButtonDownEvent,
+                });
+                ItemList.ReleaseMouseCapture();
+            }
+            e.Handled = true;
+            return;
+        }
+
         var candidate = _renameClickCandidate;
         _renameClickCandidate = null;
         if (candidate is null ||
@@ -877,13 +928,32 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern uint GetDoubleClickTime();
 
+    private void ResetItemDragGesture()
+    {
+        _dragStartPoint = null;
+        var item = _deferredSelectionItem;
+        _deferredSelectionItem = null;
+        if (item is { IsMouseCaptured: true })
+        {
+            item.ReleaseMouseCapture();
+        }
+    }
+
+    private void ItemList_OnLostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, _deferredSelectionItem))
+        {
+            ResetItemDragGesture();
+        }
+    }
+
     private void ItemList_OnMouseMove(object sender, MouseEventArgs e)
     {
         if (_isStartingDrag || e.LeftButton != MouseButtonState.Pressed || _dragStartPoint is not { } start)
         {
             if (e.LeftButton != MouseButtonState.Pressed)
             {
-                _dragStartPoint = null;
+                ResetItemDragGesture();
             }
             return;
         }
@@ -895,21 +965,46 @@ public partial class MainWindow : Window
             return;
         }
 
-        _dragStartPoint = null;
+        ResetItemDragGesture();
+        _renameClickCandidate = null;
         _isStartingDrag = true;
         CancelPendingRenameClick();
         IReadOnlyList<string> paths = [];
         try
         {
-            paths = _viewModel.PrepareSelectedItemsForDrag();
-            if (paths.Count == 0)
+            var nodes = _viewModel.GetSelectedDragItems();
+            if (nodes.Count == 0)
             {
                 return;
             }
 
-            var data = new DataObject(DataFormats.FileDrop, paths.ToArray());
-            DragDrop.DoDragDrop(ItemList, data, DragDropEffects.Copy);
+            var drag = new ArchiveItemDrag(Guid.NewGuid().ToString("N"), nodes);
+            _archiveItemDrag = drag;
+            var data = new DataObject(ArchiveItemDragFormat, drag.Token);
+            var allowedEffects = DragDropEffects.Move;
+            Exception? exportError = null;
+            try
+            {
+                paths = _fileTransferService.ExportToTemporaryLocation(nodes);
+                if (paths.Count > 0)
+                {
+                    data.SetData(DataFormats.FileDrop, paths.ToArray());
+                    allowedEffects |= DragDropEffects.Copy;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or ArgumentException
+                                              or UnauthorizedAccessException or ArchiveValidationException)
+            {
+                // Archive items can still move if staging them for Explorer fails.
+                exportError = exception;
+            }
+
+            var result = DragDrop.DoDragDrop(ItemList, data, allowedEffects);
             e.Handled = true;
+            if (result == DragDropEffects.None && exportError is not null)
+            {
+                ShowWarning("Unable to Drag Selection", exportError.Message);
+            }
         }
         catch (Exception exception)
         {
@@ -917,7 +1012,8 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _viewModel.ReleaseTemporaryTransfer(paths);
+            _archiveItemDrag = null;
+            _fileTransferService.ReleaseTemporaryLocation(paths);
             _isStartingDrag = false;
         }
     }
@@ -1250,22 +1346,73 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void ItemList_OnDragOver(object sender, DragEventArgs e)
+    private ArchiveItemDrag? GetArchiveItemDrag(IDataObject data) =>
+        _archiveItemDrag is { } drag &&
+        data.GetData(ArchiveItemDragFormat, autoConvert: false) is string token &&
+        token == drag.Token
+            ? drag
+            : null;
+
+    private ArchiveFolderNode? GetDropFolder(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) && !_viewModel.IsBusy
-            ? DragDropEffects.Copy
-            : DragDropEffects.None;
-        e.Handled = true;
+        if (ReferenceEquals(sender, FolderTree))
+        {
+            return FindVisualAncestor<TreeViewItem>(e.OriginalSource as DependencyObject)
+                ?.DataContext is FolderTreeNodeViewModel folder ? folder.Folder : null;
+        }
+
+        var item = ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject);
+        return item is ListViewItem { DataContext: ArchiveItemViewModel { Node: ArchiveFolderNode node } }
+            ? node
+            : null;
     }
 
-    private async void ItemList_OnDrop(object sender, DragEventArgs e)
+    private void ArchiveItems_OnDragOver(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        var folder = GetDropFolder(sender, e);
+        var drag = GetArchiveItemDrag(e.Data);
+        if (drag is not null)
         {
-            await _viewModel.AddDroppedPathsAsync(paths).ConfigureAwait(true);
+            e.Effects = folder is not null && _viewModel.CanMoveDroppedItems(drag.Nodes, folder)
+                ? e.AllowedEffects & DragDropEffects.Move
+                : DragDropEffects.None;
+        }
+        else
+        {
+            e.Effects = (folder is not null || ReferenceEquals(sender, ItemList)) &&
+                        _viewModel.CanDropInto(folder) && e.Data.GetDataPresent(DataFormats.FileDrop)
+                ? e.AllowedEffects & DragDropEffects.Copy
+                : DragDropEffects.None;
         }
         e.Handled = true;
     }
+
+    private async void ArchiveItems_OnDrop(object sender, DragEventArgs e)
+    {
+        var folder = GetDropFolder(sender, e);
+        var drag = GetArchiveItemDrag(e.Data);
+        e.Handled = true;
+        e.Effects = DragDropEffects.None;
+        if (drag is not null)
+        {
+            if (folder is not null && e.AllowedEffects.HasFlag(DragDropEffects.Move) &&
+                _viewModel.MoveDroppedItems(drag.Nodes, folder))
+            {
+                e.Effects = DragDropEffects.Move;
+            }
+            return;
+        }
+
+        if ((folder is not null || ReferenceEquals(sender, ItemList)) &&
+            _viewModel.CanDropInto(folder) && e.AllowedEffects.HasFlag(DragDropEffects.Copy) &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+        {
+            e.Effects = DragDropEffects.Copy;
+            await _viewModel.AddDroppedPathsAsync(paths, folder).ConfigureAwait(true);
+        }
+    }
+
+    private sealed record ArchiveItemDrag(string Token, IReadOnlyList<ArchiveNode> Nodes);
 
     private async void Window_OnClosing(object? sender, CancelEventArgs e)
     {

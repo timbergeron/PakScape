@@ -155,6 +155,22 @@ struct PakNodePlacement {
     let index: Int
 }
 
+struct PakTreeMove {
+    let sources: [PakNodePlacement]
+    let destinations: [PakNodePlacement]
+    let renames: [(node: PakNode, originalName: String, newName: String)]
+
+    func apply(undo: Bool = false) {
+        for rename in renames {
+            rename.node.name = undo ? rename.originalName : rename.newName
+        }
+        PakTreeMutation.apply(
+            removing: undo ? destinations : sources,
+            inserting: undo ? sources : destinations
+        )
+    }
+}
+
 enum PakTreeMutation {
     static func clipboardSnapshot(of node: PakNode, originalData: Data?) throws -> PakNode {
         let copy = PakNode(name: node.name)
@@ -171,7 +187,7 @@ enum PakTreeMutation {
     ) throws -> [PakNodePlacement] {
         let sources = placements(for: ids, in: root)
         guard sources.count == ids.count else {
-            throw PakError.unknown("One or more cut items are no longer in this archive.")
+            throw PakError.unknown("One or more selected items are no longer in this archive.")
         }
         guard destination.isFolder, let destinationDepth = depth(of: destination, in: root) else {
             throw PakError.unknown("The destination folder is no longer in this archive.")
@@ -184,6 +200,48 @@ enum PakTreeMutation {
             try budget.registerTree(source.node, depth: destinationDepth + 1)
         }
         return sources
+    }
+
+    static func planMove(
+        for ids: Set<PakNode.ID>, in root: PakNode, to destination: PakNode
+    ) throws -> PakTreeMove? {
+        let sources = try validatedMovePlacements(for: ids, in: root, to: destination)
+            .filter { $0.parent !== destination }
+        guard !sources.isEmpty else { return nil }
+
+        var names = Set((destination.children ?? []).map { $0.name.lowercased() })
+        var renames: [(node: PakNode, originalName: String, newName: String)] = []
+        let firstIndex = destination.children?.count ?? 0
+        let destinations = sources.enumerated().map { offset, source in
+            let originalName = source.node.name
+            let name = availableName(for: originalName, reservedNames: names)
+            names.insert(name.lowercased())
+            if name != originalName {
+                renames.append((source.node, originalName, name))
+            }
+            return PakNodePlacement(parent: destination, node: source.node, index: firstIndex + offset)
+        }
+        return PakTreeMove(sources: sources, destinations: destinations, renames: renames)
+    }
+
+    static func availableName(for originalName: String, reservedNames: Set<String>) -> String {
+        if !reservedNames.contains(originalName.lowercased()) {
+            return originalName
+        }
+
+        let ext = (originalName as NSString).pathExtension
+        let base = (originalName as NSString).deletingPathExtension
+
+        var attempt = 1
+        while true {
+            let suffix = attempt == 1 ? " copy" : " copy \(attempt)"
+            let candidateBase = base + suffix
+            let candidate = ext.isEmpty ? candidateBase : "\(candidateBase).\(ext)"
+            if !reservedNames.contains(candidate.lowercased()) {
+                return candidate
+            }
+            attempt += 1
+        }
     }
 
     static func depth(of target: PakNode, in root: PakNode) -> Int? {

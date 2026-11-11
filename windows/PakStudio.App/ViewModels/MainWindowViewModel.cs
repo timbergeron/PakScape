@@ -576,14 +576,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         CommandManager.InvalidateRequerySuggested();
     }
 
-    public async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
-    {
-        if (paths.Count == 0 || !CanModifyCurrentFolder())
-        {
-            return;
-        }
+    public bool CanDropInto(ArchiveFolderNode? folder) =>
+        CanModifyCurrentFolder() && (folder is null || _folderLookup.ContainsKey(folder));
 
-        await ImportPathsAsync(paths).ConfigureAwait(true);
+    public async Task AddDroppedPathsAsync(
+        IReadOnlyList<string> paths, ArchiveFolderNode? folder)
+    {
+        if (paths.Count > 0 && CanDropInto(folder))
+        {
+            await ImportPathsAsync(paths, folder).ConfigureAwait(true);
+        }
     }
 
     public void SetContextTarget(ArchiveNode? node)
@@ -592,19 +594,52 @@ public sealed class MainWindowViewModel : ViewModelBase
         CommandManager.InvalidateRequerySuggested();
     }
 
-    public IReadOnlyList<string> PrepareSelectedItemsForDrag()
+    public IReadOnlyList<ArchiveNode> GetSelectedDragItems() =>
+        IsBusy ? [] : _selectedItems.Select(item => item.Node).ToList();
+
+    public bool CanMoveDroppedItems(IReadOnlyList<ArchiveNode> nodes, ArchiveFolderNode destination)
     {
-        if (_selectedItems.Count == 0 || IsBusy)
+        if (!CanDropInto(destination) ||
+            !nodes.Any(node => !ReferenceEquals(node.Parent, destination)))
         {
-            return [];
+            return false;
         }
 
-        return _fileTransferService.ExportToTemporaryLocation(
-            _selectedItems.Select(item => item.Node).ToList());
+        // Reject stale sources and drops into any folder in the drag selection.
+        var sources = nodes.ToHashSet();
+        for (ArchiveNode? folder = destination; folder is not null; folder = folder.Parent)
+        {
+            if (sources.Contains(folder))
+            {
+                return false;
+            }
+        }
+
+        return nodes.All(node => node.Parent is { } parent && _folderLookup.ContainsKey(parent));
     }
 
-    public void ReleaseTemporaryTransfer(IReadOnlyList<string> paths) =>
-        _fileTransferService.ReleaseTemporaryLocation(paths);
+    public bool MoveDroppedItems(IReadOnlyList<ArchiveNode> nodes, ArchiveFolderNode destination)
+    {
+        if (!CanMoveDroppedItems(nodes, destination))
+        {
+            return false;
+        }
+
+        try
+        {
+            var history = CaptureHistory("Move");
+            ArchiveTreeEditor.MoveTo(nodes, destination);
+            RecordMutation(history);
+            MarkDirty($"Moved selection to {destination.FullPath}.");
+            RefreshAfterMutation(destination);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _messageBoxService.ShowError("Move Failed", exception.Message);
+            return false;
+        }
+    }
 
     public void SortBy(string? columnName)
     {

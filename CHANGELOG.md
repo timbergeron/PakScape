@@ -1,7 +1,15 @@
 # Changelog
 
+- Move one or more archive items by dragging them onto a folder in the main
+  pane or sidebar on macOS and Windows. Undo restores the whole selection.
+- Fixed Windows drops from Explorer to import files into the archive folder
+  under the pointer.
+
 - Added interactive IQM v2 model previews with embedded skeletal animations
   and archive texture lookup on macOS, Windows, and Linux.
+
+- Fixed Windows drag-out losing a multi-item selection when pressing a selected
+  file or folder, so the whole selection can be copied to the desktop or Explorer.
 
 - Added duplicate-item prompts when dragging, adding, or pasting files from disk:
   Keep Both, Stop, or Replace on macOS; Keep Both, Skip, Cancel, or Replace
