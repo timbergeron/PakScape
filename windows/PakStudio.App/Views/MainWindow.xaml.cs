@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
+using PakStudio.App.Helpers;
 using PakStudio.App.Services;
 using PakStudio.App.ViewModels;
 using PakStudio.Core.Interfaces;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan FolderPaneAnimationInterval = TimeSpan.FromMilliseconds(16);
     private const string ArchiveItemDragFormat = "PakScape.ArchiveItemDrag";
     private const string DetailsColumnDragFormat = "PakScape.DetailsColumnKey";
+    private const double DragAutoScrollMargin = 24;
 
     private static readonly Duration ColumnDragFadeInDuration = new(TimeSpan.FromMilliseconds(90));
     private static readonly Duration ColumnDragFadeOutDuration = new(TimeSpan.FromMilliseconds(140));
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
     private ListViewItem? _deferredSelectionItem;
     private bool _isStartingDrag;
     private ArchiveItemDrag? _archiveItemDrag;
+    private FrameworkElement? _dropHighlight;
     private bool _isFolderPaneIndicatorPressed;
     private bool _isDraggingFolderPaneIndicator;
     private bool _suppressFolderPaneIndicatorClick;
@@ -839,7 +842,6 @@ public partial class MainWindow : Window
                 {
                     RoutedEvent = MouseLeftButtonDownEvent,
                 });
-                ItemList.ReleaseMouseCapture();
             }
             e.Handled = true;
             return;
@@ -1013,6 +1015,7 @@ public partial class MainWindow : Window
         finally
         {
             _archiveItemDrag = null;
+            SetDropHighlight(null);
             _fileTransferService.ReleaseTemporaryLocation(paths);
             _isStartingDrag = false;
         }
@@ -1353,63 +1356,140 @@ public partial class MainWindow : Window
             ? drag
             : null;
 
-    private ArchiveFolderNode? GetDropFolder(object sender, DragEventArgs e)
+    private (ArchiveFolderNode? Folder, FrameworkElement? Row) GetDropFolder(object sender, DragEventArgs e)
     {
+        var source = e.OriginalSource as DependencyObject;
         if (ReferenceEquals(sender, FolderTree))
         {
-            return FindVisualAncestor<TreeViewItem>(e.OriginalSource as DependencyObject)
-                ?.DataContext is FolderTreeNodeViewModel folder ? folder.Folder : null;
+            var treeItem = FindVisualAncestor<TreeViewItem>(source);
+            return treeItem?.DataContext is FolderTreeNodeViewModel folder
+                ? (folder.Folder, treeItem)
+                : (null, null);
         }
 
-        var item = ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject);
-        return item is ListViewItem { DataContext: ArchiveItemViewModel { Node: ArchiveFolderNode node } }
-            ? node
-            : null;
+        return ItemsControl.ContainerFromElement(ItemList, source) is ListViewItem
+            {
+                DataContext: ArchiveItemViewModel { Node: ArchiveFolderNode node },
+            } listItem
+            ? (node, listItem)
+            : (null, null);
+    }
+
+    /// <summary>
+    /// Resolves the effect for a drop at the pointer. Archive items only move
+    /// onto a folder row; files from Explorer can also land on the item list's
+    /// background, which imports into the current folder.
+    /// </summary>
+    private DragDropEffects GetDropEffect(
+        object sender, DragEventArgs e, ArchiveFolderNode? folder, ArchiveItemDrag? drag)
+    {
+        if (drag is not null)
+        {
+            return folder is not null && _viewModel.CanMoveDroppedItems(drag.Nodes, folder)
+                ? e.AllowedEffects & DragDropEffects.Move
+                : DragDropEffects.None;
+        }
+
+        return (folder is not null || ReferenceEquals(sender, ItemList)) &&
+               _viewModel.CanDropInto(folder) &&
+               e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? e.AllowedEffects & DragDropEffects.Copy
+            : DragDropEffects.None;
     }
 
     private void ArchiveItems_OnDragOver(object sender, DragEventArgs e)
     {
-        var folder = GetDropFolder(sender, e);
-        var drag = GetArchiveItemDrag(e.Data);
-        if (drag is not null)
-        {
-            e.Effects = folder is not null && _viewModel.CanMoveDroppedItems(drag.Nodes, folder)
-                ? e.AllowedEffects & DragDropEffects.Move
-                : DragDropEffects.None;
-        }
-        else
-        {
-            e.Effects = (folder is not null || ReferenceEquals(sender, ItemList)) &&
-                        _viewModel.CanDropInto(folder) && e.Data.GetDataPresent(DataFormats.FileDrop)
-                ? e.AllowedEffects & DragDropEffects.Copy
-                : DragDropEffects.None;
-        }
+        var (folder, row) = GetDropFolder(sender, e);
+        e.Effects = GetDropEffect(sender, e, folder, GetArchiveItemDrag(e.Data));
+        // WPF does not update IsMouseOver during a drag, so mark the target row.
+        SetDropHighlight(e.Effects == DragDropEffects.None ? null : row);
+        AutoScrollDuringDrag((DependencyObject)sender, e);
         e.Handled = true;
+    }
+
+    private void ArchiveItems_OnDragLeave(object sender, DragEventArgs e)
+    {
+        // DragLeave also fires when crossing between rows inside the control;
+        // only clear once the pointer has actually left it.
+        var element = (FrameworkElement)sender;
+        var position = e.GetPosition(element);
+        if (position.X < 0 || position.Y < 0 ||
+            position.X >= element.ActualWidth || position.Y >= element.ActualHeight)
+        {
+            SetDropHighlight(null);
+        }
     }
 
     private async void ArchiveItems_OnDrop(object sender, DragEventArgs e)
     {
-        var folder = GetDropFolder(sender, e);
+        SetDropHighlight(null);
+        var (folder, _) = GetDropFolder(sender, e);
         var drag = GetArchiveItemDrag(e.Data);
+        e.Effects = GetDropEffect(sender, e, folder, drag);
         e.Handled = true;
-        e.Effects = DragDropEffects.None;
+        if (e.Effects == DragDropEffects.None)
+        {
+            return;
+        }
+
         if (drag is not null)
         {
-            if (folder is not null && e.AllowedEffects.HasFlag(DragDropEffects.Move) &&
-                _viewModel.MoveDroppedItems(drag.Nodes, folder))
+            if (!_viewModel.MoveDroppedItems(drag.Nodes, folder!))
             {
-                e.Effects = DragDropEffects.Move;
+                e.Effects = DragDropEffects.None;
             }
             return;
         }
 
-        if ((folder is not null || ReferenceEquals(sender, ItemList)) &&
-            _viewModel.CanDropInto(folder) && e.AllowedEffects.HasFlag(DragDropEffects.Copy) &&
-            e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
         {
-            e.Effects = DragDropEffects.Copy;
             await _viewModel.AddDroppedPathsAsync(paths, folder).ConfigureAwait(true);
         }
+    }
+
+    private void SetDropHighlight(FrameworkElement? row)
+    {
+        if (ReferenceEquals(row, _dropHighlight))
+        {
+            return;
+        }
+
+        _dropHighlight?.ClearValue(DropTarget.IsActiveProperty);
+        _dropHighlight = row;
+        row?.SetValue(DropTarget.IsActiveProperty, true);
+    }
+
+    /// <summary>Scrolls a drop target when the pointer rests near its top or bottom edge.</summary>
+    private static void AutoScrollDuringDrag(DependencyObject target, DragEventArgs e)
+    {
+        if (FindVisualDescendant<ScrollViewer>(target) is not { } viewer)
+        {
+            return;
+        }
+
+        var y = e.GetPosition(viewer).Y;
+        if (y < DragAutoScrollMargin)
+        {
+            viewer.LineUp();
+        }
+        else if (y > viewer.ActualHeight - DragAutoScrollMargin)
+        {
+            viewer.LineDown();
+        }
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if ((child as T ?? FindVisualDescendant<T>(child)) is { } match)
+            {
+                return match;
+            }
+        }
+        return null;
     }
 
     private sealed record ArchiveItemDrag(string Token, IReadOnlyList<ArchiveNode> Nodes);

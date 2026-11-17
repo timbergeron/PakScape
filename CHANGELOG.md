@@ -1,9 +1,11 @@
 # Changelog
 
 - Move one or more archive items by dragging them onto a folder in the main
-  pane or sidebar on macOS and Windows. Undo restores the whole selection.
-- Fixed Windows drops from Explorer to import files into the archive folder
-  under the pointer.
+  pane or sidebar on macOS and Windows. The target folder is highlighted while
+  dragging, and moved items keep their on-screen order. Undo restores the
+  whole selection.
+- Files dragged in from Finder or Explorer import into the folder under the
+  pointer, including sidebar folders.
 
 - Added interactive IQM v2 model previews with embedded skeletal animations
   and archive texture lookup on macOS, Windows, and Linux.

@@ -826,6 +826,7 @@
                           ItemsSource="{Binding FolderRoots}"
                           AllowDrop="True"
                           DragOver="ArchiveItems_OnDragOver"
+                          DragLeave="ArchiveItems_OnDragLeave"
                           Drop="ArchiveItems_OnDrop"
                           SelectedItemChanged="FolderTree_OnSelectedItemChanged" />
             </Border>
@@ -1116,6 +1117,7 @@
                                   MouseDoubleClick="ItemList_OnMouseDoubleClick"
                                   AllowDrop="True"
                                   DragOver="ArchiveItems_OnDragOver"
+                                  DragLeave="ArchiveItems_OnDragLeave"
                                   Drop="ArchiveItems_OnDrop"
                                   PreviewMouseLeftButtonDown="ItemList_OnPreviewMouseLeftButtonDown"
                                   PreviewMouseLeftButtonUp="ItemList_OnPreviewMouseLeftButtonUp"

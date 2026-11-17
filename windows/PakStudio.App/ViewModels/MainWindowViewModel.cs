@@ -594,13 +594,26 @@ public sealed class MainWindowViewModel : ViewModelBase
         CommandManager.InvalidateRequerySuggested();
     }
 
-    public IReadOnlyList<ArchiveNode> GetSelectedDragItems() =>
-        IsBusy ? [] : _selectedItems.Select(item => item.Node).ToList();
+    /// <summary>
+    /// Returns the selection in on-screen order. WPF reports selected items in
+    /// click order, which would otherwise scramble the order items land in.
+    /// </summary>
+    public IReadOnlyList<ArchiveNode> GetSelectedDragItems()
+    {
+        if (IsBusy || _selectedItems.Count == 0)
+        {
+            return [];
+        }
+
+        var selected = _selectedItems.ToHashSet();
+        return CurrentItems.Where(selected.Contains).Select(item => item.Node).ToList();
+    }
 
     public bool CanMoveDroppedItems(IReadOnlyList<ArchiveNode> nodes, ArchiveFolderNode destination)
     {
+        // Dropping a selection back onto its own folder is a no-op, not a move.
         if (!CanDropInto(destination) ||
-            !nodes.Any(node => !ReferenceEquals(node.Parent, destination)))
+            nodes.All(node => ReferenceEquals(node.Parent, destination)))
         {
             return false;
         }
@@ -628,9 +641,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         try
         {
             var history = CaptureHistory("Move");
+            var moved = nodes.Count(node => !ReferenceEquals(node.Parent, destination));
             ArchiveTreeEditor.MoveTo(nodes, destination);
             RecordMutation(history);
-            MarkDirty($"Moved selection to {destination.FullPath}.");
+            MarkDirty(moved == 1
+                ? $"Moved 1 item to {destination.FullPath}."
+                : $"Moved {moved} items to {destination.FullPath}.");
             RefreshAfterMutation(destination);
             return true;
         }

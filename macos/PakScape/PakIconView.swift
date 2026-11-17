@@ -1138,6 +1138,13 @@ final class PakIconItem: NSCollectionViewItem {
         }
     }
 
+    // The collection view marks the folder under an archive drag as the drop target.
+    override var highlightState: NSCollectionViewItem.HighlightState {
+        didSet {
+            updateSelectionState()
+        }
+    }
+
     @objc private func handleAudioPreviewButton() {
         onAudioPreviewToggle?()
     }
@@ -1156,6 +1163,17 @@ final class PakIconItem: NSCollectionViewItem {
             nameField.layer?.masksToBounds = true
 
             // Clear main view background
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+        } else if highlightState == .asDropTarget {
+            iconContainerView.layer?.backgroundColor =
+                NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+            iconContainerView.layer?.cornerRadius = 8
+
+            nameField.drawsBackground = false
+            nameField.backgroundColor = .clear
+            nameField.textColor = NSColor.labelColor
+            nameField.layer?.cornerRadius = 0
+
             view.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             iconContainerView.layer?.backgroundColor = NSColor.clear.cgColor

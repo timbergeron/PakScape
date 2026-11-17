@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:helpers="clr-namespace:PakStudio.App.Helpers">
     <Style TargetType="TreeView">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
@@ -105,6 +106,10 @@
                         </DataTrigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
+                        </Trigger>
+                        <!-- Last so it also shows on the root row and over selection. -->
+                        <Trigger Property="helpers:DropTarget.IsActive" Value="True">
+                            <Setter TargetName="RowBackground" Property="Background" Value="{DynamicResource DropTargetBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

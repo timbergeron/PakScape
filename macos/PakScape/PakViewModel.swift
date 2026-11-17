@@ -561,7 +561,14 @@ final class PakViewModel: NSObject, ObservableObject {
 
     private func quickLookPNGData(fileName: String, data: Data) -> Data? {
         autoreleasepool {
-            guard let image = renderPreviewImage(fileName: fileName, data: data) else { return nil }
+            /* Quick Look lists every WAD entry by name; list thumbnails keep the compact sheet. */
+            let isWad = (fileName as NSString).pathExtension.lowercased() == "wad"
+            let gallery = isWad
+                ? WadPreviewRenderer.galleryImage(data: data, appearance: pakScapePreviewAppearance())
+                : nil
+            guard let image = gallery ?? renderPreviewImage(fileName: fileName, data: data) else {
+                return nil
+            }
             return pngData(for: image)
         }
     }
@@ -969,13 +976,7 @@ final class PakViewModel: NSObject, ObservableObject {
     }
 
     private func pasteboardFileURLs() -> [URL] {
-        let pasteboard = NSPasteboard.general
-        let classes = [NSURL.self]
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [
-            .urlReadingFileURLsOnly: true
-        ]
-        let objects = pasteboard.readObjects(forClasses: classes, options: options) as? [URL] ?? []
-        return objects
+        Self.droppedFileURLs(from: .general)
     }
 
     private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
@@ -1861,6 +1862,20 @@ final class PakViewModel: NSObject, ObservableObject {
 
     var isDraggingArchiveItems: Bool { !draggedArchiveItemIDs.isEmpty }
 
+    /// Whether files dragged in from Finder can be imported into `folder`.
+    /// Our own archive drags also carry file URLs, so those always move instead.
+    func canImportDroppedFiles(into folder: PakNode) -> Bool {
+        guard isEditable, !isDraggingArchiveItems, folder.isFolder, let root = pakFile?.root else {
+            return false
+        }
+        return PakTreeMutation.depth(of: folder, in: root) != nil
+    }
+
+    static func droppedFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        return pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] ?? []
+    }
+
     func canDropArchiveItems(into destination: PakNode) -> Bool {
         archiveMove(into: destination) != nil
     }
@@ -2717,6 +2732,313 @@ private enum WadPreviewRenderer {
         return contactSheet(from: images)
     }
 
+    private struct GalleryItem {
+        let name: String
+        let detail: String
+        let image: NSImage?
+    }
+
+    private static let galleryColumns = 8
+    private static let galleryTileWidth: CGFloat = 136
+    private static let galleryArtworkSize: CGFloat = 112
+    private static let galleryLabelHeight: CGFloat = 36
+    private static let galleryPadding: CGFloat = 12
+    private static var galleryTileHeight: CGFloat { galleryArtworkSize + galleryLabelHeight + 12 }
+
+    /// Draws every WAD entry as a named tile. The sheet stays within the safe preview
+    /// size, so a very large WAD ends with a tile counting the entries left out.
+    static func galleryImage(data: Data, appearance: NSAppearance) -> NSImage? {
+        guard let entries = entries(in: data), !entries.isEmpty else { return nil }
+        let isWad3 = String(data: data.prefix(4), encoding: .ascii) == "WAD3"
+
+        let usableHeight = CGFloat(PakPreviewLimits.maximumDimension) - galleryPadding * 2
+        let maximumRows = max(1, Int(usableHeight / galleryTileHeight))
+        let capacity = maximumRows * galleryColumns
+        let shownCount = entries.count <= capacity ? entries.count : capacity - 1
+        let hiddenCount = entries.count - shownCount
+        let items = entries.prefix(shownCount).map {
+            galleryItem(entry: $0, data: data, isWad3: isWad3)
+        }
+
+        let tileCount = items.count + (hiddenCount > 0 ? 1 : 0)
+        let columns = min(galleryColumns, tileCount)
+        let rows = (tileCount + galleryColumns - 1) / galleryColumns
+        let width = Int(galleryPadding * 2 + CGFloat(columns) * galleryTileWidth)
+        let height = Int(galleryPadding * 2 + CGFloat(rows) * galleryTileHeight)
+        guard PakPreviewLimits.isSafe(width: width, height: height),
+              let representation = NSBitmapImageRep(
+                  bitmapDataPlanes: nil,
+                  pixelsWide: width,
+                  pixelsHigh: height,
+                  bitsPerSample: 8,
+                  samplesPerPixel: 4,
+                  hasAlpha: true,
+                  isPlanar: false,
+                  colorSpaceName: .deviceRGB,
+                  bytesPerRow: 0,
+                  bitsPerPixel: 0
+              ),
+              let graphicsContext = NSGraphicsContext(bitmapImageRep: representation) else {
+            return nil
+        }
+
+        let size = NSSize(width: width, height: height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        appearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSRect(origin: .zero, size: size).fill()
+
+            for index in 0..<tileCount {
+                let column = index % galleryColumns
+                let row = index / galleryColumns
+                let tile = NSRect(
+                    x: galleryPadding + CGFloat(column) * galleryTileWidth + 4,
+                    y: size.height - galleryPadding - CGFloat(row + 1) * galleryTileHeight + 4,
+                    width: galleryTileWidth - 8,
+                    height: galleryTileHeight - 8
+                )
+                if index < items.count {
+                    drawGalleryTile(items[index], in: tile)
+                } else {
+                    drawGalleryOverflowTile(hiddenCount: hiddenCount, in: tile)
+                }
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        return image
+    }
+
+    private static func galleryItem(entry: Entry, data: Data, isWad3: Bool) -> GalleryItem {
+        let image = entry.compression == 0
+            ? galleryArtwork(entry: entry, data: data, isWad3: isWad3)
+            : nil
+        var detail = typeDescription(entry.type)
+        if entry.compression != 0 {
+            detail += " (compressed)"
+        }
+        if let image {
+            detail += " • \(Int(image.size.width))×\(Int(image.size.height))"
+        }
+        return GalleryItem(
+            name: entry.name.isEmpty ? "(unnamed)" : entry.name,
+            detail: detail,
+            image: image
+        )
+    }
+
+    private static func galleryArtwork(entry: Entry, data: Data, isWad3: Bool) -> NSImage? {
+        let name = entry.name.lowercased()
+        let isConsolePicture = entry.type == UInt8(ascii: "E")
+
+        /* Quake's gfx.wad stores conchars and conback as raw pixels regardless of type. */
+        if !isWad3 {
+            if name == "conchars" || (isConsolePicture && entry.dsize == 128 * 128) {
+                return entry.dsize >= 128 * 128
+                    ? rawImage(entry: entry, data: data, width: 128, height: 128, transparentIndex: 0)
+                    : nil
+            }
+            if name == "conback" || (isConsolePicture && entry.dsize == 320 * 200) {
+                return entry.dsize >= 320 * 200
+                    ? rawImage(entry: entry, data: data, width: 320, height: 200, transparentIndex: nil)
+                    : nil
+            }
+        }
+
+        switch entry.type {
+        case UInt8(ascii: "@"):
+            guard entry.dsize >= 768 else { return nil }
+            let palette = Array(data[entry.offset ..< entry.offset + 768])
+            let swatch = Data((0...255).map { UInt8($0) })
+            return image(from: swatch, width: 16, height: 16, palette: palette, transparentIndex: nil)
+        case UInt8(ascii: "B"):
+            guard entry.dsize >= 8,
+                  let width = BspPreviewRenderer.readInt32LE(data, offset: entry.offset),
+                  let height = BspPreviewRenderer.readInt32LE(data, offset: entry.offset + 4) else {
+                return nil
+            }
+            return lumpImage(
+                entry: entry,
+                data: data,
+                pixelStart: entry.offset + 8,
+                width: width,
+                height: height,
+                isWad3: isWad3,
+                transparentIndex: 255
+            )
+        case UInt8(ascii: "C"), UInt8(ascii: "D"):
+            /* Half-Life's '{' textures are alpha-tested on the last palette entry. */
+            let transparentIndex: Int? = isWad3 && entry.name.hasPrefix("{") ? 255 : nil
+            return decodeMiptex(
+                entry: entry,
+                data: data,
+                isWad3: isWad3,
+                transparentIndex: transparentIndex
+            )
+        case UInt8(ascii: "F") where isWad3:
+            /* Half-Life font: width, height, row count, row height, then 256 char infos. */
+            let headerSize = 16 + 256 * 4
+            guard entry.dsize >= headerSize,
+                  let width = BspPreviewRenderer.readInt32LE(data, offset: entry.offset),
+                  let height = BspPreviewRenderer.readInt32LE(data, offset: entry.offset + 4) else {
+                return nil
+            }
+            return lumpImage(
+                entry: entry,
+                data: data,
+                pixelStart: entry.offset + headerSize,
+                width: width,
+                height: height,
+                isWad3: true,
+                transparentIndex: 255
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func rawImage(
+        entry: Entry,
+        data: Data,
+        width: Int,
+        height: Int,
+        transparentIndex: Int?
+    ) -> NSImage? {
+        let pixels = data.subdata(in: entry.offset ..< entry.offset + width * height)
+        return image(from: pixels, width: width, height: height, transparentIndex: transparentIndex)
+    }
+
+    /// Decodes paletted pixels inside a lump. WAD3 images carry their own palette after the pixels.
+    private static func lumpImage(
+        entry: Entry,
+        data: Data,
+        pixelStart: Int,
+        width: Int,
+        height: Int,
+        isWad3: Bool,
+        transparentIndex: Int?
+    ) -> NSImage? {
+        guard PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
+        let pixelEnd = pixelStart + width * height
+        let lumpEnd = entry.offset + entry.dsize
+        guard pixelStart >= entry.offset, pixelEnd <= lumpEnd, lumpEnd <= data.count else {
+            return nil
+        }
+
+        let palette: [UInt8]
+        if isWad3 {
+            guard pixelEnd + 770 <= lumpEnd,
+                  (Int(data[pixelEnd]) | (Int(data[pixelEnd + 1]) << 8)) == 256 else {
+                return nil
+            }
+            palette = Array(data[pixelEnd + 2 ..< pixelEnd + 770])
+        } else {
+            palette = QuakePalette.bytes
+        }
+        return image(
+            from: data.subdata(in: pixelStart ..< pixelEnd),
+            width: width,
+            height: height,
+            palette: palette,
+            transparentIndex: transparentIndex
+        )
+    }
+
+    private static func typeDescription(_ type: UInt8) -> String {
+        switch type {
+        case UInt8(ascii: "@"): return "Palette"
+        case UInt8(ascii: "B"): return "Picture"
+        case UInt8(ascii: "C"), UInt8(ascii: "D"): return "Mip texture"
+        case UInt8(ascii: "E"): return "Console picture"
+        case UInt8(ascii: "F"): return "Font"
+        default: return String(format: "Type 0x%02X", type)
+        }
+    }
+
+    private static func drawGalleryTileBackground(in tile: NSRect) {
+        let path = NSBezierPath(roundedRect: tile.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+        NSColor.controlBackgroundColor.setFill()
+        path.fill()
+        NSColor.separatorColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private static func drawGalleryTile(_ item: GalleryItem, in tile: NSRect) {
+        drawGalleryTileBackground(in: tile)
+
+        let artworkFrame = NSRect(
+            x: tile.midX - galleryArtworkSize / 2,
+            y: tile.maxY - 6 - galleryArtworkSize,
+            width: galleryArtworkSize,
+            height: galleryArtworkSize
+        )
+        if let image = item.image, image.size.width > 0, image.size.height > 0 {
+            let scale = min(
+                artworkFrame.width / image.size.width,
+                artworkFrame.height / image.size.height
+            )
+            let drawSize = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+            let drawRect = NSRect(
+                x: artworkFrame.midX - drawSize.width / 2,
+                y: artworkFrame.midY - drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            NSGraphicsContext.current?.imageInterpolation = .none
+            image.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1)
+        } else {
+            drawGalleryText(
+                "?",
+                in: NSRect(x: artworkFrame.minX, y: artworkFrame.midY - 20, width: artworkFrame.width, height: 40),
+                font: .systemFont(ofSize: 32, weight: .light),
+                color: .tertiaryLabelColor
+            )
+        }
+
+        drawGalleryText(
+            item.name,
+            in: NSRect(x: tile.minX + 6, y: tile.minY + 18, width: tile.width - 12, height: 16),
+            font: .systemFont(ofSize: 12, weight: .semibold),
+            color: .labelColor
+        )
+        drawGalleryText(
+            item.detail,
+            in: NSRect(x: tile.minX + 6, y: tile.minY + 3, width: tile.width - 12, height: 14),
+            font: .systemFont(ofSize: 10),
+            color: .secondaryLabelColor
+        )
+    }
+
+    private static func drawGalleryOverflowTile(hiddenCount: Int, in tile: NSRect) {
+        drawGalleryTileBackground(in: tile)
+        drawGalleryText(
+            "+\(hiddenCount) more",
+            in: NSRect(x: tile.minX + 6, y: tile.midY - 10, width: tile.width - 12, height: 20),
+            font: .systemFont(ofSize: 13, weight: .semibold),
+            color: .secondaryLabelColor
+        )
+    }
+
+    private static func drawGalleryText(_ text: String, in rect: NSRect, font: NSFont, color: NSColor) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+        (text as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph,
+            ],
+            context: nil
+        )
+    }
+
     static func textureImages(data: Data) -> [(name: String, image: NSImage)] {
         guard let entries = entries(in: data) else { return [] }
         let isWad3 = String(data: data.prefix(4), encoding: .ascii) == "WAD3"
@@ -2810,7 +3132,12 @@ private enum WadPreviewRenderer {
         return image(from: pixels, width: width, height: height)
     }
 
-    private static func decodeMiptex(entry: Entry, data: Data, isWad3: Bool) -> NSImage? {
+    private static func decodeMiptex(
+        entry: Entry,
+        data: Data,
+        isWad3: Bool,
+        transparentIndex: Int? = nil
+    ) -> NSImage? {
         let base = entry.offset
         guard base + 40 <= data.count else { return nil }
 
@@ -2861,7 +3188,7 @@ private enum WadPreviewRenderer {
             width: width,
             height: height,
             palette: palette,
-            transparentIndex255: false
+            transparentIndex: transparentIndex
         )
     }
 
@@ -2870,7 +3197,7 @@ private enum WadPreviewRenderer {
         width: Int,
         height: Int,
         palette: [UInt8] = QuakePalette.bytes,
-        transparentIndex255: Bool = true
+        transparentIndex: Int? = 255
     ) -> NSImage? {
         guard palette.count >= 768,
               PakPreviewLimits.isSafe(width: width, height: height) else { return nil }
@@ -2899,7 +3226,7 @@ private enum WadPreviewRenderer {
 
                 for i in 0..<pixelCount {
                     let paletteIndex = Int(src[i])
-                    if transparentIndex255 && paletteIndex == 255 {
+                    if paletteIndex == transparentIndex {
                         let destIndex = i * 4
                         dest[destIndex] = 0
                         dest[destIndex + 1] = 0

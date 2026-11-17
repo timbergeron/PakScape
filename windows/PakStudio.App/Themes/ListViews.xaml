@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:helpers="clr-namespace:PakStudio.App.Helpers">
     <Style TargetType="ListView">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
@@ -43,6 +44,9 @@
             <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Foreground" Value="{DynamicResource MutedForegroundBrush}" />
             </Trigger>
+            <Trigger Property="helpers:DropTarget.IsActive" Value="True">
+                <Setter Property="Background" Value="{DynamicResource DropTargetBrush}" />
+            </Trigger>
         </Style.Triggers>
     </Style>
 
@@ -50,6 +54,11 @@
            TargetType="ListViewItem"
            BasedOn="{StaticResource ListViewItemBaseStyle}">
         <Setter Property="HorizontalAlignment" Value="Left" />
+        <Style.Triggers>
+            <Trigger Property="helpers:DropTarget.IsActive" Value="True">
+                <Setter Property="Background" Value="{DynamicResource DropTargetBrush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style TargetType="ListViewItem"

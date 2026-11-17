@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 private let sidebarBackgroundColor = NSColor(
     name: NSColor.Name("PakScapeSidebarBackground")
@@ -33,6 +34,7 @@ struct ContentView: View {
     @State private var selectedFileIDs: Set<PakNode.ID> = [] // Selection in the detail table (supports multi-select)
     @State private var detailViewStyle: DetailViewStyle = .list
     @State private var renamingNodeID: PakNode.ID?
+    @State private var sidebarDropTargetID: PakNode.ID?
     @State private var renamingText: String = ""
     @State private var renamingNode: PakNode?
     @FocusState private var renamingFocus: PakNode.ID?
@@ -269,9 +271,19 @@ struct ContentView: View {
         Label(name, systemImage: "folder.fill")
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .background {
+                // List rows do not show hover feedback during a drag, so mark the target.
+                if sidebarDropTargetID == folder.id {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.accentColor.opacity(0.25))
+                        .padding(.horizontal, -4)
+                }
+            }
             .onDrop(
-                of: [PakViewModel.archiveDragType.rawValue],
-                delegate: ArchiveFolderDropDelegate(model: model, folder: folder)
+                of: [UTType(exportedAs: PakViewModel.archiveDragType.rawValue), .fileURL],
+                delegate: ArchiveFolderDropDelegate(
+                    model: model, folder: folder, dropTargetID: $sidebarDropTargetID
+                )
             )
             .tag(folder)
     }
@@ -279,17 +291,66 @@ struct ContentView: View {
     private struct ArchiveFolderDropDelegate: DropDelegate {
         let model: PakViewModel
         let folder: PakNode
+        @Binding var dropTargetID: PakNode.ID?
+
+        /// Archive items move; files from Finder are copied in.
+        private func operation(for info: DropInfo) -> DropOperation? {
+            if model.isDraggingArchiveItems {
+                return model.canDropArchiveItems(into: folder) ? .move : nil
+            }
+            return info.hasItemsConforming(to: [.fileURL]) && model.canImportDroppedFiles(into: folder)
+                ? .copy : nil
+        }
 
         func validateDrop(info: DropInfo) -> Bool {
-            model.canDropArchiveItems(into: folder)
+            operation(for: info) != nil
+        }
+
+        func dropEntered(info: DropInfo) {
+            dropTargetID = operation(for: info) == nil ? nil : folder.id
+        }
+
+        func dropExited(info: DropInfo) {
+            if dropTargetID == folder.id {
+                dropTargetID = nil
+            }
         }
 
         func dropUpdated(info: DropInfo) -> DropProposal? {
-            DropProposal(operation: model.canDropArchiveItems(into: folder) ? .move : .forbidden)
+            DropProposal(operation: operation(for: info) ?? .forbidden)
         }
 
         func performDrop(info: DropInfo) -> Bool {
-            model.dropArchiveItems(into: folder)
+            dropTargetID = nil
+            switch operation(for: info) {
+            case .move:
+                return model.dropArchiveItems(into: folder)
+            case .copy:
+                loadFileURLs(from: info.itemProviders(for: [.fileURL])) { urls in
+                    // The archive may have changed while the URLs were loading.
+                    guard !urls.isEmpty, model.canImportDroppedFiles(into: folder) else { return }
+                    model.importFiles(urls: urls, to: folder)
+                }
+                return true
+            default:
+                return false
+            }
+        }
+
+        private func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
+            var urls = [URL?](repeating: nil, count: providers.count)
+            let group = DispatchGroup()
+            for (index, provider) in providers.enumerated() {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    DispatchQueue.main.async {
+                        urls[index] = url?.isFileURL == true ? url : nil
+                        group.leave()
+                    }
+                }
+            }
+            // Keep Finder's order rather than whichever provider finishes first.
+            group.notify(queue: .main) { completion(urls.compactMap { $0 }) }
         }
     }
 

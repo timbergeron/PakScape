@@ -138,7 +138,7 @@ struct PakListView: NSViewRepresentable {
         tableView.target = context.coordinator
         tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
         tableView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
-        tableView.registerForDraggedTypes([PakViewModel.archiveDragType])
+        tableView.registerForDraggedTypes([PakViewModel.archiveDragType, .fileURL])
 
         let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         nameColumn.title = "Name"
@@ -467,18 +467,47 @@ struct PakListView: NSViewRepresentable {
             proposedRow: Int, proposedDropOperation: NSTableView.DropOperation
         ) -> NSDragOperation {
             let row = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
-            guard parent.nodes.indices.contains(row),
-                  parent.viewModel.canDropArchiveItems(into: parent.nodes[row]) else { return [] }
-            tableView.setDropRow(row, dropOperation: .on)
-            return .move
+            let folder = parent.nodes.indices.contains(row) && parent.nodes[row].isFolder
+                ? parent.nodes[row] : nil
+            let viewModel = parent.viewModel
+
+            if viewModel.isDraggingArchiveItems {
+                guard let folder, viewModel.canDropArchiveItems(into: folder) else { return [] }
+                tableView.setDropRow(row, dropOperation: .on)
+                return .move
+            }
+
+            // Files from Finder land in the folder under the pointer, or in the
+            // current folder when dropped anywhere else (row -1 outlines the table).
+            guard !PakViewModel.droppedFileURLs(from: info.draggingPasteboard).isEmpty,
+                  let destination = folder ?? viewModel.currentFolder,
+                  viewModel.canImportDroppedFiles(into: destination) else { return [] }
+            tableView.setDropRow(folder == nil ? -1 : row, dropOperation: .on)
+            return .copy
         }
 
         func tableView(
             _ tableView: NSTableView, acceptDrop info: NSDraggingInfo,
             row: Int, dropOperation: NSTableView.DropOperation
         ) -> Bool {
-            guard dropOperation == .on, parent.nodes.indices.contains(row) else { return false }
-            return parent.viewModel.dropArchiveItems(into: parent.nodes[row])
+            guard dropOperation == .on else { return false }
+            let viewModel = parent.viewModel
+            let folder = parent.nodes.indices.contains(row) ? parent.nodes[row] : nil
+
+            if viewModel.isDraggingArchiveItems {
+                guard let folder else { return false }
+                return viewModel.dropArchiveItems(into: folder)
+            }
+
+            let urls = PakViewModel.droppedFileURLs(from: info.draggingPasteboard)
+            guard !urls.isEmpty,
+                  let destination = folder ?? viewModel.currentFolder,
+                  viewModel.canImportDroppedFiles(into: destination) else { return false }
+            // Import after the drag session ends: duplicate-name prompts are modal.
+            DispatchQueue.main.async {
+                viewModel.importFiles(urls: urls, to: destination)
+            }
+            return true
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
