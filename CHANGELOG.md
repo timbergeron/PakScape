@@ -1,11 +1,15 @@
 # Changelog
 
 - Move one or more archive items by dragging them onto a folder in the main
-  pane or sidebar on macOS and Windows. The target folder is highlighted while
-  dragging, and moved items keep their on-screen order. Undo restores the
-  whole selection.
-- Files dragged in from Finder or Explorer import into the folder under the
-  pointer, including sidebar folders.
+  pane or sidebar on macOS, Windows, and Linux. The target folder is
+  highlighted while dragging, and moved items keep their on-screen order. Undo
+  restores the whole selection.
+- Files dragged in from Finder, Explorer, or the Linux file manager import into
+  the folder under the pointer, including sidebar folders.
+- Linux can now drag items out of the archive from every view, not only
+  Details, and pressing a selected item no longer drops the rest of a
+  multi-item selection before the drag starts.
+- Fixed Linux icon views not drawing the selected item's border.
 
 - Added interactive IQM v2 model previews with embedded skeletal animations
   and archive texture lookup on macOS, Windows, and Linux.

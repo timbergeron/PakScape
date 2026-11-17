@@ -13,6 +13,7 @@ using PakScape.Linux.ViewModels;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
+using PakStudio.Core.Validation;
 
 namespace PakScape.Linux.Views;
 
@@ -31,6 +32,10 @@ public partial class MainWindow : Window
 
     private static readonly DataFormat<byte[]> ArchiveClipboardFormat =
         DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-clipboard-id");
+    // Marks a drag that started in this window, so dropping on a folder moves instead of copying.
+    private static readonly DataFormat<byte[]> ArchiveItemDragFormat =
+        DataFormat.CreateBytesApplicationFormat("org.pakscape.archive-item-drag");
+    private const string DropTargetClass = "drop-target";
     private MainWindowViewModel? _viewModel;
     private IArchiveFileTransferService? _fileTransferService;
     private string? _startupPath;
@@ -43,6 +48,9 @@ public partial class MainWindow : Window
     private Point? _dragStartPoint;
     private Control? _dragSource;
     private bool _isStartingDrag;
+    private ArchiveItemDrag? _archiveItemDrag;
+    private Control? _dropHighlight;
+    private Control? _deferredSelectionItem;
     private bool _isSynchronizingSelection;
     private bool _isFolderPaneIndicatorPressed;
     private bool _isDraggingFolderPaneIndicator;
@@ -72,18 +80,22 @@ public partial class MainWindow : Window
             InputElement.KeyDownEvent,
             OnArchiveGridKeyDown,
             RoutingStrategies.Tunnel);
-        ArchiveGrid.AddHandler(
-            InputElement.PointerPressedEvent,
-            OnArchiveGridPointerPressed,
-            RoutingStrategies.Tunnel);
-        ArchiveGrid.AddHandler(
-            InputElement.PointerMovedEvent,
-            OnArchiveGridPointerMoved,
-            RoutingStrategies.Tunnel);
-        ArchiveGrid.AddHandler(
-            InputElement.PointerReleasedEvent,
-            OnArchiveGridPointerReleased,
-            RoutingStrategies.Tunnel);
+        /* Every view can drag its selection out to the desktop or onto an archive folder. */
+        foreach (var itemsView in new Control[] { LargeIconsList, SmallIconsList, ArchiveList, ArchiveGrid })
+        {
+            itemsView.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnArchiveGridPointerPressed,
+                RoutingStrategies.Tunnel);
+            itemsView.AddHandler(
+                InputElement.PointerMovedEvent,
+                OnArchiveGridPointerMoved,
+                RoutingStrategies.Tunnel);
+            itemsView.AddHandler(
+                InputElement.PointerReleasedEvent,
+                OnArchiveGridPointerReleased,
+                RoutingStrategies.Tunnel);
+        }
         FolderSplitter.DragStarted += OnFolderSplitterDragStarted;
         FolderSplitter.DragCompleted += OnFolderSplitterDragCompleted;
 
@@ -1234,6 +1246,8 @@ public partial class MainWindow : Window
 
         if (sender is Control source &&
             e.Source is Visual visual &&
+            // Dragging inside an inline-rename box selects text rather than items.
+            visual.FindAncestorOfType<TextBox>(includeSelf: true) is null &&
             (visual is DataGridRow or ListBoxItem ||
              visual.FindAncestorOfType<DataGridRow>() is not null ||
              visual.FindAncestorOfType<ListBoxItem>() is not null) &&
@@ -1242,7 +1256,55 @@ public partial class MainWindow : Window
             _dragTriggerEvent = e;
             _dragStartPoint = e.GetPosition(source);
             _dragSource = source;
+
+            // Pressing an item collapses a multi-selection before a drag can use it.
+            // Defer that click until release so dragging keeps every selected item.
+            if (e.ClickCount == 1 &&
+                e.KeyModifiers == KeyModifiers.None &&
+                FindItemContainer(visual) is { } container &&
+                IsContainerSelected(container) &&
+                GetSelectedCount(source) > 1)
+            {
+                _deferredSelectionItem = container;
+                e.Pointer.Capture(source);
+                e.Handled = true;
+            }
         }
+    }
+
+    private static Control? FindItemContainer(Visual visual) =>
+        (Control?)(visual as DataGridRow ?? visual.FindAncestorOfType<DataGridRow>()) ??
+        visual as ListBoxItem ?? visual.FindAncestorOfType<ListBoxItem>();
+
+    private static bool IsContainerSelected(Control container) => container switch
+    {
+        DataGridRow row => row.IsSelected,
+        ListBoxItem item => item.IsSelected,
+        _ => false,
+    };
+
+    private static int GetSelectedCount(Control view) => view switch
+    {
+        DataGrid grid => grid.SelectedItems.Count,
+        ListBox list => list.SelectedItems?.Count ?? 0,
+        _ => 0,
+    };
+
+    /// <summary>Completes a deferred click by selecting only the pressed item.</summary>
+    private static void SelectOnly(Control view, Control container)
+    {
+        switch (view, container)
+        {
+            case (DataGrid grid, DataGridRow row):
+                grid.SelectedItems.Clear();
+                row.IsSelected = true;
+                break;
+            case (ListBox list, ListBoxItem item):
+                list.SelectedItems?.Clear();
+                item.IsSelected = true;
+                break;
+        }
+        container.Focus();
     }
 
     private async void OnArchiveGridPointerMoved(object? sender, PointerEventArgs e)
@@ -1265,24 +1327,45 @@ public partial class MainWindow : Window
 
         var triggerEvent = _dragTriggerEvent;
         ClearDragStart();
+        e.Pointer.Capture(null);
         CancelPendingRenameClick();
         _isStartingDrag = true;
         IReadOnlyList<string> paths = [];
         try
         {
-            paths = ViewModel.PrepareSelectedItemsForTransfer();
-            if (paths.Count == 0)
+            var nodes = ViewModel.GetSelectedDragItems();
+            if (nodes.Count == 0)
             {
                 return;
             }
-            var transfer = await CreateFileTransferAsync(paths);
-            if (transfer.Items.Count == 0)
+
+            DataTransfer transfer;
+            Exception? exportError = null;
+            try
             {
-                ((IDataTransfer)transfer).Dispose();
-                return;
+                paths = ViewModel.PrepareSelectedItemsForTransfer();
+                transfer = await CreateFileTransferAsync(paths);
             }
-            await DragDrop.DoDragDropAsync(triggerEvent, transfer, DragDropEffects.Copy);
+            catch (Exception exception) when (exception is IOException or ArgumentException
+                                              or UnauthorizedAccessException or ArchiveValidationException)
+            {
+                // Archive items can still move if staging them for the file manager fails.
+                exportError = exception;
+                transfer = new DataTransfer();
+            }
+
+            var allowedEffects = transfer.Items.Count > 0
+                ? DragDropEffects.Copy | DragDropEffects.Move
+                : DragDropEffects.Move;
+            var drag = new ArchiveItemDrag(Guid.NewGuid().ToByteArray(), nodes);
+            transfer.Add(DataTransferItem.Create(ArchiveItemDragFormat, drag.Token));
+            _archiveItemDrag = drag;
+            var result = await DragDrop.DoDragDropAsync(triggerEvent, transfer, allowedEffects);
             e.Handled = true;
+            if (result == DragDropEffects.None && exportError is not null)
+            {
+                await ShowTransferErrorAsync("Unable to drag selection", exportError);
+            }
         }
         catch (Exception exception)
         {
@@ -1290,19 +1373,36 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _archiveItemDrag = null;
+            SetDropHighlight(null);
             ViewModel.ReleaseTemporaryTransfer(paths);
             _isStartingDrag = false;
         }
     }
 
-    private void OnArchiveGridPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+    private void OnArchiveGridPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        var deferredSelectionItem = _deferredSelectionItem;
         ClearDragStart();
+        if (deferredSelectionItem is null)
+        {
+            return;
+        }
+
+        e.Pointer.Capture(null);
+        if (sender is Control view && IsContainerSelected(deferredSelectionItem))
+        {
+            SelectOnly(view, deferredSelectionItem);
+        }
+        e.Handled = true;
+    }
 
     private void ClearDragStart()
     {
         _dragTriggerEvent = null;
         _dragStartPoint = null;
         _dragSource = null;
+        _deferredSelectionItem = null;
     }
 
     private async Task<DataTransfer> CreateFileTransferAsync(IReadOnlyList<string> paths)
@@ -1425,24 +1525,102 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnDragOver(object? sender, DragEventArgs e)
+    private ArchiveItemDrag? GetArchiveItemDrag(DragEventArgs e) =>
+        _archiveItemDrag is { } drag &&
+        e.DataTransfer.Formats.Contains(ArchiveItemDragFormat) &&
+        e.DataTransfer.TryGetValue(ArchiveItemDragFormat) is { } token &&
+        token.AsSpan().SequenceEqual(drag.Token)
+            ? drag
+            : null;
+
+    /// <summary>Finds the archive folder row under the pointer, in the folder tree or an item view.</summary>
+    private static (ArchiveFolderNode? Folder, Control? Row) GetDropFolder(DragEventArgs e)
     {
-        e.DragEffects = e.DataTransfer.Formats.Contains(DataFormat.File)
+        if (e.Source is not Visual visual)
+        {
+            return (null, null);
+        }
+
+        if ((visual as TreeViewItem ?? visual.FindAncestorOfType<TreeViewItem>()) is
+            { DataContext: FolderNodeViewModel folder } treeItem)
+        {
+            return (folder.Folder, treeItem);
+        }
+
+        return FindItemContainer(visual) is
+            { DataContext: ArchiveItemViewModel { Node: ArchiveFolderNode node } } row
+            ? (node, row)
+            : (null, null);
+    }
+
+    /// <summary>
+    /// Archive items only move onto a folder row. Files from the file manager
+    /// import into the folder under the pointer, or the current folder elsewhere.
+    /// </summary>
+    private DragDropEffects GetDropEffect(DragEventArgs e, ArchiveFolderNode? folder, ArchiveItemDrag? drag)
+    {
+        if (drag is not null)
+        {
+            return folder is not null && ViewModel.CanMoveDroppedItems(drag.Nodes, folder)
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+        }
+
+        return e.DataTransfer.Formats.Contains(DataFormat.File) && ViewModel.CanDropInto(folder)
             ? DragDropEffects.Copy
             : DragDropEffects.None;
+    }
+
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        var (folder, row) = GetDropFolder(e);
+        e.DragEffects = GetDropEffect(e, folder, GetArchiveItemDrag(e));
+        // Pointer-over styling does not update during a drag, so mark the target row.
+        SetDropHighlight(e.DragEffects == DragDropEffects.None ? null : row);
         e.Handled = true;
     }
 
+    private void OnDragLeave(object? sender, DragEventArgs e) => SetDropHighlight(null);
+
     private async void OnDrop(object? sender, DragEventArgs e)
     {
+        SetDropHighlight(null);
+        var (folder, _) = GetDropFolder(e);
+        var drag = GetArchiveItemDrag(e);
+        e.DragEffects = GetDropEffect(e, folder, drag);
+        e.Handled = true;
+        if (e.DragEffects == DragDropEffects.None)
+        {
+            return;
+        }
+
+        if (drag is not null)
+        {
+            await ViewModel.MoveDroppedItemsAsync(drag.Nodes, folder!);
+            return;
+        }
+
         var paths = e.DataTransfer.TryGetFiles()?
             .Select(item => item.TryGetLocalPath())
             .Where(path => path is not null)
             .Cast<string>()
             .ToList() ?? [];
-        e.Handled = true;
-        await ViewModel.AddDroppedPathsAsync(paths);
+        await ViewModel.AddDroppedPathsAsync(paths, folder);
     }
+
+    private void SetDropHighlight(Control? row)
+    {
+        if (ReferenceEquals(row, _dropHighlight))
+        {
+            return;
+        }
+
+        _dropHighlight?.Classes.Remove(DropTargetClass);
+        _dropHighlight = row;
+        row?.Classes.Add(DropTargetClass);
+    }
+
+    private sealed record ArchiveItemDrag(byte[] Token, IReadOnlyList<ArchiveNode> Nodes);
 
     private MainWindowViewModel ViewModel => _viewModel
         ?? throw new InvalidOperationException("The main window has not been configured.");

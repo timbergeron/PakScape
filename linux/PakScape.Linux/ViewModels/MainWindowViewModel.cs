@@ -291,11 +291,81 @@ public partial class MainWindowViewModel : ObservableObject
 
     public void SetContextTarget(ArchiveNode? node) => _contextTarget = node;
 
-    public async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
+    /// <summary>Whether a drop can import into <paramref name="folder"/>, or the current folder when null.</summary>
+    public bool CanDropInto(ArchiveFolderNode? folder) =>
+        CanModifyCurrentFolder() && (folder is null || _folderLookup.ContainsKey(folder));
+
+    public async Task AddDroppedPathsAsync(
+        IReadOnlyList<string> paths, ArchiveFolderNode? folder = null)
     {
-        if (paths.Count > 0 && CanModifyCurrentFolder())
+        if (paths.Count > 0 && CanDropInto(folder))
         {
-            await ImportPathsAsync(paths);
+            await ImportPathsAsync(paths, folder);
+        }
+    }
+
+    /// <summary>
+    /// Returns the selection in on-screen order, so dragged items land in the
+    /// order they were shown rather than the order they were clicked.
+    /// </summary>
+    public IReadOnlyList<ArchiveNode> GetSelectedDragItems()
+    {
+        if (IsBusy || _selectedItems.Count == 0)
+        {
+            return [];
+        }
+
+        var selected = _selectedItems.ToHashSet();
+        return CurrentItems.Where(selected.Contains).Select(item => item.Node).ToList();
+    }
+
+    public bool CanMoveDroppedItems(IReadOnlyList<ArchiveNode> nodes, ArchiveFolderNode destination)
+    {
+        // Dropping a selection back onto its own folder is a no-op, not a move.
+        if (nodes.Count == 0 || !CanDropInto(destination) ||
+            nodes.All(node => ReferenceEquals(node.Parent, destination)))
+        {
+            return false;
+        }
+
+        // Reject drops into any folder that is part of the drag selection.
+        var sources = nodes.ToHashSet();
+        for (ArchiveNode? folder = destination; folder is not null; folder = folder.Parent)
+        {
+            if (sources.Contains(folder))
+            {
+                return false;
+            }
+        }
+
+        // Reject stale sources whose folder is no longer in this archive.
+        return nodes.All(node => node.Parent is { } parent && _folderLookup.ContainsKey(parent));
+    }
+
+    public async Task<bool> MoveDroppedItemsAsync(
+        IReadOnlyList<ArchiveNode> nodes, ArchiveFolderNode destination)
+    {
+        if (!CanMoveDroppedItems(nodes, destination))
+        {
+            return false;
+        }
+
+        try
+        {
+            var history = CaptureHistory("Move");
+            var moved = nodes.Count(node => !ReferenceEquals(node.Parent, destination));
+            ArchiveTreeEditor.MoveTo(nodes, destination);
+            RecordMutation(history);
+            MarkDirty(moved == 1
+                ? $"Moved 1 item to {destination.FullPath}."
+                : $"Moved {moved} items to {destination.FullPath}.");
+            RefreshAfterMutation(destination);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            await _interactionService.ShowErrorAsync("Move failed", exception.Message);
+            return false;
         }
     }
 
@@ -344,8 +414,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             return [];
         }
-        return _fileTransferService.ExportToTemporaryLocation(
-            _selectedItems.Select(item => item.Node).ToList());
+        return _fileTransferService.ExportToTemporaryLocation(GetSelectedDragItems());
     }
 
     public void ReleaseTemporaryTransfer(IReadOnlyList<string> paths) =>

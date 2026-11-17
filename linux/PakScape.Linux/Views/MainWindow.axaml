@@ -14,7 +14,9 @@
         MinHeight="540"
         WindowStartupLocation="CenterScreen"
         DragDrop.AllowDrop="True"
+        DragDrop.DragEnter="OnDragOver"
         DragDrop.DragOver="OnDragOver"
+        DragDrop.DragLeave="OnDragLeave"
         DragDrop.Drop="OnDrop"
         mc:Ignorable="d">
   <Window.KeyBindings>
@@ -311,8 +313,6 @@
                           x:CompileBindings="False"
                           Width="{Binding $parent[Window].DataContext.LargeIconCardWidth}"
                           Padding="12"
-                          Background="{DynamicResource PanelBackgroundBrush}"
-                          BorderBrush="{DynamicResource PanelBorderBrush}"
                           BorderThickness="1"
                           CornerRadius="10"
                           ToolTip.Tip="{Binding Node.FullPath}">
@@ -377,8 +377,6 @@
                 <DataTemplate x:DataType="models:ArchiveItemViewModel">
                   <Border Classes="icon-card"
                           Padding="8"
-                          Background="{DynamicResource PanelBackgroundBrush}"
-                          BorderBrush="{DynamicResource PanelBorderBrush}"
                           BorderThickness="1"
                           CornerRadius="8"
                           ToolTip.Tip="{Binding Node.FullPath}">
