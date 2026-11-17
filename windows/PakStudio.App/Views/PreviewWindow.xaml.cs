@@ -1,6 +1,8 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PakStudio.App.Controls;
 using PakStudio.App.Services;
@@ -101,6 +103,12 @@ public partial class PreviewWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
+        if (TryShowWadGallery())
+        {
+            _isShowingPreview = false;
+            return;
+        }
+
         switch (preview.Kind)
         {
             case ArchivePreviewKind.Text:
@@ -139,6 +147,60 @@ public partial class PreviewWindow : Window
                 break;
         }
         _isShowingPreview = false;
+    }
+
+    /// <summary>Shows every WAD entry as a named tile instead of a single contact sheet.</summary>
+    private bool TryShowWadGallery()
+    {
+        if (_nodes[_index] is not ArchiveFileNode file ||
+            !WadPreviewCatalog.SupportsExtension(file.Extension) ||
+            !WadPreviewCatalog.TryRead(file.Data, out var items))
+        {
+            return false;
+        }
+
+        WadGalleryItems.ItemsSource = items.Select(WadGalleryTile.Create).ToList();
+        WadGalleryPanel.ScrollToTop();
+        WadGalleryPanel.Visibility = Visibility.Visible;
+        SubtitleText.Text += items.Count == 1 ? " • 1 item" : $" • {items.Count:N0} items";
+        return true;
+    }
+
+    private sealed record WadGalleryTile(
+        string Name,
+        string Detail,
+        string ToolTip,
+        ImageSource? Image,
+        Visibility PlaceholderVisibility)
+    {
+        public static WadGalleryTile Create(WadPreviewItem item)
+        {
+            ImageSource? image = null;
+            if (item.Thumbnail is { } thumbnail)
+            {
+                var source = BitmapSource.Create(
+                    thumbnail.Width,
+                    thumbnail.Height,
+                    96,
+                    96,
+                    PixelFormats.Bgra32,
+                    null,
+                    thumbnail.BgraPixels,
+                    thumbnail.Stride);
+                source.Freeze();
+                image = source;
+            }
+
+            var detail = item.Width > 0
+                ? $"{item.TypeDescription} • {item.Width}×{item.Height}"
+                : item.TypeDescription;
+            return new WadGalleryTile(
+                item.Name,
+                detail,
+                $"{item.Name}{Environment.NewLine}{detail}",
+                image,
+                image is null ? Visibility.Visible : Visibility.Collapsed);
+        }
     }
 
     private BspLevelPreviewOptions CurrentBspOptions() => new(
@@ -251,6 +313,8 @@ public partial class PreviewWindow : Window
         ImagePreview.Source = null;
         TextPreview.Text = string.Empty;
         ImagePanel.Visibility = Visibility.Collapsed;
+        WadGalleryItems.ItemsSource = null;
+        WadGalleryPanel.Visibility = Visibility.Collapsed;
         BspMarkerOptionsPanel.Visibility = Visibility.Collapsed;
         TextPreview.Visibility = Visibility.Collapsed;
         MetadataPanel.Visibility = Visibility.Collapsed;

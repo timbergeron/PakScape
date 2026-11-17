@@ -206,6 +206,62 @@
                     </Grid>
                 </Border>
 
+                <ScrollViewer x:Name="WadGalleryPanel"
+                              Visibility="Collapsed"
+                              Background="{DynamicResource WindowBackgroundBrush}"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="WadGalleryItems"
+                                  Margin="10"
+                                  Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Width="132"
+                                        Margin="4"
+                                        Padding="6"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource PanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource PanelBorderBrush}"
+                                        BorderThickness="1"
+                                        ToolTip="{Binding ToolTip}">
+                                    <StackPanel>
+                                        <Grid Width="118" Height="118">
+                                            <Image Source="{Binding Image}"
+                                                   Stretch="Uniform"
+                                                   StretchDirection="Both"
+                                                   RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                                   SnapsToDevicePixels="True" />
+                                            <TextBlock HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                       FontSize="32"
+                                                       Foreground="{DynamicResource MutedForegroundBrush}"
+                                                       Text="&#xE8A5;"
+                                                       Visibility="{Binding PlaceholderVisibility}" />
+                                        </Grid>
+                                        <TextBlock Margin="0,6,0,0"
+                                                   HorizontalAlignment="Center"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{Binding Name}" />
+                                        <TextBlock Margin="0,2,0,0"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource MutedForegroundBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{Binding Detail}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
                 <ContentControl x:Name="ModelPanel" Visibility="Collapsed" />
 
                 <ContentControl x:Name="SkyboxPanel"

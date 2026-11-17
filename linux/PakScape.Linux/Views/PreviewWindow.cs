@@ -39,6 +39,9 @@ public sealed class PreviewWindow : Window, IDisposable
     private readonly TextBlock _audioStatusText;
     private readonly Grid _metadataPanel;
     private readonly Grid _modelPanel;
+    private readonly ScrollViewer _wadGalleryPanel;
+    private readonly WrapPanel _wadGalleryItems;
+    private readonly List<Bitmap> _wadGalleryImages = [];
     private readonly TextBlock _metadataTypeText;
     private readonly TextBlock _metadataSizeText;
     private readonly TextBlock _metadataMessageText;
@@ -341,9 +344,22 @@ public sealed class PreviewWindow : Window, IDisposable
             IsVisible = false,
         };
 
+        _wadGalleryItems = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(10),
+        };
+        _wadGalleryPanel = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = _wadGalleryItems,
+            IsVisible = false,
+        };
+
         var contentGrid = new Grid
         {
-            Children = { _imagePanel, _modelPanel, _textPreview, _audioPanel, _metadataPanel },
+            Children = { _imagePanel, _wadGalleryPanel, _modelPanel, _textPreview, _audioPanel, _metadataPanel },
         };
         var contentBorder = new Border
         {
@@ -461,6 +477,11 @@ public sealed class PreviewWindow : Window, IDisposable
         _previousButton.IsEnabled = _nodes.Count > 1;
         _nextButton.IsEnabled = _nodes.Count > 1;
 
+        if (TryShowWadGallery())
+        {
+            return;
+        }
+
         switch (preview.Kind)
         {
             case ArchivePreviewKind.Text:
@@ -571,6 +592,109 @@ public sealed class PreviewWindow : Window, IDisposable
         }
     }
 
+    /// <summary>Shows every WAD entry as a named tile instead of a single contact sheet.</summary>
+    private bool TryShowWadGallery()
+    {
+        if (_nodes[_index] is not ArchiveFileNode file ||
+            !WadPreviewCatalog.SupportsExtension(file.Extension) ||
+            !WadPreviewCatalog.TryRead(file.Data, out var items))
+        {
+            return false;
+        }
+
+        foreach (var item in items)
+        {
+            _wadGalleryItems.Children.Add(CreateWadGalleryTile(item));
+        }
+        _wadGalleryPanel.Offset = default;
+        _wadGalleryPanel.IsVisible = true;
+        _subtitleText.Text += items.Count == 1 ? " • 1 item" : $" • {items.Count:N0} items";
+        return true;
+    }
+
+    private Border CreateWadGalleryTile(WadPreviewItem item)
+    {
+        Control artwork;
+        if (item.Thumbnail is { } thumbnail)
+        {
+            var bitmap = CreateBitmap(thumbnail);
+            _wadGalleryImages.Add(bitmap);
+            var image = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Uniform,
+            };
+            RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.None);
+            artwork = image;
+        }
+        else
+        {
+            artwork = new TextBlock
+            {
+                Text = "?",
+                FontSize = 32,
+                Opacity = 0.4,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+
+        var detail = item.Width > 0
+            ? $"{item.TypeDescription} • {item.Width}×{item.Height}"
+            : item.TypeDescription;
+        var tile = new Border
+        {
+            Width = 132,
+            Margin = new Thickness(4),
+            Padding = new Thickness(6),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Child = new StackPanel
+            {
+                Children =
+                {
+                    new Grid
+                    {
+                        Width = 118,
+                        Height = 118,
+                        Children = { artwork },
+                    },
+                    new TextBlock
+                    {
+                        Text = item.Name,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        FontWeight = FontWeight.SemiBold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    },
+                    new TextBlock
+                    {
+                        Text = detail,
+                        Margin = new Thickness(0, 2, 0, 0),
+                        FontSize = 11,
+                        Opacity = 0.68,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    },
+                },
+            },
+        };
+        tile.Classes.Add("preview-surface");
+        ToolTip.SetTip(tile, $"{item.Name}{Environment.NewLine}{detail}");
+        return tile;
+    }
+
+    private void ResetWadGallery()
+    {
+        _wadGalleryItems.Children.Clear();
+        _wadGalleryPanel.IsVisible = false;
+        foreach (var bitmap in _wadGalleryImages)
+        {
+            bitmap.Dispose();
+        }
+        _wadGalleryImages.Clear();
+    }
+
     private void ResetModelPreview()
     {
         var control = _modelPreview;
@@ -599,6 +723,7 @@ public sealed class PreviewWindow : Window, IDisposable
     {
         ResetAudioPlayback();
         ResetModelPreview();
+        ResetWadGallery();
         DisposeCurrentImage();
         _textPreview.Text = string.Empty;
         _imagePanel.IsVisible = false;
@@ -895,6 +1020,7 @@ public sealed class PreviewWindow : Window, IDisposable
         _previewGeneration++;
         ResetAudioPlayback();
         ResetModelPreview();
+        ResetWadGallery();
         DisposeCurrentImage();
         _isDisposed = true;
         GC.SuppressFinalize(this);
