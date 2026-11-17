@@ -1,5 +1,9 @@
 # Changelog
 
+- Windows now ships as a single portable `PakScape.exe` with the .NET runtime
+  and native preview libraries bundled, replacing the installer. File
+  associations are registered from inside the app.
+
 - Move one or more archive items by dragging them onto a folder in the main
   pane or sidebar on macOS, Windows, and Linux. The target folder is
   highlighted while dragging, and moved items keep their on-screen order. Undo

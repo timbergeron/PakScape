@@ -21,7 +21,8 @@ Current capabilities include:
 - Track recent archives and prompt before discarding unsaved work.
 - Follow the Windows light/dark app-mode setting, including live theme changes.
 - Create PAK, PK3, or KPF documents and open archives passed by Windows.
-- Install per user with PAK/PK3/KPF file associations and a bundled .NET runtime.
+- Ship as one portable `PakScape.exe` with the .NET runtime bundled; no installer.
+- Register PAK/PK3/KPF file associations per user from inside the app.
 
 Projects:
 
@@ -42,18 +43,20 @@ Open `PakStudio.sln` in Visual Studio and build or run `PakStudio.App`. The firs
 build automatically runs `../native/scripts/build-windows.ps1`; later builds run
 it again only when a native source or build script changes.
 
-## Installer
+## Single-file exe
 
-Install Inno Setup 6 or newer, then build the self-contained x64 installer from the
-repository root:
+Publish one self-contained `PakScape.exe` (no .NET install needed) from the repository
+root:
 
 ```powershell
-.\windows\scripts\build-installer.ps1
+dotnet publish windows\PakStudio.App\PakStudio.App.csproj -p:PublishProfile=win-x64
 ```
 
-The installer is written to `windows\artifacts`, installs per user without an
-administrator prompt, and registers PakScape as an opener for `.pak`, `.pk3`, and `.kpf`
-archives. It includes the .NET runtime and both native preview libraries.
+The exe is written to `windows\artifacts\publish\win-x64`. It bundles the .NET runtime,
+WPF, and both native preview libraries, which .NET extracts to
+`%TEMP%\.net\PakScape` on first launch. There is no installer: put the exe anywhere
+and run it. File associations are registered from inside the app, so if you move the
+exe, register them again from the new location.
 
 ## Quick Preview
 

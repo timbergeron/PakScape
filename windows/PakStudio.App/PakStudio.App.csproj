@@ -34,9 +34,8 @@
   <ItemGroup>
     <Resource Include="Assets\PakScape.ico" />
     <Resource Include="Assets\PakScape.png" />
-    <None Update="Assets\PakScape.File.ico"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest" />
+    <!-- Embedded so the single-file exe can write it out when registering file types. -->
+    <Resource Include="Assets\PakScape.File.ico" />
     <None Include="$(NativeAudioLibrary)"
           Link="pakscape_audio.dll"
           CopyToOutputDirectory="PreserveNewest"
@@ -47,7 +46,8 @@
           Condition="'$(OS)' == 'Windows_NT'" />
     <None Include="..\..\native\THIRD_PARTY_NOTICES.md"
           Link="THIRD_PARTY_NOTICES.md"
-          CopyToOutputDirectory="PreserveNewest" />
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="Never" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">

@@ -138,18 +138,15 @@ jobs:
           $env:PATH = "$nativeDirectory;$env:PATH"
           dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
 
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress --limit-output
-
-      - name: Package installer
-        shell: pwsh
-        run: ./scripts/build-installer.ps1
+      # One self-contained PakScape.exe; upload-artifact zips it, so the download is just the exe.
+      - name: Publish single-file exe
+        run: dotnet publish PakStudio.App/PakStudio.App.csproj -p:PublishProfile=win-x64
 
       - name: Upload
         uses: actions/upload-artifact@v6
         with:
           name: PakScape-Windows
-          path: windows/artifacts/PakScape-*-win-x64-setup.exe
+          path: windows/artifacts/publish/win-x64/PakScape.exe
           if-no-files-found: error
           retention-days: 14
 

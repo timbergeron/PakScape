@@ -203,8 +203,46 @@ public static class ShellIntegrationService
             return executable;
         }
 
-        var fileIcon = Path.Combine(directory, "PakScape.File.ico");
-        return File.Exists(fileIcon) ? fileIcon : executable;
+        var fileIcon = Path.Combine(directory, FileIconName);
+        if (File.Exists(fileIcon))
+        {
+            return fileIcon;
+        }
+
+        // The single-file build has no loose icon beside it, so write the embedded copy out.
+        return ExtractEmbeddedFileIcon() ?? executable;
+    }
+
+    private const string FileIconName = "PakScape.File.ico";
+
+    private static string? ExtractEmbeddedFileIcon()
+    {
+        try
+        {
+            var resource = System.Windows.Application.GetResourceStream(
+                new Uri($"pack://application:,,,/Assets/{FileIconName}", UriKind.Absolute));
+            if (resource is null)
+            {
+                return null;
+            }
+
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PakScape");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, FileIconName);
+            using (var source = resource.Stream)
+            using (var target = File.Create(path))
+            {
+                source.CopyTo(target);
+            }
+
+            return path;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string? ExecutablePath()
