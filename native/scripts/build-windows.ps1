@@ -58,7 +58,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-& $CMake --build $BuildDirectory --config Release --parallel 2
+$ParallelLevel = if ($env:CMAKE_BUILD_PARALLEL_LEVEL) { $env:CMAKE_BUILD_PARALLEL_LEVEL } else { 2 }
+& $CMake --build $BuildDirectory --config Release --parallel $ParallelLevel
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

@@ -9,6 +9,11 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build dependencies as static libraries" FO
 set(BUILD_TESTING OFF CACHE BOOL "Disable dependency tests" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Visual Studio builds compile one file at a time per project unless asked otherwise.
+if(MSVC)
+    add_compile_options(/MP)
+endif()
+
 # All dependencies are pinned, checksummed, and permissively licensed. They are
 # linked into one private native library so the app bundles only one audio ABI.
 set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

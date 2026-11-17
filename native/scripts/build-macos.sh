@@ -10,5 +10,5 @@ cmake -S "${native_directory}" -B "${build_directory}" \
     -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-cmake --build "${build_directory}" --config Release --parallel 2
+cmake --build "${build_directory}" --config Release --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 ctest --test-dir "${build_directory}" --build-config Release --output-on-failure

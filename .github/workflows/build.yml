@@ -1,21 +1,31 @@
-name: Build and Test
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+name: Build
 
 on:
   push:
     branches: [ main ]
+    paths-ignore: [ '**.md', 'LICENSE*', '.gitignore' ]
   pull_request:
     branches: [ main ]
+    paths-ignore: [ '**.md', 'LICENSE*', '.gitignore' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Supersede stale PR runs, but let every push to main finish so each commit gets a full build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
 
 jobs:
   macos:
-    name: Build macOS app
+    name: macOS
     runs-on: macos-26
     timeout-minutes: 30
 
@@ -24,16 +34,26 @@ jobs:
         working-directory: macos
 
     steps:
-      - name: Check out repository
+      - name: Check out
         uses: actions/checkout@v7
 
+      # Native libraries rarely change; reuse the last build unless their sources did.
+      - name: Restore native libraries
+        id: native-cache
+        uses: actions/cache@v6
+        with:
+          path: native/build/macos
+          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/CMakeLists.txt', 'native/src/**', 'native/include/**', 'native/tests/**', 'native/exports-*', 'native/scripts/build-macos.sh') }}
+          restore-keys: native-v1-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build native libraries
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: ../native/scripts/build-macos.sh
 
-      - name: Test archive core
+      - name: Test
         run: swift test --configuration release
 
-      - name: Build Release
+      - name: Build app
         run: |
           xcodebuild \
             -project PakScape.xcodeproj \
@@ -45,14 +65,14 @@ jobs:
             ARCHS="arm64 x86_64" \
             ONLY_ACTIVE_ARCH=NO
 
-      - name: Package App
+      - name: Package disk image
         run: |
           APP_PATH="build/Build/Products/Release/PakScape.app"
           DMG_NAME="PakScape.dmg"
           STAGING_DIR="dmg_staging"
 
           if [ ! -d "$APP_PATH" ]; then
-            echo "App bundle not found at $APP_PATH"
+            echo "::error::App bundle not found at $APP_PATH"
             exit 1
           fi
 
@@ -67,16 +87,16 @@ jobs:
             -ov \
             -format UDZO
 
-      - name: Upload release artifact
+      - name: Upload
         uses: actions/upload-artifact@v6
         with:
-          name: PakScape
+          name: PakScape-macOS
           path: macos/PakScape.dmg
           if-no-files-found: error
           retention-days: 14
 
   windows:
-    name: Build and test Windows app
+    name: Windows
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -85,7 +105,7 @@ jobs:
         working-directory: windows
 
     steps:
-      - name: Check out repository
+      - name: Check out
         uses: actions/checkout@v7
 
       - name: Set up .NET
@@ -93,14 +113,23 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Restore native libraries
+        id: native-cache
+        uses: actions/cache@v6
+        with:
+          path: native/build/windows
+          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/CMakeLists.txt', 'native/src/**', 'native/include/**', 'native/tests/**', 'native/exports-*', 'native/scripts/build-windows.ps1') }}
+          restore-keys: native-v1-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build native libraries
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ../native/scripts/build-windows.ps1
 
-      - name: Restore
+      - name: Restore packages
         run: dotnet restore PakStudio.sln
 
-      - name: Build
+      - name: Build app
         run: dotnet build PakStudio.sln --configuration Release --no-restore --maxcpucount:1
 
       - name: Test
@@ -110,13 +139,13 @@ jobs:
           dotnet run --project PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
 
       - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup --yes --no-progress --limit-output
 
-      - name: Build Windows installer
+      - name: Package installer
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
-      - name: Upload Windows installer
+      - name: Upload
         uses: actions/upload-artifact@v6
         with:
           name: PakScape-Windows
@@ -125,7 +154,7 @@ jobs:
           retention-days: 14
 
   linux:
-    name: Build Ubuntu app (${{ matrix.architecture }})
+    name: Ubuntu ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -133,19 +162,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - label: x64
+            runner: ubuntu-24.04
             runtime: linux-x64
             architecture: amd64
-          - runner: ubuntu-24.04-arm
+          - label: Arm64
+            runner: ubuntu-24.04-arm
             runtime: linux-arm64
             architecture: arm64
 
-    env:
-      DOTNET_CLI_TELEMETRY_OPTOUT: 1
-      DOTNET_NOLOGO: 1
-
     steps:
-      - name: Check out repository
+      - name: Check out
         uses: actions/checkout@v7
 
       - name: Set up .NET
@@ -155,33 +182,41 @@ jobs:
             8.0.x
             10.0.x
 
-      - name: Install native build dependencies
+      - name: Restore native libraries
+        id: native-cache
+        uses: actions/cache@v6
+        with:
+          path: native/build/linux
+          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/CMakeLists.txt', 'native/src/**', 'native/include/**', 'native/tests/**', 'native/exports-*', 'native/scripts/build-linux.sh') }}
+          restore-keys: native-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install native toolchain
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes libgl-dev
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --quiet --no-install-recommends libgl-dev
 
       - name: Build native libraries
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: native/scripts/build-linux.sh
 
-      - name: Restore
+      - name: Restore packages
         run: dotnet restore linux/PakScape.Linux.slnx
 
-      - name: Build
+      - name: Build app
         run: dotnet build linux/PakScape.Linux.slnx --configuration Release --no-restore --maxcpucount:1
 
-      - name: Test portable archive core
-        run: dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+      - name: Test
+        run: |
+          dotnet run --project windows/PakStudio.Tests/PakStudio.Tests.csproj --configuration Release --no-build
+          dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release --no-build
 
-      - name: Test Linux services
-        run: dotnet run --project linux/PakScape.Linux.Tests/PakScape.Linux.Tests.csproj --configuration Release --no-build
+      - name: Package
+        run: |
+          linux/packaging/build-deb.sh 1.0.1 ${{ matrix.runtime }}
+          dpkg-deb --info linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
 
-      - name: Build Debian package
-        run: linux/packaging/build-deb.sh 1.0.1 ${{ matrix.runtime }}
-
-      - name: Inspect Debian package
-        run: dpkg-deb --info linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
-
-      - name: Upload Linux artifacts
+      - name: Upload
         uses: actions/upload-artifact@v6
         with:
           name: PakScape-Ubuntu-${{ matrix.architecture }}
