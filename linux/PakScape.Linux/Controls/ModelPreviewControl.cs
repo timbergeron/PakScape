@@ -128,12 +128,14 @@ public sealed class ModelPreviewControl : UserControl, IDisposable
             Children = { _skinPicker, _viewSkinButton, copySkinButton },
         };
 
+        var animateModels = PakScapeSettings.Current.AnimateModels;
         var animateCheck = new CheckBox
         {
             Content = "Animate",
-            IsChecked = true,
+            IsChecked = animateModels,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
         };
+        _session.AnimationEnabled = animateModels;
         animateCheck.IsCheckedChanged += (_, _) =>
             _session.AnimationEnabled = animateCheck.IsChecked == true;
 

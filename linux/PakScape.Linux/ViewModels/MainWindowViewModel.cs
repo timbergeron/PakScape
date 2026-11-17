@@ -24,6 +24,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IUserInteractionService _interactionService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly ArchiveThumbnailService _thumbnailService;
+    private readonly PakScapeSettings _settings = PakScapeSettings.Current;
     private readonly Dictionary<ArchiveFolderNode, FolderNodeViewModel> _folderLookup = [];
     private readonly Stack<ArchiveFolderNode> _backHistory = [];
     private readonly Stack<ArchiveFolderNode> _forwardHistory = [];
@@ -42,7 +43,7 @@ public partial class MainWindowViewModel : ObservableObject
     private ArchiveClipboardPayload? _pendingClipboardPayload;
     private IReadOnlyList<string> _clipboardExportedPaths = [];
     private IReadOnlyList<string> _pendingClipboardExportedPaths = [];
-    private ArchiveViewMode _activeViewMode = ArchiveViewMode.Details;
+    private ArchiveViewMode _activeViewMode = PakScapeSettings.Current.DefaultView;
     private ArchiveNode? _contextTarget;
     private int _iconZoomLevel = 1;
     private int _nextRevision;
@@ -780,13 +781,16 @@ public partial class MainWindowViewModel : ObservableObject
         var description = items.Count == 1
             ? $"'{items[0].Name}'"
             : $"these {items.Count} items";
-        var confirmed = await _interactionService.ConfirmAsync(
-            items.Count == 1 ? "Delete item" : "Delete items",
-            $"Delete {description} from this archive? Folder contents will also be removed.",
-            "Delete");
-        if (!confirmed)
+        if (_settings.ConfirmDeletion)
         {
-            return;
+            var confirmed = await _interactionService.ConfirmAsync(
+                items.Count == 1 ? "Delete item" : "Delete items",
+                $"Delete {description} from this archive? Folder contents will also be removed.",
+                "Delete");
+            if (!confirmed)
+            {
+                return;
+            }
         }
 
         try
@@ -833,6 +837,11 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 try
                 {
+                    if (!await PrepareExportDestinationAsync(directory, item.Name))
+                    {
+                        continue;
+                    }
+
                     outputs.Add(await Task.Run(() =>
                         _fileTransferService.Export(item.Node, directory)));
                 }
@@ -852,6 +861,40 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         await ReportFailuresAsync("Some items were not exported", failures);
+    }
+
+    /// <summary>
+    /// Clears an existing export of the same name so the item keeps its archive name.
+    /// Returns false when the user declines to replace it.
+    /// </summary>
+    private async Task<bool> PrepareExportDestinationAsync(string directory, string name)
+    {
+        var destination = Path.Combine(directory, name);
+        var isDirectory = Directory.Exists(destination);
+        if (!isDirectory && !File.Exists(destination))
+        {
+            return true;
+        }
+
+        if (_settings.ConfirmOverwrite &&
+            !await _interactionService.ConfirmAsync(
+                "Replace existing item?",
+                $"'{name}' already exists in this folder. Do you want to replace it?",
+                "Replace"))
+        {
+            return false;
+        }
+
+        if (isDirectory)
+        {
+            Directory.Delete(destination, recursive: true);
+        }
+        else
+        {
+            File.Delete(destination);
+        }
+
+        return true;
     }
 
     [RelayCommand(CanExecute = nameof(CanSaveImageAs))]
@@ -1310,6 +1353,50 @@ public partial class MainWindowViewModel : ObservableObject
         await _interactionService.ShowAboutAsync();
     }
 
+    [RelayCommand]
+    private void Settings()
+    {
+        _interactionService.ShowSettings();
+    }
+
+    /// <summary>Copies the archive that is about to be replaced to '&lt;name&gt;.bak'.</summary>
+    private static void CreateBackup(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(path);
+        if (directory is null)
+        {
+            return;
+        }
+
+        var backupPath = path + ".bak";
+        var temporaryPath = Path.Combine(
+            directory,
+            $".{Path.GetFileName(backupPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.Copy(path, temporaryPath);
+            File.Move(temporaryPath, backupPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            /* A failed backup must not block the save the user asked for. */
+            try
+            {
+                File.Delete(temporaryPath);
+            }
+            catch (Exception cleanupFailure) when (
+                cleanupFailure is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup of an uncommitted backup copy.
+            }
+        }
+    }
+
     private async Task OpenPathAsync(string path, bool confirmReplacement)
     {
         if (confirmReplacement && !await ConfirmDocumentReplacementAsync())
@@ -1365,6 +1452,10 @@ public partial class MainWindowViewModel : ObservableObject
         {
             IsBusy = true;
             StatusText = "Saving archive...";
+            if (_settings.BackupBeforeSave)
+            {
+                CreateBackup(path);
+            }
             await _archiveService.SaveAsync(Document, path);
             _savedRevision = _currentRevision;
             RecordRecentFile(path);
@@ -1485,15 +1576,13 @@ public partial class MainWindowViewModel : ObservableObject
         var nodes = searchAllPaths
             ? EnumerateDescendants(Document.Root)
             : _currentFolder.Children;
-        var items = nodes
+        var items = SortByPreference(nodes
             .Select(node => new ArchiveItemViewModel(
                 node,
                 ArchiveThumbnailService.CanCreateThumbnail(node)
                     ? () => _thumbnailService.GetThumbnail(node)
                     : null))
-            .Where(item => !searchAllPaths || MatchesArchiveSearch(item, query))
-            .OrderByDescending(item => item.IsFolder)
-            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase);
+            .Where(item => !searchAllPaths || MatchesArchiveSearch(item, query)));
         foreach (var item in items)
         {
             CurrentItems.Add(item);
@@ -1508,6 +1597,30 @@ public partial class MainWindowViewModel : ObservableObject
         StatusText = searchAllPaths
             ? $"{CurrentItems.Count} search result(s) in {ArchiveDisplayName}"
             : $"{CurrentItems.Count} item(s) in {CurrentFolderPath}";
+    }
+
+    /// <summary>Orders a folder's items by the preferred column, folders first as on macOS.</summary>
+    private IOrderedEnumerable<ArchiveItemViewModel> SortByPreference(
+        IEnumerable<ArchiveItemViewModel> items)
+    {
+        var ascending = _settings.DefaultSortAscending;
+        var ordered = items.OrderByDescending(item => item.IsFolder);
+        return _settings.DefaultSort switch
+        {
+            DefaultSortPreference.Type => ascending
+                ? ordered.ThenBy(item => item.TypeText, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenByDescending(item => item.TypeText, StringComparer.OrdinalIgnoreCase)
+                    .ThenByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase),
+            DefaultSortPreference.Size => ascending
+                ? ordered.ThenBy(item => item.SizeBytes)
+                    .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenByDescending(item => item.SizeBytes)
+                    .ThenByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase),
+            _ => ascending
+                ? ordered.ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenByDescending(item => item.Name, StringComparer.OrdinalIgnoreCase),
+        };
     }
 
     private static IEnumerable<ArchiveNode> EnumerateDescendants(ArchiveFolderNode root)

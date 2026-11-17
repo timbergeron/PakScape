@@ -6,6 +6,8 @@ public interface IUserInteractionService
 {
     Task ShowAboutAsync();
 
+    void ShowSettings();
+
     Task<string?> PickArchiveToOpenAsync();
 
     Task<string?> PickArchiveSavePathAsync(string suggestedFileName, string formatId);

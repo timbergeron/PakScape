@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using PakScape.Linux.Services;
 using PakScape.Linux.ViewModels;
 using PakScape.Linux.Views;
@@ -14,6 +16,7 @@ namespace PakScape.Linux;
 public partial class App : Application, IDisposable
 {
     private readonly List<WindowSession> _sessions = [];
+    private readonly PakScapeSettings _settings = PakScapeSettings.Current;
     private ArchiveService? _archiveService;
     private XdgRecentFilesService? _recentFilesService;
     private IClassicDesktopStyleApplicationLifetime? _desktop;
@@ -37,13 +40,54 @@ public partial class App : Application, IDisposable
             desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
             _archiveService = new ArchiveService(new ArchiveFormatRegistry(handlers));
             _recentFilesService = new XdgRecentFilesService();
-            var startupPath = desktop.Args?
-                .FirstOrDefault(argument => argument.Length == 0 || argument[0] != '-');
-            OpenArchiveWindow(startupPath);
+
+            ApplyAppearance();
+            ApplyTextSize();
+            _settings.PropertyChanged += OnSettingsChanged;
+
+            /* Scripts are refreshed so they follow the running copy of PakScape. */
+            DesktopIntegrationService.UpdateFileManagerActions(_settings.FileManagerActionsEnabled);
+
+            if (!DesktopCommandRunner.TryStart(desktop, _archiveService, desktop.Args))
+            {
+                var startupPath = desktop.Args?
+                    .FirstOrDefault(argument => argument.Length == 0 || argument[0] != '-');
+                OpenArchiveWindow(startupPath);
+            }
+
             desktop.Exit += (_, _) => Dispose();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void ApplyAppearance()
+    {
+        RequestedThemeVariant = _settings.Appearance switch
+        {
+            AppearancePreference.Light => ThemeVariant.Light,
+            AppearancePreference.Dark => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
+    }
+
+    /// <summary>Every window's font size follows this resource, so the change is live.</summary>
+    private void ApplyTextSize()
+    {
+        Resources["AppTextSize"] = _settings.TextSize;
+    }
+
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(PakScapeSettings.Appearance):
+                ApplyAppearance();
+                break;
+            case nameof(PakScapeSettings.TextSize):
+                ApplyTextSize();
+                break;
+        }
     }
 
     public void OpenArchiveWindow(string? archivePath, string formatId = "pak")

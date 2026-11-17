@@ -154,6 +154,7 @@
       </ResourceDictionary.ThemeDictionaries>
 
       <SolidColorBrush x:Key="BrandGreenBrush" Color="#36C549" />
+      <x:Double x:Key="AppTextSize">13</x:Double>
       <Thickness x:Key="MenuBarItemPadding">6,5</Thickness>
       <Thickness x:Key="HorizontalMenuFlyoutItemMargin">0</Thickness>
       <x:Double x:Key="SliderTrackThemeHeight">3</x:Double>
@@ -171,6 +172,7 @@
     <Style Selector="Window">
       <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource TextForegroundBrush}" />
+      <Setter Property="FontSize" Value="{DynamicResource AppTextSize}" />
     </Style>
     <Style Selector="Menu">
       <Setter Property="Background" Value="Transparent" />

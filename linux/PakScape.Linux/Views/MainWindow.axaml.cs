@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using PakScape.Linux.Models;
+using PakScape.Linux.Services;
 using PakScape.Linux.ViewModels;
 using PakStudio.Core.Interfaces;
 using PakStudio.Core.Nodes;
@@ -911,6 +912,25 @@ public partial class MainWindow : Window
         {
             _isSynchronizingSelection = false;
         }
+
+        PreviewSelectionIfPreferred(items);
+    }
+
+    /// <summary>Opens Quick Preview for the new selection when that preference is on.</summary>
+    private void PreviewSelectionIfPreferred(List<ArchiveItemViewModel> items)
+    {
+        if (!PakScapeSettings.Current.QuickPreviewOnSelection ||
+            _previewWindow is { IsVisible: true } ||
+            items.Count == 0 ||
+            !ArchivePreviewBuilder.OpensInQuickPreview(items[0].Node))
+        {
+            return;
+        }
+
+        ShowQuickPreview(items.Select(item => item.Node).ToList());
+
+        /* Keep the keyboard on the item list so arrow keys keep browsing the archive. */
+        Activate();
     }
 
     private static void ReplaceSelection(

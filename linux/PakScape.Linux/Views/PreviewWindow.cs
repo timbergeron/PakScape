@@ -11,6 +11,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using PakScape.Linux.Controls;
+using PakScape.Linux.Services;
 using PakStudio.Core.Audio;
 using PakStudio.Core.Nodes;
 using PakStudio.Core.Preview;
@@ -791,12 +792,14 @@ public sealed class PreviewWindow : Window, IDisposable
 
     private CheckBox CreateBspMarkerCheckBox(string label, bool isLast = false)
     {
+        /* Seeded from the preference; each preview window can still override it. */
         var checkBox = new CheckBox
         {
             Content = label,
             Margin = isLast ? default : new Thickness(0, 0, 12, 0),
             Foreground = Brushes.White,
             VerticalAlignment = VerticalAlignment.Center,
+            IsChecked = PakScapeSettings.Current.ShowBspMarkers,
         };
         checkBox.IsCheckedChanged += OnBspMarkerOptionChanged;
         return checkBox;

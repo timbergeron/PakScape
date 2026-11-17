@@ -14,6 +14,11 @@ public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
         await dialog.ShowDialog(Owner);
     }
 
+    public void ShowSettings()
+    {
+        SettingsWindowService.Show(ownerProvider());
+    }
+
     private static readonly FilePickerFileType PakArchiveType = new("Quake PAK archive")
     {
         Patterns = ["*.pak"],

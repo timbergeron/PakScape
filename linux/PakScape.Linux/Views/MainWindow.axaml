@@ -27,6 +27,7 @@
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+W" Command="{Binding ExitCommand}" />
+    <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding SettingsCommand}" />
     <KeyBinding Gesture="Alt+Up" Command="{Binding UpCommand}" />
     <KeyBinding Gesture="Alt+Left" Command="{Binding BackCommand}" />
     <KeyBinding Gesture="Alt+Right" Command="{Binding ForwardCommand}" />
@@ -108,6 +109,8 @@
           <MenuItem Header="_Export Selected…" Command="{Binding ExportCommand}" />
           <Separator />
           <MenuItem Header="Open PAK _Folder" Command="{Binding OpenPakFolderCommand}" />
+          <Separator />
+          <MenuItem Header="Settin_gs…" Command="{Binding SettingsCommand}" InputGesture="Ctrl+," />
           <Separator />
           <MenuItem Header="_Close Window" Command="{Binding ExitCommand}" InputGesture="Ctrl+W" />
         </MenuItem>
