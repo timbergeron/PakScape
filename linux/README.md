@@ -74,10 +74,10 @@ On an Ubuntu or Debian build host with CMake, a C/C++ toolchain, and `dpkg-deb` 
 
 ```bash
 native/scripts/build-linux.sh
-linux/packaging/build-deb.sh 1.0.1 linux-x64
+linux/packaging/build-deb.sh 1.0.2 linux-x64
 ```
 
-Use `linux-arm64` for ARM64. The script creates a self-contained `.deb` and portable `.tar.gz` under `linux/artifacts/`. Install the Debian package with `sudo apt install ./linux/artifacts/pakscape_1.0.1_amd64.deb` so dependencies are resolved.
+Use `linux-arm64` for ARM64. The script creates a self-contained `.deb` and portable `.tar.gz` under `linux/artifacts/`. Install the Debian package with `sudo apt install ./linux/artifacts/pakscape_1.0.2_amd64.deb` so dependencies are resolved.
 
 The package follows the XDG Base Directory, desktop-entry, icon-theme, and shared-MIME-info conventions. Recent files are stored under `$XDG_STATE_HOME/pakscape`; temporary previews use a private directory under `$XDG_RUNTIME_DIR` when it is usable.
 

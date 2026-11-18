@@ -210,15 +210,15 @@ jobs:
 
       - name: Package
         run: |
-          linux/packaging/build-deb.sh 1.0.1 ${{ matrix.runtime }}
-          dpkg-deb --info linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
+          linux/packaging/build-deb.sh 1.0.2 ${{ matrix.runtime }}
+          dpkg-deb --info linux/artifacts/pakscape_1.0.2_${{ matrix.architecture }}.deb
 
       - name: Upload
         uses: actions/upload-artifact@v6
         with:
           name: PakScape-Ubuntu-${{ matrix.architecture }}
           path: |
-            linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.deb
-            linux/artifacts/pakscape_1.0.1_${{ matrix.architecture }}.tar.gz
+            linux/artifacts/pakscape_1.0.2_${{ matrix.architecture }}.deb
+            linux/artifacts/pakscape_1.0.2_${{ matrix.architecture }}.tar.gz
           if-no-files-found: error
           retention-days: 14

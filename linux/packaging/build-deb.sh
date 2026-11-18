@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "${script_directory}/../.." && pwd)"
-version="${1:-1.0.1}"
+version="${1:-1.0.2}"
 runtime_identifier="${2:-linux-x64}"
 dotnet_command="${DOTNET_COMMAND:-dotnet}"
 
