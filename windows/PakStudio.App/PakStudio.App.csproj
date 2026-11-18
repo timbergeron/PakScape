@@ -9,7 +9,7 @@
     <Product>PakScape</Product>
     <Title>PakScape for Windows</Title>
     <Description>A native Windows browser and editor for Quake PAK, PK3, and KPF archives.</Description>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Authors>Tim Bergeron</Authors>
     <ApplicationIcon>Assets\PakScape.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
